@@ -61,6 +61,10 @@ namespace Impostors
 
         // Debug: draws the impostors in place of the real entities, which it hides
         private bool compare;
+
+        // Debug: draws the impostors moved by this much, next to the real entities (voxel
+        // maps can't be hidden on the client)
+        private Vector3D shift;
         private readonly HashSet<long> hidden = new HashSet<long>();
         private int tick;
         private int drawnQuads;
@@ -126,7 +130,8 @@ namespace Impostors
             }
         }
 
-        // "impostor" in the mode file draws the impostors instead of the real entities
+        // "impostor" in the mode file draws the impostors instead of the real entities,
+        // "shift x y z" draws them moved by that vector next to the real ones
         private void ReadMode()
         {
             var mode = "";
@@ -139,6 +144,17 @@ namespace Impostors
                     )
                 )
                     mode = file.ReadToEnd().Trim();
+            }
+            var words = mode.Split(' ');
+            shift = Vector3D.Zero;
+            if (words.Length == 4 && words[0] == "shift")
+            {
+                shift = new Vector3D(
+                    double.Parse(words[1]),
+                    double.Parse(words[2]),
+                    double.Parse(words[3])
+                );
+                mode = "";
             }
             compare = mode == "impostor";
 
@@ -166,7 +182,7 @@ namespace Impostors
             if (camera == null)
                 return "";
             var entity = MyAPIGateway.Entities.GetEntityById(state.Id);
-            var center = entity != null ? entity.WorldAABB.Center : state.Position;
+            var center = (entity != null ? entity.WorldAABB.Center : state.Position) + shift;
             var radius = entity != null ? entity.WorldAABB.HalfExtents.Length() : state.Radius;
             var local = Vector3D.TransformNormal(
                 center - camera.Position,
@@ -345,7 +361,11 @@ namespace Impostors
                     continue;
 
                 // The real entity is replicated, it draws itself
-                if (!compare && MyAPIGateway.Entities.EntityExists(impostor.State.Id))
+                if (
+                    !compare
+                    && shift == Vector3D.Zero
+                    && MyAPIGateway.Entities.EntityExists(impostor.State.Id)
+                )
                     continue;
 
                 visible.Add(impostor);
@@ -390,7 +410,7 @@ namespace Impostors
 
             // Extrapolate motion between state updates, a few seconds at most
             var age = Math.Min(tick - impostor.ReceivedTick, 600) / 60f;
-            var position = state.Position + state.Velocity * age;
+            var position = state.Position + state.Velocity * age + shift;
 
             var rotation = Matrix.CreateFromQuaternion(state.Orientation);
             var toLocal = Matrix.Transpose(rotation);
