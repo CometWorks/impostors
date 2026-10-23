@@ -95,13 +95,13 @@ public sealed class ClusterBridge
         catch (Exception e)
         {
             // Far view still works within each node
-            log.Error(e, "Impostors: no cluster bridge, impostors stay within each node");
+            log.Error(e, "no cluster bridge, impostors stay within each node");
             return;
         }
 
         ImpostorService.BuildAll = true;
         ImpostorService.ExtraSources.Add(() => new RemoteSource(Instance));
-        log.Info("Impostors: cluster bridge started");
+        log.Info("cluster bridge started");
     }
 
     // Called on every game update
@@ -130,7 +130,7 @@ public sealed class ClusterBridge
         }
         catch (Exception e)
         {
-            log.Error(e, "Impostors: cluster update failed");
+            log.Error(e, "cluster update failed");
         }
     }
 
@@ -146,7 +146,7 @@ public sealed class ClusterBridge
         }
         catch (Exception e)
         {
-            log.Warning(e, "Impostors: cluster handlers not registered yet");
+            log.Warning(e, "cluster handlers not registered yet");
             foreach (var handler in handlers)
                 handler.Dispose();
             handlers.Clear();
@@ -252,9 +252,7 @@ public sealed class ClusterBridge
                 .ConfigureAwait(false);
             if (result.Code != PluginResultCode.Success || result.Payload == null)
             {
-                gameThread.Enqueue(() =>
-                    log.Warning($"Impostors: report to the WA failed: {result.Code}")
-                );
+                gameThread.Enqueue(() => log.Warning($"report to the WA failed: {result.Code}"));
                 return;
             }
 
@@ -360,9 +358,7 @@ public sealed class ClusterBridge
                 Index[record.Id] = (record, node);
             indexInstance = waInstance;
             indexRevision = snapshotRevision;
-            log.Info(
-                $"Impostors: cluster index loaded, {Index.Count} records, revision {indexRevision}"
-            );
+            log.Info($"cluster index loaded, {Index.Count} records, revision {indexRevision}");
         });
     }
 
@@ -554,9 +550,7 @@ public sealed class ClusterBridge
                 )
                 .ConfigureAwait(false);
             if (result.Code != PluginResultCode.Success)
-                gameThread.Enqueue(() =>
-                    log.Debug($"Impostors: index publication incomplete: {result.Code}")
-                );
+                gameThread.Enqueue(() => log.Debug($"index publication incomplete: {result.Code}"));
         }
     }
 }
