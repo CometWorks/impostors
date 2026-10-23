@@ -58,6 +58,10 @@ namespace Impostors
         private long serverInstance;
         private bool active;
         private bool debug;
+
+        // Debug: draws the impostors in place of the real entities, which it hides
+        private bool compare;
+        private readonly HashSet<long> hidden = new HashSet<long>();
         private int tick;
         private int drawnQuads;
 
@@ -73,7 +77,8 @@ namespace Impostors
             MyAPIGateway.Multiplayer.RegisterSecureMessageHandler(Protocol.Channel, OnMessage);
             active = true;
 
-            // Tests put this file into the mod's local storage to get stats.txt every 5 s
+            // Tests put this file into the mod's local storage to get stats.txt every second
+            // and to switch between the real entities and their impostors (see ReadMode)
             if (ModContext != null)
                 debug = MyAPIGateway.Utilities.FileExistsInLocalStorage(
                     "debug",
@@ -114,8 +119,78 @@ namespace Impostors
                 MyAPIGateway.Multiplayer.SendMessageToServer(Protocol.Channel, writer.ToArray());
             }
 
-            if (debug && tick % 300 == 0)
+            if (debug && tick % 60 == 0)
+            {
+                ReadMode();
                 WriteStats();
+            }
+        }
+
+        // "impostor" in the mode file draws the impostors instead of the real entities
+        private void ReadMode()
+        {
+            var mode = "";
+            if (MyAPIGateway.Utilities.FileExistsInLocalStorage("mode", typeof(ImpostorRenderer)))
+            {
+                using (
+                    var file = MyAPIGateway.Utilities.ReadFileInLocalStorage(
+                        "mode",
+                        typeof(ImpostorRenderer)
+                    )
+                )
+                    mode = file.ReadToEnd().Trim();
+            }
+            compare = mode == "impostor";
+
+            foreach (var id in impostors.Keys)
+            {
+                var entity = MyAPIGateway.Entities.GetEntityById(id);
+                if (entity == null)
+                    continue;
+                if (compare && entity.Visible)
+                {
+                    entity.Visible = false;
+                    hidden.Add(id);
+                }
+                else if (!compare && hidden.Remove(id))
+                {
+                    entity.Visible = true;
+                }
+            }
+        }
+
+        // Where an impostor is on screen, in pixels, and its radius there
+        private string ScreenPosition(ImpostorState state)
+        {
+            var camera = MyAPIGateway.Session.Camera;
+            if (camera == null)
+                return "";
+            var entity = MyAPIGateway.Entities.GetEntityById(state.Id);
+            var center = entity != null ? entity.WorldAABB.Center : state.Position;
+            var radius = entity != null ? entity.WorldAABB.HalfExtents.Length() : state.Radius;
+            var local = Vector3D.TransformNormal(
+                center - camera.Position,
+                MatrixD.Transpose(camera.WorldMatrix)
+            );
+            if (local.Z >= 0)
+                return " screen=behind";
+            var t = Math.Tan(camera.FovWithZoom / 2);
+            var size = camera.ViewportSize;
+            var x = (local.X / (-local.Z * t * size.X / size.Y) + 1) / 2 * size.X;
+            var y = (1 - local.Y / (-local.Z * t)) / 2 * size.Y;
+            var pixels = radius / -local.Z / t * size.Y / 2;
+            return " screen="
+                + x.ToString("0")
+                + ","
+                + y.ToString("0")
+                + " radius="
+                + pixels.ToString("0.0")
+                + " viewport="
+                + size.X.ToString("0")
+                + "x"
+                + size.Y.ToString("0")
+                + " distance="
+                + (-local.Z).ToString("0");
         }
 
         private void WriteStats()
@@ -160,6 +235,7 @@ namespace Impostors
                         + state.Position.Y.ToString("0.0")
                         + ","
                         + state.Position.Z.ToString("0.0")
+                        + ScreenPosition(state)
                 );
             }
             using (
@@ -269,7 +345,7 @@ namespace Impostors
                     continue;
 
                 // The real entity is replicated, it draws itself
-                if (MyAPIGateway.Entities.EntityExists(impostor.State.Id))
+                if (!compare && MyAPIGateway.Entities.EntityExists(impostor.State.Id))
                     continue;
 
                 visible.Add(impostor);

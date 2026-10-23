@@ -372,10 +372,13 @@ class Client:
     """Client i of the slot. With plugin=True it also runs the Impostors client
     plugin, otherwise it is vanilla as far as Impostors goes."""
 
-    def __init__(self, index: int, name: str, plugin: bool = False):
+    def __init__(
+        self, index: int, name: str, plugin: bool = False, quality: str = "minimal"
+    ):
         self.index = index
         self.name = name
         self.plugin = plugin
+        self.quality = quality
         self.pulsar = TEST_ROOT / f"{TASK}-c{index}"
         self.launcher = self.pulsar / "Interim.bin"
         self.appdata = TEST_ROOT / f"{TASK}-c{index}-data"
@@ -406,7 +409,7 @@ class Client:
             "-appdata",
             self.appdata,
             "--quality",
-            "minimal",
+            self.quality,
             "--resolution",
             "1280x720",
             "--no-audio",
