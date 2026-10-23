@@ -57,6 +57,11 @@ greedily into rectangles of one color, so a flat painted side is a single quad.
   gradient of the occupancy blurred by a Gaussian (σ = 1.5 cells): seen along an axis, a
   stair-stepped surface shows only faces of one direction and would shade as one flat color.
   Quads merge only when color and normal both match.
+- Only faces towards empty space reachable from outside are emitted (a flood fill from the
+  volume's border): enclosed pockets, like caves or the rooms of a hollow grid, are never
+  seen, and drawn they would cost quads and break the back to front order. Smoothed surfaces
+  merge into quads of at most 4 cells for the same reason: a large quad deep in a crater
+  could sort in front of the rock before it.
 - Normal precision trades speckle against quads. On a bumpy voxel sphere, 16° steps (the
   first version, 4 bits and a coarser estimate) left 19% of neighboring quads with a visible
   shade jump; 6 bits leave 0.3% at 50% more quads than that version, 8 bits none at 80% more.

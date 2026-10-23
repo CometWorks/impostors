@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Impostors;
 using VRageMath;
 
@@ -70,6 +71,60 @@ public sealed class CellVolume
         if (x < 0 || y < 0 || z < 0 || x >= Size.X || y >= Size.Y || z >= Size.Z)
             return false;
         return weight[Index(x, y, z)] > 0;
+    }
+
+    // Empty cells reachable from outside the volume. Faces towards empty pockets enclosed in the
+    // content (caves, the rooms of a hollow grid) are never seen, but drawn they would cost
+    // quads and break the back to front order of the billboards.
+    private bool[] outside;
+
+    private void FindOutside()
+    {
+        outside = new bool[weight.Length];
+        var stack = new Stack<int>();
+        void Visit(int x, int y, int z)
+        {
+            var i = Index(x, y, z);
+            if (outside[i] || weight[i] > 0)
+                return;
+            outside[i] = true;
+            stack.Push(i);
+        }
+
+        for (var z = 0; z < Size.Z; z++)
+        for (var y = 0; y < Size.Y; y++)
+        for (var x = 0; x < Size.X; x++)
+        {
+            if (x == 0 || y == 0 || z == 0 || x == Size.X - 1 || y == Size.Y - 1 || z == Size.Z - 1)
+                Visit(x, y, z);
+        }
+
+        while (stack.Count > 0)
+        {
+            var i = stack.Pop();
+            var x = i % Size.X;
+            var y = i / Size.X % Size.Y;
+            var z = i / (Size.X * Size.Y);
+            if (x > 0)
+                Visit(x - 1, y, z);
+            if (x < Size.X - 1)
+                Visit(x + 1, y, z);
+            if (y > 0)
+                Visit(x, y - 1, z);
+            if (y < Size.Y - 1)
+                Visit(x, y + 1, z);
+            if (z > 0)
+                Visit(x, y, z - 1);
+            if (z < Size.Z - 1)
+                Visit(x, y, z + 1);
+        }
+    }
+
+    private bool Exposed(int x, int y, int z)
+    {
+        if (x < 0 || y < 0 || z < 0 || x >= Size.X || y >= Size.Y || z >= Size.Z)
+            return true;
+        return outside[Index(x, y, z)];
     }
 
     // RGB565 of the cell's average color, quantized to 4 bits per channel first, so
@@ -189,6 +244,11 @@ public sealed class CellVolume
     {
         if (smooth)
             BlurOccupancy();
+        FindOutside();
+
+        // Smooth surfaces get small quads: billboards are drawn back to front by their centers,
+        // and a large quad deep in a crater would sort in front of the rock before it
+        var maxSpan = smooth ? 4 : 255;
 
         var writer = new ByteWriter(4096);
         writer.Byte(Lod);
@@ -229,7 +289,7 @@ public sealed class CellVolume
                             ? SmoothNormal(cell[0], cell[1], cell[2], face)
                             : FaceNormals[face];
                         cell[n] = s + step;
-                        if (!Filled(cell[0], cell[1], cell[2]))
+                        if (Exposed(cell[0], cell[1], cell[2]))
                             mask[j * sizeU + i] = 1 + Color(index) + ((long)normal << 16);
                     }
                 }
@@ -248,14 +308,16 @@ public sealed class CellVolume
 
                         var width = 1;
                         while (
-                            i + width < sizeU && width < 255 && mask[j * sizeU + i + width] == key
+                            i + width < sizeU
+                            && width < maxSpan
+                            && mask[j * sizeU + i + width] == key
                         )
                             width++;
 
                         var height = 1;
                         while (
                             j + height < sizeV
-                            && height < 255
+                            && height < maxSpan
                             && RowMatches(mask, sizeU, i, j + height, width, key)
                         )
                             height++;
