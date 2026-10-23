@@ -190,7 +190,13 @@ def main() -> None:
         )
     SERVER.prepare([CLIENT.steam_id])
     SERVER.write_plugin_config(
-        rig.plugin_config(ReplicationMargin=100000, MinPixels=0, MinBlocks=1)
+        rig.plugin_config(
+            ReplicationMargin=100000,
+            MinPixels=0,
+            MinBlocks=1,
+            # IMP_OCCLUSION=1 compares asteroids with ambient occlusion baked in
+            AsteroidOcclusion=os.environ.get("IMP_OCCLUSION") == "1",
+        )
     )
     SHOTS.mkdir(parents=True, exist_ok=True)
 
