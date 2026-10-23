@@ -138,6 +138,84 @@ public sealed class CellVolume
         return Shape.ToRgb565(Math.Min(r, 255), Math.Min(g, 255), Math.Min(b, 255));
     }
 
+    // The cell's average color darkened by its ambient occlusion, at the full precision of
+    // RGB565: quantizing first would band the gradual darkening
+    private ushort OccludedColor(int x, int y, int z)
+    {
+        var i = Index(x, y, z);
+        var w = weight[i];
+        var light = Occlusion(x, y, z);
+        return Shape.ToRgb565(
+            Math.Min((int)(red[i] / w * light), 255),
+            Math.Min((int)(green[i] / w * light), 255),
+            Math.Min((int)(blue[i] / w * light), 255)
+        );
+    }
+
+    // Ambient occlusion: how much of the sky around a surface cell the content within a fifth
+    // of the shape's size blocks, by rays over the hemisphere around the smoothed normal,
+    // cosine weighted. The game darkens pits and crevices with its shadows and the occlusion
+    // baked into its textures; this bakes a view independent version into the colors. The
+    // reach scales with the level of detail, so every level darkens the same places.
+    private int OcclusionRange => Math.Max(2, Lod / 5);
+    private static readonly Vector3[] OcclusionRays = FibonacciSphere(32);
+
+    private float[] occlusion;
+
+    private static Vector3[] FibonacciSphere(int count)
+    {
+        var points = new Vector3[count];
+        var golden = Math.PI * (3 - Math.Sqrt(5));
+        for (var k = 0; k < count; k++)
+        {
+            var y = 1 - (k + 0.5f) * 2 / count;
+            var r = (float)Math.Sqrt(1 - y * y);
+            var a = golden * k;
+            points[k] = new Vector3((float)Math.Cos(a) * r, y, (float)Math.Sin(a) * r);
+        }
+        return points;
+    }
+
+    // Light left by the occlusion, 1 for open sky, 0 fully enclosed
+    private float Occlusion(int x, int y, int z)
+    {
+        var i = Index(x, y, z);
+        if (occlusion[i] >= 0)
+            return occlusion[i];
+
+        var gradient = Gradient(x, y, z);
+        if (gradient.LengthSquared() < 1e-8f)
+            return occlusion[i] = 1;
+        var normal = Vector3.Normalize(gradient);
+
+        var range = OcclusionRange;
+        float blocked = 0,
+            total = 0;
+        foreach (var ray in OcclusionRays)
+        {
+            var cosine = Vector3.Dot(ray, normal);
+            if (cosine <= 0.1f)
+                continue;
+            total += cosine;
+            var p = new Vector3(x + 0.5f, y + 0.5f, z + 0.5f) + normal * 0.75f;
+            for (var step = 0; step < range; step++)
+            {
+                p += ray;
+                var cx = (int)Math.Floor(p.X);
+                var cy = (int)Math.Floor(p.Y);
+                var cz = (int)Math.Floor(p.Z);
+                if (cx < 0 || cy < 0 || cz < 0 || cx >= Size.X || cy >= Size.Y || cz >= Size.Z)
+                    break;
+                if (weight[Index(cx, cy, cz)] > 0)
+                {
+                    blocked += cosine;
+                    break;
+                }
+            }
+        }
+        return occlusion[i] = 1 - blocked / total;
+    }
+
     public int FilledCount
     {
         get
@@ -218,16 +296,19 @@ public sealed class CellVolume
         return density[Index(x, y, z)];
     }
 
+    private Vector3 Gradient(int x, int y, int z) =>
+        new(
+            Density(x - 1, y, z) - Density(x + 1, y, z),
+            Density(x, y - 1, z) - Density(x, y + 1, z),
+            Density(x, y, z - 1) - Density(x, y, z + 1)
+        );
+
     // The surface normal at a filled cell: down the blurred occupancy. Where it points nearly
     // along the face or away from it, it is tilted towards the face's own normal, gradually,
     // so the shading has no steps there.
     private ushort SmoothNormal(int x, int y, int z, int face)
     {
-        var gradient = new Vector3(
-            Density(x - 1, y, z) - Density(x + 1, y, z),
-            Density(x, y - 1, z) - Density(x, y + 1, z),
-            Density(x, y, z - 1) - Density(x, y, z + 1)
-        );
+        var gradient = Gradient(x, y, z);
         if (gradient.LengthSquared() < 1e-8f)
             return FaceNormals[face];
 
@@ -239,11 +320,17 @@ public sealed class CellVolume
     }
 
     // Encodes the surface as a shape (see Shape in the protocol). Smooth normals shade curved
-    // surfaces like asteroids, flat ones suit grids.
-    public byte[] ToShape(bool smooth = false)
+    // surfaces like asteroids, flat ones suit grids. Occlusion darkens pits and crevices.
+    public byte[] ToShape(bool smooth = false, bool occluded = false)
     {
-        if (smooth)
+        if (smooth || occluded)
             BlurOccupancy();
+        if (occluded)
+        {
+            occlusion = new float[weight.Length];
+            for (var i = 0; i < occlusion.Length; i++)
+                occlusion[i] = -1;
+        }
         FindOutside();
 
         // Smooth surfaces get small quads: billboards are drawn back to front by their centers,
@@ -285,12 +372,18 @@ public sealed class CellVolume
                             continue;
 
                         var index = Index(cell[0], cell[1], cell[2]);
+                        cell[n] = s + step;
+                        if (!Exposed(cell[0], cell[1], cell[2]))
+                            continue;
+
+                        cell[n] = s;
                         var normal = smooth
                             ? SmoothNormal(cell[0], cell[1], cell[2], face)
                             : FaceNormals[face];
-                        cell[n] = s + step;
-                        if (Exposed(cell[0], cell[1], cell[2]))
-                            mask[j * sizeU + i] = 1 + Color(index) + ((long)normal << 16);
+                        var color = occluded
+                            ? OccludedColor(cell[0], cell[1], cell[2])
+                            : Color(index);
+                        mask[j * sizeU + i] = 1 + color + ((long)normal << 16);
                     }
                 }
 

@@ -62,6 +62,12 @@ greedily into rectangles of one color, so a flat painted side is a single quad.
   seen, and drawn they would cost quads and break the back to front order. Smoothed surfaces
   merge into quads of at most 4 cells for the same reason: a large quad deep in a crater
   could sort in front of the rock before it.
+- Shapes can bake ambient occlusion into their colors: 32 rays over the hemisphere around each
+  surface cell's smoothed normal, reaching a fifth of the shape's size, darken the cell by the
+  cosine weighted share they find blocked. It stands in for the shadows and baked occlusion that
+  darken pits and crevices in the game's own rendering, view independently. On a 128 cell
+  cratered sphere it darkens the craters by about 12% against the open surface and doubles the
+  meshing time (230 ms instead of 115 ms, background thread).
 - Normal precision trades speckle against quads. On a bumpy voxel sphere, 16° steps (the
   first version, 4 bits and a coarser estimate) left 19% of neighboring quads with a visible
   shade jump; 6 bits leave 0.3% at 50% more quads than that version, 8 bits none at 80% more.
