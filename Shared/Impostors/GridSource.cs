@@ -174,19 +174,15 @@ public sealed class GridSource : ImpostorSource
             volume.Add(start + new Vector3(x, y, z) * step, s.Color);
     }
 
-    // The painted color for armor, and a duller version of it for functional blocks, whose
-    // models are mostly unpainted metal
+    // The painted color: block models are painted over most of their surface, functional
+    // blocks too. Windows show the dark space behind them.
     private static Vector3I BlockColor(MySlimBlock block)
     {
-        var rgb = MyColorPickerConstants.HSVOffsetToHSV(block.ColorMaskHSV).HSVtoColor();
-        var color = new Vector3I(rgb.R, rgb.G, rgb.B);
-        if (block.FatBlock == null)
-            return color;
-
         var subtype = block.BlockDefinition.Id.SubtypeName;
-        if (subtype.Contains("Window") || subtype.Contains("Glass"))
+        if (block.FatBlock != null && (subtype.Contains("Window") || subtype.Contains("Glass")))
             return new Vector3I(40, 55, 70);
 
-        return (color + new Vector3I(110, 110, 110)) / 2;
+        var rgb = MyColorPickerConstants.HSVOffsetToHSV(block.ColorMaskHSV).HSVtoColor();
+        return new Vector3I(rgb.R, rgb.G, rgb.B);
     }
 }

@@ -24,8 +24,10 @@ namespace Impostors
         // Billboards are shared with every effect of the game, which has 32768 per frame
         private const int MaxQuads = 12000;
 
-        private const float Ambient = 0.35f;
-        private const float Diffuse = 0.65f;
+        // The game's ambient light keeps the sides away from the sun fairly bright; sunlit
+        // faces may go above 1, which saturates like the game's lit paint does
+        private const float Ambient = 0.5f;
+        private const float Diffuse = 0.6f;
 
         // Re-sort a shape's quads when the view direction turned by about 3 degrees
         private const float ResortCosine = 0.9986f;

@@ -60,8 +60,8 @@ greedily into rectangles of one color, so a flat painted side is a single quad.
 - The version of a shape is a hash of the encoded shapes, so a rebuild that changes nothing
   sends nothing.
 
-Colors: armor takes its paint color (`ColorMaskHSV` the way the color picker converts it).
-Functional blocks take a duller version of it, halfway to mid gray. Windows are dark. For
+Colors: every block takes its paint color (`ColorMaskHSV` the way the color picker converts
+it), since block models are painted over most of their surface. Windows are dark. For
 asteroids, see the SE-383 section.
 
 ## Server
@@ -122,7 +122,7 @@ Each frame it:
 - keeps the nearest impostors within the 12000 quad budget,
 - draws them far to near, each with its back faces culled and its quads sorted back to front
   for the current view direction (re-sorted when the view turns by about 3°),
-- shades each quad with its normal: `0.35 + 0.65 × max(0, n·sun)`.
+- shades each quad with its normal: `0.5 + 0.6 × max(0, n·sun)`.
 
 The client plugin compiles the same files. That copy has no mod context; it stands down when
 a session mod contains the renderer, so it only draws on servers whose world lacks the mod.
