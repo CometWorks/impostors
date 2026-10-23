@@ -3,7 +3,7 @@ the Impostors plugin, one headless client without it, the Impostors mod from
 the world's mod list. Prints one PASS or FAIL line per check and exits with
 the number of failures. Screenshots land in ~/.se-test/<task>-shots.
 
-    uv run --no-project --with httpx python tests/scenario.py   # prepare, start, check, stop
+    uv run --no-project --with httpx --with pillow python tests/scenario.py
     IMP_KEEP=1 ...                             # leave the game running
     IMP_PLUGIN=1 ...                           # the client runs the client plugin
                                                  and the world has no mod
@@ -84,6 +84,20 @@ def shot(api, name: str, target) -> Path:
     return path
 
 
+def shades(path: Path) -> int:
+    """Colors covering at least 5 pixels at the screen center, where the impostor the camera
+    looks at is: single bright pixels are stars or antialiased edges"""
+    from collections import Counter
+
+    from PIL import Image
+
+    image = Image.open(path).convert("RGB")
+    w, h = image.size
+    center = image.crop((w // 2 - 30, h // 2 - 30, w // 2 + 30, h // 2 + 30))
+    counts = Counter(c for c in center.getdata() if sum(c) > 90)
+    return sum(1 for n in counts.values() if n >= 5)
+
+
 def drawn(impostors: dict, grid: world.Grid) -> bool:
     i = impostors.get(grid.entity_id)
     return bool(i) and i["drawn"] == "1" and i["shape"] != "none"
@@ -149,6 +163,10 @@ def run(api):
         print("screenshot", shot(api, f"home-{g.name}", g.position))
     for a in world.ASTEROIDS:
         print("screenshot", shot(api, f"home-{a.name}", a.center))
+
+    # Seen along an axis, the far asteroid's impostor must not be one flat color
+    tones = shades(SHOTS / f"home-{world.ROCK_FAR.name}.png")
+    check("asteroid impostor shaded", tones >= 4, f"{tones} shades")
 
     # Closer, still beyond the sync distance: the impostor is larger on screen. Grids start
     # at level 16, which the station has at 8 km.

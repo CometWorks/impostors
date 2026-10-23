@@ -140,7 +140,7 @@ public sealed class VoxelSource : ImpostorSource
                     colors[data.Material(ref p)]
                 );
             }
-            shapes[i] = volume.ToShape();
+            shapes[i] = volume.ToShape(smooth: true);
 
             if (voxelLod == 0)
                 break;

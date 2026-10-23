@@ -193,6 +193,8 @@ from afar anyway.
   number of voxels along the longest axis (`IMyStorage.ReadRange` with content and material),
   one cell per voxel above the iso level. Colors come from the material's mined ore through a
   small table (stone, iron, ice and the rest), on a background thread.
+- Quads are shaded with smoothed normals: an asteroid seen along an axis would otherwise be
+  one flat color.
 - Signature: a counter of the storage's `RangeChanged` events, so mining or a blast rebuilds it
   (at most every `RebuildSeconds`).
 - Frame: the voxel map's world matrix; asteroids don't move.
