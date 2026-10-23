@@ -58,12 +58,18 @@ def wait_stats(predicate, timeout: float, interval: float = 2.0):
 
 def command(api, text: str, timeout: float = 20.0) -> str:
     """A chat command of the probe and its reply"""
-    seen = {(m.get("text"), m.get("timestamp")) for m in api.get_chat_messages().get("hud") or []}
+    seen = {
+        (m.get("text"), m.get("timestamp"))
+        for m in api.get_chat_messages().get("hud") or []
+    }
     api.send_chat(text)
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         for m in api.get_chat_messages().get("hud") or []:
-            if (m.get("text"), m.get("timestamp")) not in seen and m.get("sender") in ("iprobe", "ImpostorsProbe"):
+            if (m.get("text"), m.get("timestamp")) not in seen and m.get("sender") in (
+                "iprobe",
+                "ImpostorsProbe",
+            ):
                 return m.get("text")
         time.sleep(0.5)
     raise TimeoutError(f"No reply to {text!r}")
@@ -102,13 +108,23 @@ def run(api):
 
     # The server learns that the client draws impostors from its hello
     log = lambda: SERVER.game_log().read_text(errors="replace")
-    check("hello", wait(lambda: f"Player {CLIENT.steam_id} draws impostors" in log(), 90))
+    check(
+        "hello", wait(lambda: f"Player {CLIENT.steam_id} draws impostors" in log(), 90)
+    )
 
     far = (world.SHIP, world.STATION, world.FAR)
     totals, impostors = wait_stats(lambda i: all(drawn(i, g) for g in far), 120)
     for g in far:
-        check(f"impostor {g.name}", drawn(impostors, g), impostors.get(g.entity_id, "missing"))
-    check("no impostor Near", world.NEAR.entity_id not in impostors, impostors.get(world.NEAR.entity_id, ""))
+        check(
+            f"impostor {g.name}",
+            drawn(impostors, g),
+            impostors.get(g.entity_id, "missing"),
+        )
+    check(
+        "no impostor Near",
+        world.NEAR.entity_id not in impostors,
+        impostors.get(world.NEAR.entity_id, ""),
+    )
     check("quads drawn", int(totals.get("quads", 0)) > 0, totals)
     print("server:", command(api, "!iprobe stats"))
 
@@ -118,37 +134,73 @@ def run(api):
     # Closer, still beyond the sync distance: the impostor is larger on screen
     station = world.STATION
     api.character_teleport(station.position[0] - 4000, 0, 0)
-    totals, impostors = wait_stats(lambda i: drawn(i, station) and int(i[station.entity_id]["lod"]) > 8, 30)
-    check("station finer level at 4 km", int(impostors.get(station.entity_id, {}).get("lod", 0)) > 8, impostors.get(station.entity_id, "missing"))
+    totals, impostors = wait_stats(
+        lambda i: drawn(i, station) and int(i[station.entity_id]["lod"]) > 8, 30
+    )
+    check(
+        "station finer level at 4 km",
+        int(impostors.get(station.entity_id, {}).get("lod", 0)) > 8,
+        impostors.get(station.entity_id, "missing"),
+    )
     print("screenshot", shot(api, "4km-Station", station.position))
 
     # Hand-off: next to the station its real grid replicates. The server stops sending the
     # impostor; while the client still has it, it must not draw it.
     api.character_teleport(station.position[0] - 1000, 0, 0)
-    totals, impostors = wait_stats(lambda i: i.get(station.entity_id, {}).get("drawn") != "1", 60)
+    totals, impostors = wait_stats(
+        lambda i: i.get(station.entity_id, {}).get("drawn") != "1", 60
+    )
     i = impostors.get(station.entity_id, {})
     check("station impostor hidden near", i.get("drawn") != "1", i or "removed")
     print("screenshot", shot(api, "near-Station", station.position))
 
     api.character_teleport(*world.HOME)
-    totals, impostors = wait_stats(lambda i: drawn(i, station) and i[station.entity_id]["real"] == "0", 90)
-    check("station impostor again", drawn(impostors, station), impostors.get(station.entity_id, "missing"))
+    totals, impostors = wait_stats(
+        lambda i: drawn(i, station) and i[station.entity_id]["real"] == "0", 90
+    )
+    check(
+        "station impostor again",
+        drawn(impostors, station),
+        impostors.get(station.entity_id, "missing"),
+    )
 
     # Motion: the ship moves, the client gets its new position
     ship = world.SHIP
     target = (ship.position[0] + 800, ship.position[1], ship.position[2])
-    assert command(api, f"!iprobe place {ship.entity_id} {target[0]} {target[1]} {target[2]}") == "Probe place: done"
-    moved = lambda i: abs(float(i.get(ship.entity_id, {}).get("pos", "0,0,0").split(",")[0]) - target[0]) < 5
+    assert (
+        command(
+            api, f"!iprobe place {ship.entity_id} {target[0]} {target[1]} {target[2]}"
+        )
+        == "Probe place: done"
+    )
+    moved = (
+        lambda i: abs(
+            float(i.get(ship.entity_id, {}).get("pos", "0,0,0").split(",")[0])
+            - target[0]
+        )
+        < 5
+    )
     totals, impostors = wait_stats(moved, 30)
     check("ship moved", moved(impostors), impostors.get(ship.entity_id, "missing"))
 
     # Content: repainting the station rebuilds it, a new version reaches the client
     version = impostors.get(station.entity_id, {}).get("version")
-    assert command(api, f"!iprobe paint {station.entity_id} {world.YELLOW}") == "Probe paint: done"
-    changed = lambda i: i.get(station.entity_id, {}).get("version") not in (None, version)
+    assert (
+        command(api, f"!iprobe paint {station.entity_id} {world.YELLOW}")
+        == "Probe paint: done"
+    )
+    changed = lambda i: i.get(station.entity_id, {}).get("version") not in (
+        None,
+        version,
+    )
     totals, impostors = wait_stats(changed, 150, 5)
     i = impostors.get(station.entity_id, {})
-    check("station repainted", changed(impostors) and i.get("shape", "").startswith(i.get("version", "?") + "/"), i)
+    check(
+        "station repainted",
+        changed(impostors)
+        and i.get("shape", "").startswith(i.get("version", "?") + "/"),
+        i,
+    )
     print("screenshot", shot(api, "home-Station-repainted", station.position))
 
 

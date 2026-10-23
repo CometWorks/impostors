@@ -42,7 +42,12 @@ public sealed class CellVolume
     {
         var p = (local - Origin) / CellSize;
         cell = new Vector3I((int)Math.Floor(p.X), (int)Math.Floor(p.Y), (int)Math.Floor(p.Z));
-        return cell.X >= 0 && cell.Y >= 0 && cell.Z >= 0 && cell.X < Size.X && cell.Y < Size.Y && cell.Z < Size.Z;
+        return cell.X >= 0
+            && cell.Y >= 0
+            && cell.Z >= 0
+            && cell.X < Size.X
+            && cell.Y < Size.Y
+            && cell.Z < Size.Z;
     }
 
     // Adds color to the cell holding this local position, color components 0..255
@@ -148,11 +153,17 @@ public sealed class CellVolume
                         }
 
                         var width = 1;
-                        while (i + width < sizeU && width < 255 && mask[j * sizeU + i + width] == key)
+                        while (
+                            i + width < sizeU && width < 255 && mask[j * sizeU + i + width] == key
+                        )
                             width++;
 
                         var height = 1;
-                        while (j + height < sizeV && height < 255 && RowMatches(mask, sizeU, i, j + height, width, key))
+                        while (
+                            j + height < sizeV
+                            && height < 255
+                            && RowMatches(mask, sizeU, i, j + height, width, key)
+                        )
                             height++;
 
                         for (var y = 0; y < height; y++)

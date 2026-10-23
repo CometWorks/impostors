@@ -32,7 +32,8 @@ namespace Impostors
 
         private static readonly MyStringId Material = MyStringId.GetOrCompute("Square");
 
-        private readonly Dictionary<long, ClientImpostor> impostors = new Dictionary<long, ClientImpostor>();
+        private readonly Dictionary<long, ClientImpostor> impostors =
+            new Dictionary<long, ClientImpostor>();
         private readonly List<ClientImpostor> visible = new List<ClientImpostor>();
         private readonly ByteWriter writer = new ByteWriter(16);
         private readonly Vector3[] lefts = new Vector3[6];
@@ -59,7 +60,10 @@ namespace Impostors
 
             // Tests put this file into the mod's local storage to get stats.txt every 5 s
             if (ModContext != null)
-                debug = MyAPIGateway.Utilities.FileExistsInLocalStorage("debug", typeof(ImpostorRenderer));
+                debug = MyAPIGateway.Utilities.FileExistsInLocalStorage(
+                    "debug",
+                    typeof(ImpostorRenderer)
+                );
         }
 
         protected override void UnloadData()
@@ -102,20 +106,46 @@ namespace Impostors
         private void WriteStats()
         {
             var text = new System.Text.StringBuilder();
-            text.AppendLine("impostors=" + impostors.Count + " drawn=" + visible.Count + " quads=" + drawnQuads);
+            text.AppendLine(
+                "impostors=" + impostors.Count + " drawn=" + visible.Count + " quads=" + drawnQuads
+            );
             foreach (var impostor in impostors.Values)
             {
                 var state = impostor.State;
                 var shape = impostor.Shape;
                 text.AppendLine(
-                    "id=" + state.Id + " kind=" + state.Kind + " version=" + state.Version + " lod=" + state.Lod
-                    + " shape=" + (shape == null ? "none" : shape.Version + "/" + shape.Lod + "/" + shape.Count)
-                    + " real=" + (MyAPIGateway.Entities.EntityExists(state.Id) ? 1 : 0)
-                    + " drawn=" + (visible.Contains(impostor) ? 1 : 0)
-                    + " pos=" + state.Position.X.ToString("0.0") + "," + state.Position.Y.ToString("0.0") + "," + state.Position.Z.ToString("0.0")
+                    "id="
+                        + state.Id
+                        + " kind="
+                        + state.Kind
+                        + " version="
+                        + state.Version
+                        + " lod="
+                        + state.Lod
+                        + " shape="
+                        + (
+                            shape == null
+                                ? "none"
+                                : shape.Version + "/" + shape.Lod + "/" + shape.Count
+                        )
+                        + " real="
+                        + (MyAPIGateway.Entities.EntityExists(state.Id) ? 1 : 0)
+                        + " drawn="
+                        + (visible.Contains(impostor) ? 1 : 0)
+                        + " pos="
+                        + state.Position.X.ToString("0.0")
+                        + ","
+                        + state.Position.Y.ToString("0.0")
+                        + ","
+                        + state.Position.Z.ToString("0.0")
                 );
             }
-            using (var file = MyAPIGateway.Utilities.WriteFileInLocalStorage("stats.txt", typeof(ImpostorRenderer)))
+            using (
+                var file = MyAPIGateway.Utilities.WriteFileInLocalStorage(
+                    "stats.txt",
+                    typeof(ImpostorRenderer)
+                )
+            )
                 file.Write(text.ToString());
         }
 
@@ -130,7 +160,9 @@ namespace Impostors
             }
             catch (Exception e)
             {
-                MyLog.Default.WriteLineAndConsole("Impostors: bad message " + message[0] + ": " + e);
+                MyLog.Default.WriteLineAndConsole(
+                    "Impostors: bad message " + message[0] + ": " + e
+                );
             }
         }
 
@@ -216,7 +248,12 @@ namespace Impostors
                 visible.Add(impostor);
             }
 
-            visible.Sort((a, b) => Vector3D.DistanceSquared(eye, a.State.Position).CompareTo(Vector3D.DistanceSquared(eye, b.State.Position)));
+            visible.Sort(
+                (a, b) =>
+                    Vector3D
+                        .DistanceSquared(eye, a.State.Position)
+                        .CompareTo(Vector3D.DistanceSquared(eye, b.State.Position))
+            );
 
             var quads = 0;
             var count = 0;
@@ -243,7 +280,9 @@ namespace Impostors
 
             var rotation = Matrix.CreateFromQuaternion(state.Orientation);
             var toLocal = Matrix.Transpose(rotation);
-            var view = Vector3.Normalize(Vector3.TransformNormal((Vector3)(position - eye), toLocal));
+            var view = Vector3.Normalize(
+                Vector3.TransformNormal((Vector3)(position - eye), toLocal)
+            );
             var sunLocal = Vector3.TransformNormal(sun, toLocal);
 
             for (var f = 0; f < 6; f++)
@@ -252,7 +291,9 @@ namespace Impostors
                 facing[f] = Vector3.Dot(normal, view) < 0;
                 light[f] = Ambient + Diffuse * Math.Max(0, Vector3.Dot(normal, sunLocal));
 
-                int n, u, v;
+                int n,
+                    u,
+                    v;
                 Shape.Axes(f, out n, out u, out v);
                 lefts[f] = Vector3.TransformNormal(ClientShape.Axis[u], rotation);
                 ups[f] = Vector3.TransformNormal(ClientShape.Axis[v], rotation);
@@ -270,7 +311,17 @@ namespace Impostors
                 var center = position + Vector3.TransformNormal(shape.Centers[i], rotation);
                 var color = new Vector4(shape.Colors[i] * light[face], 1f);
                 var half = shape.HalfSizes[i];
-                MyTransparentGeometry.AddBillboardOriented(Material, color, center, lefts[face], ups[face], half.X, half.Y, Vector2.Zero, MyBillboard.BlendTypeEnum.LDR);
+                MyTransparentGeometry.AddBillboardOriented(
+                    Material,
+                    color,
+                    center,
+                    lefts[face],
+                    ups[face],
+                    half.X,
+                    half.Y,
+                    Vector2.Zero,
+                    MyBillboard.BlendTypeEnum.LDR
+                );
                 drawnQuads++;
             }
         }

@@ -46,7 +46,10 @@ public sealed class ImpostorEntry
         Kind = source.Kind;
     }
 
-    public float Radius => (float)((WorldAabb.Center - WorldMatrix.Translation).Length() + WorldAabb.HalfExtents.Length());
+    public float Radius =>
+        (float)(
+            (WorldAabb.Center - WorldMatrix.Translation).Length() + WorldAabb.HalfExtents.Length()
+        );
 
     // Index of the best shape at or below the wanted level of detail
     public int ShapeIndex(byte lod)

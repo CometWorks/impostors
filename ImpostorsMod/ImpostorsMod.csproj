@@ -109,12 +109,18 @@
   </ItemGroup>
 
   <Target Name="ValidateProps" BeforeTargets="PrepareForBuild">
-    <Error Condition="'$(Bin64)' == ''"
-           Text="Could not locate the Space Engineers Bin64 folder. Set &lt;Bin64&gt; in &quot;$(RepoRoot)Directory.Build.props.user&quot;." />
-    <Error Condition="!Exists('$(Bin64)')"
-           Text="Invalid Bin64 path &quot;$(Bin64)&quot; in &quot;$(RepoRoot)Directory.Build.props[.user]&quot;." />
-    <Warning Condition="'$(Mods)' == ''"
-             Text="Could not locate the local mods folder of the game, the mod will not be deployed. Set &lt;Mods&gt; in &quot;$(RepoRoot)Directory.Build.props.user&quot;." />
+    <Error
+      Condition="'$(Bin64)' == ''"
+      Text="Could not locate the Space Engineers Bin64 folder. Set &lt;Bin64&gt; in &quot;$(RepoRoot)Directory.Build.props.user&quot;."
+    />
+    <Error
+      Condition="!Exists('$(Bin64)')"
+      Text="Invalid Bin64 path &quot;$(Bin64)&quot; in &quot;$(RepoRoot)Directory.Build.props[.user]&quot;."
+    />
+    <Warning
+      Condition="'$(Mods)' == ''"
+      Text="Could not locate the local mods folder of the game, the mod will not be deployed. Set &lt;Mods&gt; in &quot;$(RepoRoot)Directory.Build.props.user&quot;."
+    />
   </Target>
 
   <!-- Links the Mod folder of this project into the local mods folder of the game
@@ -122,33 +128,51 @@
        straight from the working copy and source changes need no copying at all.
        A stale link (for example after moving the working copy) is recreated, while a
        real folder with the same name is left untouched. -->
-  <Target Name="DeployMod" AfterTargets="Build"
-          Condition="'$(RunPostBuildEvent)' != 'Never' And '$(Mods)' != ''">
+  <Target
+    Name="DeployMod"
+    AfterTargets="Build"
+    Condition="'$(RunPostBuildEvent)' != 'Never' And '$(Mods)' != ''"
+  >
     <PropertyGroup>
       <ModSourceDir>$(MSBuildProjectDirectory)$(PathSeparator)Mod</ModSourceDir>
       <ModLinkDir>$(Mods)$(PathSeparator)Impostors</ModLinkDir>
 
       <!-- Links and junctions carry the ReparsePoint attribute, real folders do not -->
-      <ModLinkAttributes Condition="Exists('$(ModLinkDir)')">$([System.IO.File]::GetAttributes('$(ModLinkDir)'))</ModLinkAttributes>
+      <ModLinkAttributes Condition="Exists('$(ModLinkDir)')"
+        >$([System.IO.File]::GetAttributes('$(ModLinkDir)'))</ModLinkAttributes>
       <ModFolderExists>false</ModFolderExists>
-      <ModFolderExists Condition="'$(ModLinkAttributes)' != '' And !$(ModLinkAttributes.Contains('ReparsePoint'))">true</ModFolderExists>
+      <ModFolderExists
+        Condition="'$(ModLinkAttributes)' != '' And !$(ModLinkAttributes.Contains('ReparsePoint'))"
+        >true</ModFolderExists>
     </PropertyGroup>
 
     <MakeDir Condition="!$(ModFolderExists)" Directories="$(Mods)" />
 
     <!-- Windows: rmdir removes only the junction itself, never the linked content -->
-    <Exec Condition="!$(ModFolderExists) And $([MSBuild]::IsOSPlatform('Windows'))"
-          Command="if exist &quot;$(ModLinkDir)&quot; rmdir &quot;$(ModLinkDir)&quot;" />
-    <Exec Condition="!$(ModFolderExists) And $([MSBuild]::IsOSPlatform('Windows'))"
-          Command="mklink /J &quot;$(ModLinkDir)&quot; &quot;$(ModSourceDir)&quot;" />
+    <Exec
+      Condition="!$(ModFolderExists) And $([MSBuild]::IsOSPlatform('Windows'))"
+      Command="if exist &quot;$(ModLinkDir)&quot; rmdir &quot;$(ModLinkDir)&quot;"
+    />
+    <Exec
+      Condition="!$(ModFolderExists) And $([MSBuild]::IsOSPlatform('Windows'))"
+      Command="mklink /J &quot;$(ModLinkDir)&quot; &quot;$(ModSourceDir)&quot;"
+    />
 
     <!-- Linux: ln -sfn replaces an existing symlink in place -->
-    <Exec Condition="!$(ModFolderExists) And !$([MSBuild]::IsOSPlatform('Windows'))"
-          Command="ln -sfn &quot;$(ModSourceDir)&quot; &quot;$(ModLinkDir)&quot;" />
+    <Exec
+      Condition="!$(ModFolderExists) And !$([MSBuild]::IsOSPlatform('Windows'))"
+      Command="ln -sfn &quot;$(ModSourceDir)&quot; &quot;$(ModLinkDir)&quot;"
+    />
 
-    <Message Condition="!$(ModFolderExists)" Importance="high"
-             Text="Linked the mod into the local mods folder of the game: &quot;$(ModLinkDir)&quot; -> &quot;$(ModSourceDir)&quot;" />
-    <Message Condition="$(ModFolderExists)" Importance="high"
-             Text="Local mod folder: &quot;$(ModLinkDir)&quot; (a real folder, not a link, left untouched)" />
+    <Message
+      Condition="!$(ModFolderExists)"
+      Importance="high"
+      Text="Linked the mod into the local mods folder of the game: &quot;$(ModLinkDir)&quot; -> &quot;$(ModSourceDir)&quot;"
+    />
+    <Message
+      Condition="$(ModFolderExists)"
+      Importance="high"
+      Text="Local mod folder: &quot;$(ModLinkDir)&quot; (a real folder, not a link, left untouched)"
+    />
   </Target>
 </Project>

@@ -67,16 +67,16 @@ STEAM = HOME / ".steam/steam/steamapps/common"
 if not STEAM.exists():
     STEAM = HOME / ".steam/debian-installation/steamapps/common"
 DS64 = Path(
-    os.environ.get("IMP_DS64", STEAM / "SpaceEngineersDedicatedServer/DedicatedServer64")
+    os.environ.get(
+        "IMP_DS64", STEAM / "SpaceEngineersDedicatedServer/DedicatedServer64"
+    )
 )
 BIN64 = Path(os.environ.get("IMP_BIN64", STEAM / "SpaceEngineers/Bin64"))
 EMPTY_WORLD = DS64.parent / "Content" / "CustomWorlds" / "Empty World"
 GAME_CFG = Path(
     os.environ.get("IMP_GAME_CFG", HOME / ".config/SpaceEngineers/SpaceEngineers.cfg")
 )
-REMOTE_REPO = Path(
-    os.environ.get("IMP_REMOTE_REPO", HOME / "ws/se/se1/plugins/remote")
-)
+REMOTE_REPO = Path(os.environ.get("IMP_REMOTE_REPO", HOME / "ws/se/se1/plugins/remote"))
 DIRECT_TRANSPORT_REPO = Path(
     os.environ.get("IMP_DIRECT_TRANSPORT_REPO", WORKSPACE / "se1" / "direct-transport")
 )

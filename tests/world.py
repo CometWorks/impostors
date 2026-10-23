@@ -62,10 +62,11 @@ class Grid:
 # Near replicates normally, the others are beyond the sync distance
 NEAR = Grid("Near", 120000000000000001, (1500.0, 0.0, 0.0), (4, 3, 6), False, YELLOW)
 SHIP = Grid("Ship", 120000000000000002, (0.0, 0.0, -5000.0), (6, 4, 14), False, RED)
-STATION = Grid("Station", 120000000000000003, (8000.0, 0.0, 0.0), (60, 16, 40), True, BLUE)
+STATION = Grid(
+    "Station", 120000000000000003, (8000.0, 0.0, 0.0), (60, 16, 40), True, BLUE
+)
 FAR = Grid("Far", 120000000000000004, (0.0, 2000.0, 12000.0), (10, 8, 24), True, GREEN)
 GRIDS = (NEAR, SHIP, STATION, FAR)
-
 
 
 def _vec(tag: str, v) -> str:
@@ -137,7 +138,9 @@ def _mods_xml() -> str:
     )
 
 
-def prepare(world: Path, steam_id: int, name: str, grids=GRIDS, mod: bool = True) -> None:
+def prepare(
+    world: Path, steam_id: int, name: str, grids=GRIDS, mod: bool = True
+) -> None:
     """A fresh copy of the Empty World with the player, the grids and the mod
     unless mod is False"""
     if world.exists():

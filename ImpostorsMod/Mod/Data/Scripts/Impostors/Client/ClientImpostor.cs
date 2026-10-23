@@ -31,12 +31,7 @@ namespace Impostors
             Vector3.Forward,
         };
 
-        public static readonly Vector3[] Axis =
-        {
-            Vector3.Right,
-            Vector3.Up,
-            Vector3.Backward,
-        };
+        public static readonly Vector3[] Axis = { Vector3.Right, Vector3.Up, Vector3.Backward };
 
         public static ClientShape Read(ByteReader r, int version)
         {
@@ -63,7 +58,9 @@ namespace Impostors
                 var height = r.Byte();
                 var color = r.UShort();
 
-                int n, u, v;
+                int n,
+                    u,
+                    v;
                 Shape.Axes(face, out n, out u, out v);
 
                 // Center of the quad in cell units: the face plane, then halfway along U and V

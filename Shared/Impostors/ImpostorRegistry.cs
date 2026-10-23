@@ -47,7 +47,12 @@ public sealed class ImpostorRegistry
     // Drops the entries of this source the current scan has not seen
     public void EndScan(ImpostorSource source)
     {
-        foreach (var id in entries.Values.Where(e => e.Source == source && e.LastSeen != scan).Select(e => e.Id).ToList())
+        foreach (
+            var id in entries
+                .Values.Where(e => e.Source == source && e.LastSeen != scan)
+                .Select(e => e.Id)
+                .ToList()
+        )
             entries.Remove(id);
     }
 
@@ -82,7 +87,8 @@ public sealed class ImpostorRegistry
                 && !e.Building
                 && (
                     e.Shapes == null && now - e.LastBuild >= RetrySeconds
-                    || (e.Stale || now - e.LastBuild >= refreshSeconds) && now - e.LastBuild >= rebuildSeconds
+                    || (e.Stale || now - e.LastBuild >= refreshSeconds)
+                        && now - e.LastBuild >= rebuildSeconds
                 )
             )
             .OrderBy(e => e.Shapes != null)

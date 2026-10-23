@@ -92,7 +92,12 @@ public sealed class ImpostorService : IDisposable
         }
 
         // Only a multiplayer server has someone to send impostors to
-        if (instance == null && config.Enabled && Sync.IsServer && Sandbox.Engine.Multiplayer.MyMultiplayer.Static != null)
+        if (
+            instance == null
+            && config.Enabled
+            && Sync.IsServer
+            && Sandbox.Engine.Multiplayer.MyMultiplayer.Static != null
+        )
             instance = new ImpostorService(config, log);
 
         instance?.Update();
@@ -150,7 +155,9 @@ public sealed class ImpostorService : IDisposable
 
         if (message[1] != Protocol.Version)
         {
-            log.Warning($"Player {sender} has Impostors protocol version {message[1]}, the server has {Protocol.Version}");
+            log.Warning(
+                $"Player {sender} has Impostors protocol version {message[1]}, the server has {Protocol.Version}"
+            );
             return;
         }
 
@@ -201,7 +208,10 @@ public sealed class ImpostorService : IDisposable
             candidates.Add((entry, pixels, distance));
         }
 
-        var shown = candidates.OrderByDescending(c => c.pixels).Take(config.MaxImpostorsPerPlayer).ToList();
+        var shown = candidates
+            .OrderByDescending(c => c.pixels)
+            .Take(config.MaxImpostorsPerPlayer)
+            .ToList();
         var shownIds = new HashSet<long>(shown.Select(c => c.entry.Id));
 
         var removed = viewer.Sent.Keys.Where(id => !shownIds.Contains(id)).ToList();

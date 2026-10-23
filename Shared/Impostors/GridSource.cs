@@ -83,7 +83,12 @@ public sealed class GridSource : ImpostorSource
         }
     }
 
-    private static bool Eligible(MyCubeGrid grid) => !grid.Closed && !grid.MarkedForClose && !grid.IsPreview && grid.Projector == null && grid.InScene;
+    private static bool Eligible(MyCubeGrid grid) =>
+        !grid.Closed
+        && !grid.MarkedForClose
+        && !grid.IsPreview
+        && grid.Projector == null
+        && grid.InScene;
 
     public override Func<byte[][]> PrepareBuild(ImpostorEntry entry)
     {
@@ -109,7 +114,8 @@ public sealed class GridSource : ImpostorSource
                     samples.Add(
                         new Sample
                         {
-                            Center = (Vector3)Vector3D.Transform(new Vector3D(x, y, z) * size, toFrame),
+                            Center = (Vector3)
+                                Vector3D.Transform(new Vector3D(x, y, z) * size, toFrame),
                             Size = size,
                             Color = color,
                         }

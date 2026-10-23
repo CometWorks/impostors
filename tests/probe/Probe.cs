@@ -43,7 +43,10 @@ public class Probe : IPlugin
 [HarmonyPatch(typeof(MyWorkshop), nameof(MyWorkshop.DownloadWorldModsBlockingInternal))]
 public static class LocalWorldModsPatch
 {
-    public static bool Prefix(List<MyObjectBuilder_Checkpoint.ModItem> mods, ref MyWorkshop.ResultData __result)
+    public static bool Prefix(
+        List<MyObjectBuilder_Checkpoint.ModItem> mods,
+        ref MyWorkshop.ResultData __result
+    )
     {
         if (mods == null || mods.Count == 0)
             return true;
@@ -55,11 +58,19 @@ public static class LocalWorldModsPatch
         for (var i = 0; i < mods.Count; i++)
         {
             var (mod, path) = paths[i];
-            var item = new MyWorkshopItem { Id = mod.PublishedFileId, Title = mod.FriendlyName ?? mod.Name };
-            AccessTools.PropertySetter(typeof(MyWorkshopItem), nameof(MyWorkshopItem.Folder)).Invoke(item, [path]);
+            var item = new MyWorkshopItem
+            {
+                Id = mod.PublishedFileId,
+                Title = mod.FriendlyName ?? mod.Name,
+            };
+            AccessTools
+                .PropertySetter(typeof(MyWorkshopItem), nameof(MyWorkshopItem.Folder))
+                .Invoke(item, [path]);
             mod.SetModData(item);
             mods[i] = mod;
-            MyLog.Default.WriteLineAndConsole($"ImpostorsProbe: local mod {mod.PublishedFileId} from {path}");
+            MyLog.Default.WriteLineAndConsole(
+                $"ImpostorsProbe: local mod {mod.PublishedFileId} from {path}"
+            );
         }
 
         __result = new MyWorkshop.ResultData(MyGameServiceCallResult.OK, false);
@@ -70,7 +81,8 @@ public static class LocalWorldModsPatch
 [CommandRoot("iprobe", "ImpostorsProbe", "Impostors test hooks")]
 public sealed class ProbeCommands : CommandModule
 {
-    private const BindingFlags Any = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
+    private const BindingFlags Any =
+        BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
 
     private static object Service =>
         AppDomain
@@ -81,11 +93,15 @@ public sealed class ProbeCommands : CommandModule
             .GetValue(null);
 
     private static object Get(object target, string name) =>
-        target.GetType().GetField(name, Any)?.GetValue(target) ?? target.GetType().GetProperty(name, Any)?.GetValue(target);
+        target.GetType().GetField(name, Any)?.GetValue(target)
+        ?? target.GetType().GetProperty(name, Any)?.GetValue(target);
 
     private static string F(double value) => value.ToString("0.#", CultureInfo.InvariantCulture);
 
-    [Command("stats", "The impostor service: entries with their versions, and what each player was sent.")]
+    [Command(
+        "stats",
+        "The impostor service: entries with their versions, and what each player was sent."
+    )]
     [Permission(MyPromoteLevel.Admin)]
     public string Stats()
     {
@@ -95,10 +111,14 @@ public sealed class ProbeCommands : CommandModule
 
         var entries = ((IEnumerable)Get(service, "Entries"))
             .Cast<object>()
-            .Select(e => $"{Get(e, "Id")}:{Get(e, "Version")}:{(Get(e, "Shapes") is byte[][] s ? string.Join("/", s.Select(x => x?.Length ?? 0)) : "-")}");
+            .Select(e =>
+                $"{Get(e, "Id")}:{Get(e, "Version")}:{(Get(e, "Shapes") is byte[][] s ? string.Join("/", s.Select(x => x?.Length ?? 0)) : "-")}"
+            );
         var viewers = ((IDictionary)Get(service, "viewers"))
             .Values.Cast<object>()
-            .Select(v => $"{Get(v, "SteamId")}:{string.Join(",", ((IDictionary)Get(v, "Sent")).Keys.Cast<long>().OrderBy(i => i))}");
+            .Select(v =>
+                $"{Get(v, "SteamId")}:{string.Join(",", ((IDictionary)Get(v, "Sent")).Keys.Cast<long>().OrderBy(i => i))}"
+            );
         return $"Probe stats: entries={string.Join(" ", entries)} viewers={string.Join(" ", viewers)}";
     }
 

@@ -7,7 +7,8 @@
     <LangVersion>14</LangVersion>
 
     <!-- Target platforms on Windows and Linux -->
-    <TargetFrameworks Condition="$([MSBuild]::IsOSPlatform('Windows'))">net48;net10.0</TargetFrameworks>
+    <TargetFrameworks Condition="$([MSBuild]::IsOSPlatform('Windows'))"
+      >net48;net10.0</TargetFrameworks>
     <TargetFramework Condition="!$([MSBuild]::IsOSPlatform('Windows'))">net10.0</TargetFramework>
 
     <!-- Ensure SDK generates assembly attributes (no need for AssemblyInfo) -->
@@ -333,12 +334,18 @@
   -->
 
   <Target Name="ValidateProps" BeforeTargets="PrepareForBuild">
-    <Error Condition="'$(Dedicated64)' == ''"
-           Text="Could not locate the Dedicated Server DedicatedServer64 folder. Set &lt;Dedicated64&gt; in &quot;$(RepoRoot)Directory.Build.props.user&quot;." />
-    <Error Condition="!Exists('$(Dedicated64)')"
-           Text="Invalid Dedicated64 path &quot;$(Dedicated64)&quot; in &quot;$(RepoRoot)Directory.Build.props[.user]&quot;." />
-    <Error Condition="'$(MagnetarBinDir)' == '' Or !Exists('$(MagnetarBinDir)PluginSdk.dll')"
-           Text="Could not locate PluginSdk.dll under &quot;$(MagnetarBinDir)&quot;. Set &lt;Magnetar&gt; to your Magnetar installation folder in &quot;$(RepoRoot)Directory.Build.props.user&quot;." />
+    <Error
+      Condition="'$(Dedicated64)' == ''"
+      Text="Could not locate the Dedicated Server DedicatedServer64 folder. Set &lt;Dedicated64&gt; in &quot;$(RepoRoot)Directory.Build.props.user&quot;."
+    />
+    <Error
+      Condition="!Exists('$(Dedicated64)')"
+      Text="Invalid Dedicated64 path &quot;$(Dedicated64)&quot; in &quot;$(RepoRoot)Directory.Build.props[.user]&quot;."
+    />
+    <Error
+      Condition="'$(MagnetarBinDir)' == '' Or !Exists('$(MagnetarBinDir)PluginSdk.dll')"
+      Text="Could not locate PluginSdk.dll under &quot;$(MagnetarBinDir)&quot;. Set &lt;Magnetar&gt; to your Magnetar installation folder in &quot;$(RepoRoot)Directory.Build.props.user&quot;."
+    />
   </Target>
 
   <!-- Copies the build output into Magnetar's Local plugin folder, which lives in
@@ -348,27 +355,47 @@
        Magnetar scans Local recursively for assemblies and identifies each plugin by
        its DLL file name, so the plugin is deployed flat, with the MagnetarHub
        registration XML next to it as <AssemblyName>.dll.xml. -->
-  <Target Name="DeployPlugin" AfterTargets="Build"
-          Condition="'$(RunPostBuildEvent)' != 'Never' And '$(TargetFramework)' != '' And ('$(TargetFrameworks)' == '' Or !$(TargetFramework.StartsWith('net4')))">
+  <Target
+    Name="DeployPlugin"
+    AfterTargets="Build"
+    Condition="'$(RunPostBuildEvent)' != 'Never' And '$(TargetFramework)' != '' And ('$(TargetFrameworks)' == '' Or !$(TargetFramework.StartsWith('net4')))"
+  >
     <PropertyGroup>
-      <PluginDirectory Condition="'$(MagnetarData)' != '' And Exists('$(MagnetarData)')">$(MagnetarData)$(PathSeparator)Local</PluginDirectory>
+      <PluginDirectory Condition="'$(MagnetarData)' != '' And Exists('$(MagnetarData)')"
+        >$(MagnetarData)$(PathSeparator)Local</PluginDirectory>
       <PluginDataFile>$(RepoRoot)$(AssemblyName)Server.xml</PluginDataFile>
     </PropertyGroup>
 
-    <Message Condition="'$(MagnetarData)' == ''"
-             Text="MagnetarData is not set, the $(TargetFramework) server build will not be deployed." />
-    <Warning Condition="'$(MagnetarData)' != '' And '$(PluginDirectory)' == ''"
-             Text="Magnetar config folder &quot;$(MagnetarData)&quot; does not exist, skipping the deployment of the $(TargetFramework) server build." />
+    <Message
+      Condition="'$(MagnetarData)' == ''"
+      Text="MagnetarData is not set, the $(TargetFramework) server build will not be deployed."
+    />
+    <Warning
+      Condition="'$(MagnetarData)' != '' And '$(PluginDirectory)' == ''"
+      Text="Magnetar config folder &quot;$(MagnetarData)&quot; does not exist, skipping the deployment of the $(TargetFramework) server build."
+    />
 
     <MakeDir Condition="'$(PluginDirectory)' != ''" Directories="$(PluginDirectory)" />
-    <Copy Condition="'$(PluginDirectory)' != ''"
-          SourceFiles="$(TargetPath)" DestinationFolder="$(PluginDirectory)" />
-    <Copy Condition="'$(PluginDirectory)' != '' And Exists('$(TargetDir)$(TargetName).pdb')"
-          SourceFiles="$(TargetDir)$(TargetName).pdb" DestinationFolder="$(PluginDirectory)" />
-    <Copy Condition="'$(PluginDirectory)' != '' And Exists('$(PluginDataFile)')"
-          SourceFiles="$(PluginDataFile)" DestinationFiles="$(PluginDirectory)$(PathSeparator)$(TargetFileName).xml" />
-    <Message Condition="'$(PluginDirectory)' != ''" Importance="high"
-             Text="Deployed the $(TargetFramework) server build to &quot;$(PluginDirectory)&quot;" />
+    <Copy
+      Condition="'$(PluginDirectory)' != ''"
+      SourceFiles="$(TargetPath)"
+      DestinationFolder="$(PluginDirectory)"
+    />
+    <Copy
+      Condition="'$(PluginDirectory)' != '' And Exists('$(TargetDir)$(TargetName).pdb')"
+      SourceFiles="$(TargetDir)$(TargetName).pdb"
+      DestinationFolder="$(PluginDirectory)"
+    />
+    <Copy
+      Condition="'$(PluginDirectory)' != '' And Exists('$(PluginDataFile)')"
+      SourceFiles="$(PluginDataFile)"
+      DestinationFiles="$(PluginDirectory)$(PathSeparator)$(TargetFileName).xml"
+    />
+    <Message
+      Condition="'$(PluginDirectory)' != ''"
+      Importance="high"
+      Text="Deployed the $(TargetFramework) server build to &quot;$(PluginDirectory)&quot;"
+    />
   </Target>
 
   <Import Project="..\Shared\Shared.projitems" Label="Shared" />
