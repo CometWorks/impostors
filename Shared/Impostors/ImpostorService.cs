@@ -69,7 +69,7 @@ public sealed class ImpostorService : IDisposable
         if (config.Grids)
             sources.Add(new GridSource(config));
         if (config.Asteroids)
-            sources.Add(new VoxelSource());
+            sources.Add(new VoxelSource(config));
 
         MyAPIGateway.Multiplayer.RegisterSecureMessageHandler(Protocol.Channel, OnMessage);
         log.Info($"Impostors service started, instance {instanceId:x16}");

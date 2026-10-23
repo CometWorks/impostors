@@ -26,6 +26,7 @@ public class PluginConfig : IPluginConfig
     private bool enabled = true;
     private bool grids = true;
     private bool asteroids = true;
+    private bool asteroidOcclusion;
     private int minBlocks = 8;
     private float maxDistance;
     private float minPixels = 3f;
@@ -52,6 +53,12 @@ public class PluginConfig : IPluginConfig
     {
         get => asteroids;
         set => SetValue(ref asteroids, value);
+    }
+
+    public bool AsteroidOcclusion
+    {
+        get => asteroidOcclusion;
+        set => SetValue(ref asteroidOcclusion, value);
     }
 
     public int MinBlocks

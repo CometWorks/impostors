@@ -26,6 +26,7 @@ How it works, its limits and the plans for clusters: [Docs/Design.md](Docs/Desig
 | `Enabled` | true | Turns the plugin on |
 | `Grids` | true | Impostors of grids |
 | `Asteroids` | true | Impostors of asteroids |
+| `AsteroidOcclusion` | false | Darkens pits and crevices of asteroid impostors, doubles their build time |
 | `MinBlocks` | 8 | Grid groups with fewer blocks are not shown |
 | `MaxDistance` | 0 | Farthest impostor in meters, 0 is the world's view distance |
 | `MinPixels` | 3 | Impostors less than this many pixels across on a 1080p screen are not sent |

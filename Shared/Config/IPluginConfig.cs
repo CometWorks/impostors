@@ -13,6 +13,10 @@ public interface IPluginConfig : INotifyPropertyChanged
     // Sends impostors of asteroids (voxel maps other than planets)
     bool Asteroids { get; set; }
 
+    // Bakes ambient occlusion into asteroid impostor colors: pits and crevices darken a little,
+    // building takes about twice as long
+    bool AsteroidOcclusion { get; set; }
+
     // Grid groups with fewer blocks are not shown
     int MinBlocks { get; set; }
 

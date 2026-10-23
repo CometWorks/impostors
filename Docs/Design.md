@@ -195,6 +195,10 @@ from afar anyway.
   small table (stone, iron, ice and the rest), on a background thread.
 - Quads are shaded with smoothed normals: an asteroid seen along an axis would otherwise be
   one flat color.
+- With `AsteroidOcclusion` on, their colors get ambient occlusion baked in, so pits and
+  crevices darken like the real ones. It's off by default: in 8-direction comparisons it made
+  the impostors closer to the real asteroids at some distances and farther at others, for twice
+  the build time.
 - Signature: a counter of the storage's `RangeChanged` events, so mining or a blast rebuilds it
   (at most every `RebuildSeconds`).
 - Frame: the voxel map's world matrix; asteroids don't move.

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using Impostors;
 using Sandbox.Definitions;
 using Sandbox.Game.Entities;
+using Shared.Config;
 using VRage.Game;
 using VRage.ModAPI;
 using VRage.Voxels;
@@ -34,8 +35,15 @@ public sealed class VoxelSource : ImpostorSource
 
     private static readonly Vector3I Stone = OreColors["Stone"];
 
+    private readonly IPluginConfig config;
+
     // Storage edits seen per voxel map, the signature of its entry
     private readonly Dictionary<long, int> edits = new();
+
+    public VoxelSource(IPluginConfig config)
+    {
+        this.config = config;
+    }
 
     public override ImpostorKind Kind => ImpostorKind.Voxel;
 
@@ -99,14 +107,16 @@ public sealed class VoxelSource : ImpostorSource
                     : Stone;
         }
 
-        return () => Build(storage, size, corner, colors);
+        var occluded = config.AsteroidOcclusion;
+        return () => Build(storage, size, corner, colors, occluded);
     }
 
     private static byte[][] Build(
         IMyStorage storage,
         Vector3I size,
         Vector3 corner,
-        Vector3I[] colors
+        Vector3I[] colors,
+        bool occluded
     )
     {
         var shapes = new byte[ImpostorEntry.Lods.Length][];
@@ -141,7 +151,7 @@ public sealed class VoxelSource : ImpostorSource
                     colors[data.Material(ref p)]
                 );
             }
-            shapes[i] = volume.ToShape(smooth: true);
+            shapes[i] = volume.ToShape(smooth: true, occluded);
 
             if (voxelLod == 0)
                 break;
