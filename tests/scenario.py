@@ -127,12 +127,28 @@ def run(api):
         world.NEAR.entity_id not in impostors,
         impostors.get(world.NEAR.entity_id, ""),
     )
+
+    # Asteroids: the far one is beyond the range vanilla replicates saved asteroids to
+    rock = world.ROCK_FAR
+    totals, impostors = wait_stats(lambda i: drawn(i, rock), 90)
+    check(
+        "impostor RockFar",
+        drawn(impostors, rock) and impostors[rock.entity_id]["kind"] == "Voxel",
+        impostors.get(rock.entity_id, "missing"),
+    )
+    check(
+        "no impostor RockNear",
+        world.ROCK_NEAR.entity_id not in impostors,
+        impostors.get(world.ROCK_NEAR.entity_id, ""),
+    )
     check("quads drawn", int(totals.get("quads", 0)) > 0, totals)
     check("quad budget from the server", totals.get("maxquads") == "20000", totals)
     print("server:", command(api, "!iprobe stats"))
 
     for g in far + (world.NEAR,):
         print("screenshot", shot(api, f"home-{g.name}", g.position))
+    for a in world.ASTEROIDS:
+        print("screenshot", shot(api, f"home-{a.name}", a.center))
 
     # Closer, still beyond the sync distance: the impostor is larger on screen. Grids start
     # at level 16, which the station has at 8 km.

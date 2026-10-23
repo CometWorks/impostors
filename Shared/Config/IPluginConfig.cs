@@ -10,6 +10,9 @@ public interface IPluginConfig : INotifyPropertyChanged
     // Sends impostors of grids
     bool Grids { get; set; }
 
+    // Sends impostors of asteroids (voxel maps other than planets)
+    bool Asteroids { get; set; }
+
     // Grid groups with fewer blocks are not shown
     int MinBlocks { get; set; }
 

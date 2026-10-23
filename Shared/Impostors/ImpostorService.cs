@@ -68,6 +68,8 @@ public sealed class ImpostorService : IDisposable
         registry = new ImpostorRegistry(log);
         if (config.Grids)
             sources.Add(new GridSource(config));
+        if (config.Asteroids)
+            sources.Add(new VoxelSource());
 
         MyAPIGateway.Multiplayer.RegisterSecureMessageHandler(Protocol.Channel, OnMessage);
         log.Info($"Impostors service started, instance {instanceId:x16}");
@@ -194,11 +196,22 @@ public sealed class ImpostorService : IDisposable
         var half = Math.Max(0, settings.SyncDistance - config.ReplicationMargin);
         var replicated = new BoundingBoxD(eye - half, eye + half);
 
+        // Saved and edited asteroids replicate farther: MyVoxelReplicable inflates their AABB
+        var voxelHalf = Math.Max(
+            half,
+            settings.ViewDistance / Math.Sqrt(3) - config.ReplicationMargin
+        );
+        var voxelReplicated = new BoundingBoxD(eye - voxelHalf, eye + voxelHalf);
+
         var candidates = new List<(ImpostorEntry entry, double pixels, double distance)>();
         foreach (var entry in registry.Entries)
         {
             // The client has the real entity, or will have it soon
-            if (entry.WorldAabb.Intersects(replicated))
+            if (
+                entry.WorldAabb.Intersects(
+                    entry.Kind == ImpostorKind.Voxel ? voxelReplicated : replicated
+                )
+            )
                 continue;
 
             var radius = entry.WorldAabb.HalfExtents.Length();

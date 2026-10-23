@@ -69,6 +69,31 @@ FAR = Grid("Far", 120000000000000004, (0.0, 2000.0, 12000.0), (10, 8, 24), True,
 GRIDS = (NEAR, SHIP, STATION, FAR)
 
 
+@dataclass
+class Asteroid:
+    name: str
+    entity_id: int
+    # Its min corner, the voxel map's PositionLeftBottomCorner
+    position: tuple[float, float, float]
+    file: str
+
+    @property
+    def center(self):
+        # Asteroid512-* storages are 512 voxels (meters) on a side
+        return tuple(c + 256 for c in self.position)
+
+
+# Saved asteroids replicate to about ViewDistance/sqrt(3) = 8.66 km per axis
+ROCK_FAR = Asteroid(
+    "RockFar", 130000000000000001, (-11256.0, -256.0, -256.0), "Asteroid512-001.vx2"
+)
+ROCK_NEAR = Asteroid(
+    "RockNear", 130000000000000002, (-4256.0, -256.0, 3000.0), "Asteroid512-013.vx2"
+)
+ASTEROIDS = (ROCK_FAR, ROCK_NEAR)
+VOXEL_MAPS = rig.DS64.parent / "Content" / "VoxelMaps"
+
+
 def _vec(tag: str, v) -> str:
     return f'<{tag} x="{v[0]}" y="{v[1]}" z="{v[2]}" />'
 
@@ -110,6 +135,21 @@ def _grid_xml(g: Grid) -> str:
     )
 
 
+def _asteroid_xml(a: Asteroid) -> str:
+    return (
+        '<MyObjectBuilder_EntityBase xsi:type="MyObjectBuilder_VoxelMap">'
+        f"<SubtypeName /><EntityId>{a.entity_id}</EntityId>"
+        "<PersistentFlags>CastShadows InScene</PersistentFlags>"
+        "<PositionAndOrientation>"
+        + _vec("Position", a.position)
+        + _vec("Forward", (0, 0, -1))
+        + _vec("Up", (0, 1, 0))
+        + "</PositionAndOrientation>"
+        f"<StorageName>{a.name}</StorageName><MutableStorage>true</MutableStorage>"
+        "</MyObjectBuilder_EntityBase>"
+    )
+
+
 def _insert(text: str, tag: str, content: str) -> str:
     """Puts content at the start of the first <tag> element, opening an empty
     <tag /> if need be"""
@@ -139,10 +179,15 @@ def _mods_xml() -> str:
 
 
 def prepare(
-    world: Path, steam_id: int, name: str, grids=GRIDS, mod: bool = True
+    world: Path,
+    steam_id: int,
+    name: str,
+    grids=GRIDS,
+    asteroids=ASTEROIDS,
+    mod: bool = True,
 ) -> None:
-    """A fresh copy of the Empty World with the player, the grids and the mod
-    unless mod is False"""
+    """A fresh copy of the Empty World with the player, the grids, the asteroids
+    and the mod unless mod is False"""
     if world.exists():
         shutil.rmtree(world)
     shutil.copytree(rig.EMPTY_WORLD, world)
@@ -151,8 +196,13 @@ def prepare(
 
     sector = world / "SANDBOX_0_0_0_.sbs"
     text = sector.read_text(encoding="utf-8")
-    text = _insert(text, "SectorObjects", "".join(_grid_xml(g) for g in grids))
+    objects = "".join(_grid_xml(g) for g in grids) + "".join(
+        _asteroid_xml(a) for a in asteroids
+    )
+    text = _insert(text, "SectorObjects", objects)
     sector.write_text(text, encoding="utf-8")
+    for a in asteroids:
+        shutil.copy(VOXEL_MAPS / a.file, world / f"{a.name}.vx2")
 
     for file in ("Sandbox.sbc", "Sandbox_config.sbc"):
         path = world / file
