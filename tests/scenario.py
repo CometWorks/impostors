@@ -80,7 +80,7 @@ def shot(api, name: str, target) -> Path:
     time.sleep(2)
     SHOTS.mkdir(parents=True, exist_ok=True)
     path = SHOTS / f"{name}.png"
-    path.write_bytes(api.screenshot_bytes())
+    path.write_bytes(api.screenshot_bytes(ignore_sprites=True))
     return path
 
 
@@ -204,10 +204,29 @@ def run(api):
     print("screenshot", shot(api, "home-Station-repainted", station.position))
 
 
+def run_plugin(api):
+    """The client plugin's copy of the renderer, on a world without the mod. The copy
+    writes no stats: its hello shows it runs, the server's sent list and the screenshots
+    show the rest."""
+    api.character_teleport(*world.HOME)
+    time.sleep(3)
+    log = lambda: SERVER.game_log().read_text(errors="replace")
+    check(
+        "hello", wait(lambda: f"Player {CLIENT.steam_id} draws impostors" in log(), 90)
+    )
+
+    far = (world.SHIP, world.STATION, world.FAR)
+    sent = lambda: command(api, "!iprobe stats").split("viewers=")[-1]
+    reply = wait(lambda: all(str(g.entity_id) in sent() for g in far) and sent(), 90)
+    check("server sent the far grids", bool(reply), reply)
+    for g in far:
+        print("screenshot", shot(api, f"plugin-home-{g.name}", g.position))
+
+
 def main():
     try:
         api = start()
-        run(api)
+        (run_plugin if PLUGIN else run)(api)
     finally:
         if os.environ.get("IMP_KEEP") != "1":
             CLIENT.stop()
