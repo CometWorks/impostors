@@ -25,6 +25,7 @@ The image lands in ~/.se-test/<task>-shots/compare-<name>.png.
 
 from __future__ import annotations
 
+import json
 import math
 import os
 import re
@@ -46,6 +47,9 @@ ASTEROID = TARGET.removeprefix("asteroid:") if TARGET.startswith("asteroid:") el
 NAME = (ASTEROID.removesuffix(".vx2") if ASTEROID else Path(TARGET).name).replace(
     " ", "-"
 )
+# Tells runs with other settings apart, for example another sun
+if os.environ.get("IMP_TAG"):
+    NAME += "-" + os.environ["IMP_TAG"]
 DISTANCES = [float(d) for d in sys.argv[2:]] or [
     100,
     200,
@@ -59,15 +63,37 @@ DISTANCES = [float(d) for d in sys.argv[2:]] or [
 ]
 
 SERVER = rig.Server()
-CLIENT = rig.Client(1, "Alpha", quality="high")
+# Medium: on the high preset the headless client (integrated GPU) draws asteroids without
+# sunlight. Low and minimal may break other rendering.
+CLIENT = rig.Client(1, "Alpha", quality="medium")
 SHOTS = rig.TEST_ROOT / f"{rig.TASK}-shots"
 
-# The grid's position, and the direction the player looks at it from: a three quarter
-# view, so no face is seen edge on
 GRID_POSITION = (2000.0, 0.0, 0.0)
-VIEW_FROM = (-0.6, 0.35, 0.72)
 
-CELL = 400  # Side of one image cell, pixels
+# The directions the player looks at the target from, at every distance: the 8 cube corners
+# by default, which put the sun in front, behind and to the sides; "faces" for the 6 cube
+# faces, or explicit "x,y,z;x,y,z"
+CORNERS = [(x, y, z) for x in (1, -1) for y in (1, -1) for z in (1, -1)]
+FACES = [(1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)]
+_directions = os.environ.get("IMP_DIRECTIONS", "corners")
+DIRECTIONS = (
+    CORNERS
+    if _directions == "corners"
+    else (
+        FACES
+        if _directions == "faces"
+        else [tuple(float(v) for v in d.split(",")) for d in _directions.split(";")]
+    )
+)
+
+# Direction towards the sun, by default the Empty World's
+SUN = (
+    tuple(float(v) for v in os.environ["IMP_SUN"].split(","))
+    if os.environ.get("IMP_SUN")
+    else None
+)
+
+CELL = 180  # Side of one image cell, pixels
 
 
 def blueprint_xml(path: Path, position) -> tuple[str, list[int]]:
@@ -168,7 +194,21 @@ def main() -> None:
     )
     SHOTS.mkdir(parents=True, exist_ok=True)
 
-    rows = []
+    if SUN:
+        sandbox = SERVER.world / "Sandbox.sbc"
+        x, y, z = normalize(SUN)
+        vector = f'x="{x}" y="{y}" z="{z}"'
+        text = re.sub(
+            r"<(BaseSunDirection|SunDirectionNormalized) [^/]*/>",
+            rf"<\1 {vector} />",
+            sandbox.read_text(encoding="utf-8"),
+        )
+        sandbox.write_text(text, encoding="utf-8")
+
+    shots = (
+        {}
+    )  # (direction index, distance) -> (real row, real shot, impostor row, impostor shot)
+    sun = None
     try:
         SERVER.start()
         CLIENT.launch(SERVER.port)
@@ -177,76 +217,132 @@ def main() -> None:
         rig.ensure_character(api)
         rig.focus_gameplay(api)
 
-        norm = math.sqrt(sum(v * v for v in VIEW_FROM))
-        direction = [v / norm for v in VIEW_FROM]
-        # Sideways: across the view direction, in the horizontal plane
-        side = [-direction[2], 0.0, direction[0]]
-        side_norm = math.sqrt(sum(v * v for v in side))
-        shift = [v / side_norm * shift_length for v in side]
-        for distance in DISTANCES:
-            eye = [p + d * distance for p, d in zip(GRID_POSITION, direction)]
-            write_mode("real")
-            api.character_teleport(*eye)
-            time.sleep(3)
-            api.character_look_at(*GRID_POSITION, tolerance=0.2)
-            real = wait_row(main_id, lambda r: r.get("real") == "1" and "screen" in r)
-            time.sleep(2)
-            real = stats_row(main_id) or real
-            real_shot = shoot(api, f"compare-{NAME}-{int(distance)}-real")
+        for index, view in enumerate(DIRECTIONS):
+            direction = normalize(view)
+            # Sideways: across the view direction, in the horizontal plane if possible
+            side = [-direction[2], 0.0, direction[0]]
+            if sum(v * v for v in side) < 0.01:
+                side = [1.0, 0.0, 0.0]
+            shift = [v * shift_length for v in normalize(side)]
+            for distance in DISTANCES:
+                eye = [p + d * distance for p, d in zip(GRID_POSITION, direction)]
+                write_mode("real")
+                real = look(api, main_id, eye, GRID_POSITION, distance)
+                real_shot = shoot(api, f"compare-{NAME}-{index}-{int(distance)}-real")
 
-            if ASTEROID:
-                write_mode("shift " + " ".join(f"{v:.0f}" for v in shift))
-                api.character_teleport(*[e + v for e, v in zip(eye, shift)])
-                time.sleep(3)
-                api.character_look_at(
-                    *[p + v for p, v in zip(GRID_POSITION, shift)], tolerance=0.2
+                if ASTEROID:
+                    write_mode("shift " + " ".join(f"{v:.0f}" for v in shift))
+                    impostor = look(
+                        api,
+                        main_id,
+                        [e + v for e, v in zip(eye, shift)],
+                        [p + v for p, v in zip(GRID_POSITION, shift)],
+                        distance,
+                        drawn=True,
+                    )
+                else:
+                    write_mode("impostor")
+                    impostor = look(
+                        api, main_id, None, GRID_POSITION, distance, drawn=True
+                    )
+                impostor_shot = shoot(
+                    api, f"compare-{NAME}-{index}-{int(distance)}-impostor"
                 )
-            else:
-                write_mode("impostor")
-            impostor = wait_row(main_id, lambda r: r.get("drawn") == "1")
-            time.sleep(2)
-            impostor = stats_row(main_id) or impostor
-            impostor_shot = shoot(api, f"compare-{NAME}-{int(distance)}-impostor")
-            print(f"{distance:.0f} m: real {real}\n  impostor {impostor}", flush=True)
-            rows.append((distance, real, real_shot, impostor, impostor_shot))
+                print(f"{view} {distance:.0f} m: {impostor.get('lod')}", flush=True)
+                shots[index, distance] = (real, real_shot, impostor, impostor_shot)
         write_mode("real")
+        sun = SUN or tuple(
+            float(v) for v in CLIENT.stats()[0].get("sun", "0,1,0").split(",")
+        )
     finally:
         if os.environ.get("IMP_KEEP") != "1":
             CLIENT.stop()
             SERVER.stop()
 
-    compose(rows, SHOTS / f"compare-{NAME}.png")
+    compose(shots, sun, SHOTS / f"compare-{NAME}.png")
+    # The stats of every shot, for measuring them later
+    (SHOTS / f"compare-{NAME}.json").write_text(
+        json.dumps(
+            {
+                "sun": sun,
+                "directions": DIRECTIONS,
+                "shots": [
+                    {"direction": i, "distance": d, "real": r, "impostor": m}
+                    for (i, d), (r, _, m, _) in shots.items()
+                ],
+            },
+            indent=1,
+        )
+    )
 
 
-def compose(rows, target: Path) -> None:
+def normalize(v):
+    length = math.sqrt(sum(x * x for x in v))
+    return [x / length for x in v]
+
+
+def look(api, entity_id, eye, target, distance, drawn=False) -> dict:
+    """Moves the player (unless eye is None), aims at the target and waits for stats of
+    this view: the target near the screen center at the right distance"""
+    if eye is not None:
+        api.character_teleport(*eye)
+        time.sleep(2)
+    api.character_look_at(*target, tolerance=0.2)
+
+    def ready(row):
+        if "screen" not in row or row["screen"] == "behind":
+            return False
+        x, y = (float(v) for v in row["screen"].split(","))
+        w, h = (float(v) for v in row["viewport"].split("x"))
+        centered = abs(x - w / 2) < 60 and abs(y - h / 2) < 60
+        near = abs(float(row["distance"]) - distance) < max(30, distance * 0.05)
+        return centered and near and (not drawn or row.get("drawn") == "1")
+
+    row = wait_row(entity_id, ready)
+    time.sleep(1.5)
+    return stats_row(entity_id) or row
+
+
+def compose(shots, sun, target: Path) -> None:
+    """A row per distance; per direction a real and an impostor cell"""
     from PIL import Image, ImageDraw
 
-    label = 200
-    sheet = Image.new(
-        "RGB", (label + 2 * CELL + 10, len(rows) * (CELL + 10) + 30), "white"
-    )
+    label, gap, pair_gap, header = 150, 4, 16, 44
+    pair = 2 * CELL + gap
+    width = label + len(DIRECTIONS) * (pair + pair_gap)
+    height = header + len(DISTANCES) * (CELL + gap)
+    sheet = Image.new("RGB", (width, height), "white")
     draw = ImageDraw.Draw(sheet)
-    draw.text((label + CELL // 2 - 20, 8), "real", fill="black")
-    draw.text((label + CELL + 10 + CELL // 2 - 30, 8), "impostor", fill="black")
-    for i, (distance, real, real_shot, impostor, impostor_shot) in enumerate(rows):
-        top = 30 + i * (CELL + 10)
-        cells = []
-        for row, shot in ((real, real_shot), (impostor, impostor_shot)):
-            try:
-                cells.append(crop(shot, row))
-            except (KeyError, ValueError):
-                cells.append((Image.new("RGB", (CELL, CELL), "gray"), 0.0))
-        (real_cell, radius), (impostor_cell, _) = cells
-        sheet.paste(real_cell, (label, top))
-        sheet.paste(impostor_cell, (label + CELL + 10, top))
-        shape = impostor.get("shape", "none").split("/")
-        quads = shape[2] if len(shape) == 3 else "?"
-        level = impostor.get("lod", "?")
-        if real.get("lod") not in (None, level):
-            level += f" ({real['lod']} at this distance)"
+    sun = normalize(sun)
+    for index, view in enumerate(DIRECTIONS):
+        left = label + index * (pair + pair_gap)
+        angle = math.degrees(
+            math.acos(max(-1, min(1, sum(a * b for a, b in zip(normalize(view), sun)))))
+        )
+        name = "".join(f"{'+' if v > 0 else '-'}{a}" for v, a in zip(view, "XYZ") if v)
+        draw.text((left, 4), f"from {name}, {angle:.0f} deg from the sun", fill="black")
+        draw.text((left + CELL // 2 - 12, 24), "real", fill="black")
+        draw.text((left + CELL + gap + CELL // 2 - 24, 24), "impostor", fill="black")
+    for row_index, distance in enumerate(DISTANCES):
+        top = header + row_index * (CELL + gap)
+        radius, level = 0.0, "?"
+        for index in range(len(DIRECTIONS)):
+            left = label + index * (pair + pair_gap)
+            real, real_shot, impostor, impostor_shot = shots[index, distance]
+            for column, (row, shot) in enumerate(
+                ((real, real_shot), (impostor, impostor_shot))
+            ):
+                try:
+                    cell, r = crop(shot, row)
+                except (KeyError, ValueError):
+                    cell, r = Image.new("RGB", (CELL, CELL), "gray"), 0.0
+                sheet.paste(cell, (left + column * (CELL + gap), top))
+                if column == 0:
+                    radius = max(radius, r)
+            level = impostor.get("lod", level)
         draw.multiline_text(
-            (10, top + 10),
-            f"{distance:.0f} m\nradius {radius:.1f} px\nlevel {level}\n{quads} quads",
+            (8, top + 8),
+            f"{distance:.0f} m\nradius {radius:.1f} px\nlevel {level}",
             fill="black",
             spacing=6,
         )

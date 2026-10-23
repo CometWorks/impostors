@@ -175,6 +175,15 @@ namespace Impostors
             }
         }
 
+        private static string Vec(Vector3 v)
+        {
+            return v.X.ToString("0.000")
+                + ","
+                + v.Y.ToString("0.000")
+                + ","
+                + v.Z.ToString("0.000");
+        }
+
         // Where an impostor is on screen, in pixels, and its radius there
         private string ScreenPosition(ImpostorState state)
         {
@@ -221,6 +230,8 @@ namespace Impostors
                     + drawnQuads
                     + " maxquads="
                     + maxQuads
+                    + " sun="
+                    + Vec(MyVisualScriptLogicProvider.GetSunDirection())
             );
             foreach (var impostor in impostors.Values)
             {
