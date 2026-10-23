@@ -15,20 +15,21 @@ namespace Shared.Impostors;
 // about ViewDistance/√3 (MyVoxelReplicable). Planets are drawn by the game from afar anyway.
 public sealed class VoxelSource : ImpostorSource
 {
-    // Colors by the material's mined ore, the rest are stone
+    // Colors by the material's mined ore, the rest are stone. Stone is fitted to screenshots of
+    // real asteroids from 8 directions (a neutral gray the 4 bit quantization keeps exact), the ores keep their hues at about the same brightness.
     private static readonly Dictionary<string, Vector3I> OreColors = new()
     {
-        ["Stone"] = new Vector3I(105, 100, 95),
-        ["Iron"] = new Vector3I(115, 90, 75),
-        ["Nickel"] = new Vector3I(125, 120, 105),
-        ["Cobalt"] = new Vector3I(80, 90, 115),
-        ["Magnesium"] = new Vector3I(150, 150, 145),
-        ["Silicon"] = new Vector3I(135, 135, 145),
-        ["Silver"] = new Vector3I(170, 170, 175),
-        ["Gold"] = new Vector3I(180, 150, 70),
-        ["Platinum"] = new Vector3I(175, 180, 190),
-        ["Uranium"] = new Vector3I(85, 105, 70),
-        ["Ice"] = new Vector3I(205, 220, 235),
+        ["Stone"] = new Vector3I(170, 170, 170),
+        ["Iron"] = new Vector3I(178, 144, 123),
+        ["Nickel"] = new Vector3I(187, 180, 162),
+        ["Cobalt"] = new Vector3I(128, 144, 183),
+        ["Magnesium"] = new Vector3I(200, 200, 194),
+        ["Silicon"] = new Vector3I(191, 191, 202),
+        ["Silver"] = new Vector3I(204, 204, 208),
+        ["Gold"] = new Vector3I(208, 174, 85),
+        ["Platinum"] = new Vector3I(204, 208, 217),
+        ["Uranium"] = new Vector3I(136, 166, 110),
+        ["Ice"] = new Vector3I(200, 208, 217),
     };
 
     private static readonly Vector3I Stone = OreColors["Stone"];
