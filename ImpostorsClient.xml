@@ -5,29 +5,28 @@
     <Id>66AA3D09-1732-445D-A2B6-A377B31AE76C</Id>
 
     <!-- GitHub repository ID -->
-    <RepoId>todo-github-user/project-name</RepoId>
+    <RepoId>viktor-ferenczi/impostors</RepoId>
 
     <!-- The name of your plugin that will appear in the plugin list -->
-    <FriendlyName>TODO ImpostorsClient</FriendlyName>
+    <FriendlyName>Impostors</FriendlyName>
 
     <!-- The author name that you want to appear in the plugin list -->
-    <Author>TODO Author Name</Author>
+    <Author>Viktor</Author>
 
     <!-- Optional tooltip for the plugin in the plugin list -->
-    <Tooltip>TODO Short description</Tooltip>
+    <Tooltip>Shows far grids and asteroids beyond the sync distance as impostors</Tooltip>
 
     <!-- Optional plugin description. If omitted, this will be the same as the Tooltip. 1000 characters max. -->
-    <Description>TODO Long description, multiple lines.
-
-        This text is shown on the plugin details panel in a scrollable text box.
-
-        You can use links here, players can click on them. For example, add a Discord invite.
+    <Description>Shows grids and asteroids beyond the sync distance as impostors on servers running the
+        Impostors server plugin, even when the world doesn't have the Impostors mod. When hosting a
+        lobby, sends impostors to the players who joined.
     </Description>
 
     <!-- Only source code in the Directory entries listed in SourceDirectories is compiled. Exclude any test projects or similar. -->
     <SourceDirectories>
         <Directory>ClientPlugin</Directory>
         <Directory>Shared</Directory>
+        <Directory>ImpostorsMod/Mod/Data/Scripts/Impostors</Directory>
     </SourceDirectories>
 
     <!-- To specify asset files to be copied onto disk, use the AssetFolder tag.

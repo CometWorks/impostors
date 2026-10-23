@@ -19,6 +19,10 @@
          holding Local, Sources and Profiles, usually the Magnetar subfolder of the folder
          above (empty = no deployment) -->
     <MagnetarData></MagnetarData>
+
+    <!-- Local mods folder of the game, ImpostorsMod/Mod is linked into it as Impostors
+         after each build of the mod project (empty = auto-detect) -->
+    <Mods></Mods>
   </PropertyGroup>
 
   <!-- Plugin version (committed, shared by all contributors) -->
@@ -109,6 +113,13 @@
        launcher has its own Libraries subfolder, Linux ships only MagnetarInterim. -->
   <PropertyGroup Condition="'$(MagnetarBin)' == '' and '$(Magnetar)' != '' and '$(MagnetarLauncher)' != ''">
     <MagnetarBin>$(Magnetar)$(PathSeparator)Libraries$(PathSeparator)$(MagnetarLauncher)</MagnetarBin>
+  </PropertyGroup>
+
+  <!-- Local mods folder: the native Linux client (Pulsar Interim) keeps its user data in
+       ~/.config/SpaceEngineers, Windows in %APPDATA%\SpaceEngineers -->
+  <PropertyGroup>
+    <Mods Condition="'$(Mods)' == '' and $([MSBuild]::IsOSPlatform('Windows')) and '$(APPDATA)' != ''">$(APPDATA)\SpaceEngineers\Mods</Mods>
+    <Mods Condition="'$(Mods)' == '' and !$([MSBuild]::IsOSPlatform('Windows')) and '$(HOME)' != ''">$(HOME)/.config/SpaceEngineers/Mods</Mods>
   </PropertyGroup>
 
   <!-- Reference folders with a trailing directory separator, for use in HintPath -->

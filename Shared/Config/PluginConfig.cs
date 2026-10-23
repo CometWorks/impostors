@@ -20,17 +20,19 @@ public class PluginConfig : IPluginConfig
 
     private void OnPropertyChanged([CallerMemberName] string propName = "")
     {
-        PropertyChangedEventHandler propertyChanged = PropertyChanged;
-        if (propertyChanged == null)
-            return;
-
-        propertyChanged(this, new PropertyChangedEventArgs(propName));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propName));
     }
 
     private bool enabled = true;
-    // TODO: Implement your config fields here
-    // The default values here will apply to Client and Dedicated.
-    // The default values for Torch are defined in TorchPlugin.
+    private bool grids = true;
+    private int minBlocks = 8;
+    private float maxDistance;
+    private float minPixels = 2f;
+    private int maxImpostorsPerPlayer = 200;
+    private int shapeBytesPerSecond = 32 * 1024;
+    private int rebuildSeconds = 60;
+    private int refreshSeconds = 600;
+    private float replicationMargin = 500f;
 
     public bool Enabled
     {
@@ -38,5 +40,57 @@ public class PluginConfig : IPluginConfig
         set => SetValue(ref enabled, value);
     }
 
-    // TODO: Encapsulate your config fields as properties here
+    public bool Grids
+    {
+        get => grids;
+        set => SetValue(ref grids, value);
+    }
+
+    public int MinBlocks
+    {
+        get => minBlocks;
+        set => SetValue(ref minBlocks, value);
+    }
+
+    public float MaxDistance
+    {
+        get => maxDistance;
+        set => SetValue(ref maxDistance, value);
+    }
+
+    public float MinPixels
+    {
+        get => minPixels;
+        set => SetValue(ref minPixels, value);
+    }
+
+    public int MaxImpostorsPerPlayer
+    {
+        get => maxImpostorsPerPlayer;
+        set => SetValue(ref maxImpostorsPerPlayer, value);
+    }
+
+    public int ShapeBytesPerSecond
+    {
+        get => shapeBytesPerSecond;
+        set => SetValue(ref shapeBytesPerSecond, value);
+    }
+
+    public int RebuildSeconds
+    {
+        get => rebuildSeconds;
+        set => SetValue(ref rebuildSeconds, value);
+    }
+
+    public int RefreshSeconds
+    {
+        get => refreshSeconds;
+        set => SetValue(ref refreshSeconds, value);
+    }
+
+    public float ReplicationMargin
+    {
+        get => replicationMargin;
+        set => SetValue(ref replicationMargin, value);
+    }
 }

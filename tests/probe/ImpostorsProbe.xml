@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<PluginData
+  xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:type="GitHubPlugin"
+>
+  <!-- Test-only server plugin of the Impostors suite, loaded as a dev folder.
+         Never published to a hub. -->
+  <Id>5B1E3C7A-9D2F-4E61-8A47-2C0F9B6D1E35</Id>
+  <RepoId>viktor-ferenczi/impostors</RepoId>
+  <FriendlyName>Impostors Probe</FriendlyName>
+  <Author>Viktor</Author>
+  <Tooltip>Test hooks for the Impostors test suite</Tooltip>
+  <Commit>TODO Git commit hash</Commit>
+</PluginData>

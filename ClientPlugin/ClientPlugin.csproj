@@ -245,6 +245,11 @@
     <None Include="App.config" />
   </ItemGroup>
 
+  <!-- The renderer of the Impostors mod, for servers whose world doesn't list the mod -->
+  <ItemGroup>
+    <Compile Include="..\ImpostorsMod\Mod\Data\Scripts\Impostors\Client\*.cs" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="Lib.Harmony" Version="2.4.2" />
     <PackageReference Include="Mono.Cecil" Version="0.11.6" />

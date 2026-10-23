@@ -3,6 +3,7 @@ using System.IO;
 using System.Threading;
 using HarmonyLib;
 using Shared.Config;
+using Shared.Impostors;
 using Shared.Logging;
 using Shared.Patches;
 using Shared.Plugin;
@@ -67,8 +68,7 @@ public class Plugin : IPlugin, ICommonPlugin
     {
         try
         {
-            // TODO: Save state and close resources here, called when the game exists (not guaranteed!)
-            // IMPORTANT: Do NOT call harmony.UnpatchAll() here! It may break other plugins.
+            ImpostorService.Stop();
         }
         catch (Exception ex)
         {
@@ -102,7 +102,7 @@ public class Plugin : IPlugin, ICommonPlugin
 
     private void CustomUpdate()
     {
-        // TODO: Put your update code here. It is called on every simulation frame!
         PatchHelpers.PatchUpdates();
+        ImpostorService.UpdateStatic(Config, Log);
     }
 }
