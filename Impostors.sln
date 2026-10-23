@@ -1,0 +1,40 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ClientPlugin", "ClientPlugin\ClientPlugin.csproj", "{66AA3D09-1732-445D-A2B6-A377B31AE76C}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ServerPlugin", "ServerPlugin\ServerPlugin.csproj", "{5B2D239C-ECAE-46A7-8005-3F023319CA8F}"
+EndProject
+Project("{D954291E-2A0B-460D-934E-DC6B0785DB48}") = "Shared", "Shared\Shared.shproj", "{50131747-507D-49BE-9F2E-B6F373EFAFC1}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{75919FCB-E258-4690-ABD5-44597B3D9D65}"
+	ProjectSection(SolutionItems) = preProject
+		.gitignore = .gitignore
+		README.md = README.md
+		AGENTS.md = AGENTS.md
+		Directory.Build.props = Directory.Build.props
+		ImpostorsClient.xml = ImpostorsClient.xml
+		ImpostorsServer.xml = ImpostorsServer.xml
+		LICENSE = LICENSE
+		Version.Build.props = Version.Build.props
+	EndProjectSection
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{66AA3D09-1732-445D-A2B6-A377B31AE76C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{66AA3D09-1732-445D-A2B6-A377B31AE76C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{66AA3D09-1732-445D-A2B6-A377B31AE76C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{66AA3D09-1732-445D-A2B6-A377B31AE76C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{66AA3D09-1732-445D-A2B6-A377B31AE76C}.Debug|Any CPU.Deploy.0 = Debug|Any CPU
+		{66AA3D09-1732-445D-A2B6-A377B31AE76C}.Release|Any CPU.Deploy.0 = Release|Any CPU
+		{5B2D239C-ECAE-46A7-8005-3F023319CA8F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5B2D239C-ECAE-46A7-8005-3F023319CA8F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5B2D239C-ECAE-46A7-8005-3F023319CA8F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5B2D239C-ECAE-46A7-8005-3F023319CA8F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{5B2D239C-ECAE-46A7-8005-3F023319CA8F}.Debug|Any CPU.Deploy.0 = Debug|Any CPU
+		{5B2D239C-ECAE-46A7-8005-3F023319CA8F}.Release|Any CPU.Deploy.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal

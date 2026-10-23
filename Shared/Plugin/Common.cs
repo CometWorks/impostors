@@ -22,7 +22,7 @@ public static class Common
         Config = plugin.Config;
 
         GameVersion = gameVersion;
-        DataDir = Path.Combine(storageDir, "PluginTemplate");
+        DataDir = Path.Combine(storageDir, "Impostors");
 
         PatchHelpers.Configure();
     }

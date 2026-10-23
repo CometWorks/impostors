@@ -2,13 +2,13 @@
 <PluginData xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="GitHubPlugin">
 
     <!-- The ID of your plugin, never change this -->
-    <Id>A061FC6C-713E-42CD-B413-151AC8A5074C</Id>
+    <Id>66AA3D09-1732-445D-A2B6-A377B31AE76C</Id>
 
     <!-- GitHub repository ID -->
     <RepoId>todo-github-user/project-name</RepoId>
 
     <!-- The name of your plugin that will appear in the plugin list -->
-    <FriendlyName>TODO PluginTemplateServer</FriendlyName>
+    <FriendlyName>TODO ImpostorsClient</FriendlyName>
 
     <!-- The author name that you want to appear in the plugin list -->
     <Author>TODO Author Name</Author>
@@ -26,7 +26,7 @@
 
     <!-- Only source code in the Directory entries listed in SourceDirectories is compiled. Exclude any test projects or similar. -->
     <SourceDirectories>
-        <Directory>ServerPlugin</Directory>
+        <Directory>ClientPlugin</Directory>
         <Directory>Shared</Directory>
     </SourceDirectories>
 
@@ -70,6 +70,6 @@
     </AlternateVersions> 
     -->
 
-    <!-- Feel free to delete the comments and the commented out optional blocks once you're done -->
+    <!-- Feel free to delete the comments and the commented out optional blocks once you're done. -->
 
 </PluginData>
