@@ -226,6 +226,9 @@ def main() -> None:
         rig.wait_world(api)
         rig.ensure_character(api)
         rig.focus_gameplay(api)
+        # A windowed client starts in third person, with the character in front of the target
+        if api.get_view().get("thirdPerson"):
+            api.key("V")
 
         for index, view in enumerate(DIRECTIONS):
             direction = normalize(view)

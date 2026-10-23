@@ -33,6 +33,11 @@ Paths, all overridable by environment variables:
     IMP_REMOTE_REPO           Remote plugin working copy
     IMP_DIRECT_TRANSPORT_REPO DirectTransport working copy
 
+IMP_DISPLAY=:N gives the clients a real window on that X display instead of
+--headless. Headless clients can't render on the NVIDIA GPU (Remote drops its
+Vulkan driver), windowed ones can; with the XWayland display of a headless
+weston (weston --backend=headless --xwayland) nothing shows on the desktop.
+
 The server and the clients download hub plugins from GitHub. On a machine
 GitHub's API rate limits, export PULSAR_GITHUB_TOKEN: Pulsar and Magnetar read
 it from the environment the rig passes on. Or put the plugins Magnetar can't
@@ -86,6 +91,7 @@ sys.path.insert(0, str(REMOTE_REPO / "skills" / "se-remote"))
 from se_remote import RemoteAPI  # noqa: E402
 
 TASK = os.environ.get("IMP_TASK", "impostors")
+DISPLAY = os.environ.get("IMP_DISPLAY")
 TEST_ROOT = HOME / ".se-test"
 
 IMPOSTORS_ID = "66AA3D09-1732-445D-A2B6-A377B31AE76C"
@@ -413,7 +419,7 @@ class Client:
             "--resolution",
             "1280x720",
             "--no-audio",
-            "--headless",
+            *([] if DISPLAY else ["--headless"]),
             "--connect",
             f"127.0.0.1:{server_port}",
         ]
@@ -475,6 +481,15 @@ class Client:
             self.pulsar,
             self.launch_log,
             self.pid_file,
+            env=(
+                {
+                    "DISPLAY": DISPLAY,
+                    "SDL_VIDEO_DRIVER": "x11",
+                    "SDL_VIDEODRIVER": "x11",
+                }
+                if DISPLAY
+                else None
+            ),
         )
 
     def stop(self) -> None:
