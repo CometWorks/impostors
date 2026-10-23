@@ -84,18 +84,18 @@ def shot(api, name: str, target) -> Path:
     return path
 
 
-def shades(path: Path) -> int:
-    """Colors covering at least 5 pixels at the screen center, where the impostor the camera
-    looks at is: single bright pixels are stars or antialiased edges"""
-    from collections import Counter
-
+def shade_spread(path: Path) -> int:
+    """Brightness spread (90th minus 10th percentile) of the lit object at the screen center,
+    where the impostor the camera looks at is; one flat color gives about 0"""
     from PIL import Image
 
-    image = Image.open(path).convert("RGB")
+    image = Image.open(path).convert("L")
     w, h = image.size
     center = image.crop((w // 2 - 30, h // 2 - 30, w // 2 + 30, h // 2 + 30))
-    counts = Counter(c for c in center.getdata() if sum(c) > 90)
-    return sum(1 for n in counts.values() if n >= 5)
+    pixels = sorted(p for p in center.getdata() if p > 30)
+    if not pixels:
+        return 0
+    return pixels[len(pixels) * 9 // 10] - pixels[len(pixels) // 10]
 
 
 def drawn(impostors: dict, grid: world.Grid) -> bool:
@@ -165,8 +165,8 @@ def run(api):
         print("screenshot", shot(api, f"home-{a.name}", a.center))
 
     # Seen along an axis, the far asteroid's impostor must not be one flat color
-    tones = shades(SHOTS / f"home-{world.ROCK_FAR.name}.png")
-    check("asteroid impostor shaded", tones >= 4, f"{tones} shades")
+    spread = shade_spread(SHOTS / f"home-{world.ROCK_FAR.name}.png")
+    check("asteroid impostor shaded", spread >= 40, f"brightness spread {spread}")
 
     # Closer, still beyond the sync distance: the impostor is larger on screen. Grids start
     # at level 16, which the station has at 8 km.
