@@ -10,7 +10,7 @@ namespace Impostors
     public static class Protocol
     {
         public const ushort Channel = 47213;
-        public const byte Version = 2;
+        public const byte Version = 3;
 
         // Client to server: byte version. Sent when the session is ready and then every
         // HelloInterval seconds, so a server that starts later or a cluster node the client
@@ -104,8 +104,8 @@ namespace Impostors
     //   float cellSize, meters
     //   float originX, originY, originZ: local position of the min corner of cell (0,0,0)
     //   ushort quad count
-    //   quads, 9 bytes each: byte face, byte x, y, z, byte width, height, ushort RGB565,
-    //   byte normal (see EncodeNormal)
+    //   quads, 10 bytes each: byte face, byte x, y, z, byte width, height, ushort RGB565,
+    //   ushort normal (see EncodeNormal)
     // Faces are +X, -X, +Y, -Y, +Z, -Z (0 to 5). (x, y, z) is the cell holding the quad's
     // min corner. Width runs along axis U and height along axis V of the face (see Axes).
     // The normal is the face's own for grids, and the smoothed surface's for asteroids, whose
@@ -113,11 +113,13 @@ namespace Impostors
     public static class Shape
     {
         public const int HeaderSize = 1 + 4 + 12 + 2;
-        public const int QuadSize = 9;
+        public const int QuadSize = 10;
 
-        // Octahedral encoding, 4 bits per coordinate (0..14, so 7 is exactly 0): within 17
-        // degrees of the encoded normal, plenty for a few pixels of shading
-        public static byte EncodeNormal(Vector3 n)
+        // Octahedral encoding, 6 bits per coordinate (0..62, so 31 is exactly 0, in the high and
+        // low byte): within 4 degrees. Coarser steps show: with the sun's weight in the shading,
+        // a 17 degree step between neighboring quads made a visible speckle. Finer ones cost
+        // quads, fewer neighbors share a normal to merge with.
+        public static ushort EncodeNormal(Vector3 n)
         {
             n /= Math.Abs(n.X) + Math.Abs(n.Y) + Math.Abs(n.Z);
             var u = n.X;
@@ -127,15 +129,15 @@ namespace Impostors
                 u = (1 - Math.Abs(n.Y)) * Sign(n.X);
                 v = (1 - Math.Abs(n.X)) * Sign(n.Y);
             }
-            var iu = (int)Math.Round((u * 0.5f + 0.5f) * 14);
-            var iv = (int)Math.Round((v * 0.5f + 0.5f) * 14);
-            return (byte)((MathHelper.Clamp(iu, 0, 14) << 4) | MathHelper.Clamp(iv, 0, 14));
+            var iu = (int)Math.Round((u * 0.5f + 0.5f) * 62);
+            var iv = (int)Math.Round((v * 0.5f + 0.5f) * 62);
+            return (ushort)((MathHelper.Clamp(iu, 0, 62) << 8) | MathHelper.Clamp(iv, 0, 62));
         }
 
-        public static Vector3 DecodeNormal(byte code)
+        public static Vector3 DecodeNormal(ushort code)
         {
-            var u = (code >> 4) / 14f * 2 - 1;
-            var v = (code & 15) / 14f * 2 - 1;
+            var u = (code >> 8) / 62f * 2 - 1;
+            var v = (code & 255) / 62f * 2 - 1;
             var n = new Vector3(u, v, 1 - Math.Abs(u) - Math.Abs(v));
             if (n.Z < 0)
             {

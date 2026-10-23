@@ -50,13 +50,16 @@ greedily into rectangles of one color, so a flat painted side is a single quad.
   once its cells are as small as the content's own resolution (a block for grids).
 - The server sends one level per impostor and player, picked from the on-screen size on a
   1080p screen with a 70° field of view: about one cell per 2.5 pixels.
-- Encoding (`Protocol.cs`): a 19 byte header (level, cell size, origin) and 9 bytes per quad
+- Encoding (`Protocol.cs`): a 19 byte header (level, cell size, origin) and 10 bytes per quad
   (face, min cell, width, height, RGB565 color, normal).
-- Each quad carries the normal it is shaded with, octahedral in one byte (within 17°).
-  Grids use the face's own normal. Curved surfaces can use a smoothed one, pointing away from
-  the filled cells within two cells around: seen along an axis, a stair-stepped surface shows
-  only faces of one direction and would shade as one flat color. Quads merge only when color
-  and normal both match.
+- Each quad carries the normal it is shaded with, octahedral with 6 bits per coordinate
+  (within 4°). Grids use the face's own normal. Curved surfaces can use a smoothed one, the
+  gradient of the occupancy blurred by a Gaussian (σ = 1.5 cells): seen along an axis, a
+  stair-stepped surface shows only faces of one direction and would shade as one flat color.
+  Quads merge only when color and normal both match.
+- Normal precision trades speckle against quads. On a bumpy voxel sphere, 16° steps (the
+  first version, 4 bits and a coarser estimate) left 19% of neighboring quads with a visible
+  shade jump; 6 bits leave 0.3% at 50% more quads than that version, 8 bits none at 80% more.
 - The version of a shape is a hash of the encoded shapes, so a rebuild that changes nothing
   sends nothing.
 

@@ -75,7 +75,7 @@ namespace Impostors
                 shape.Faces[i] = face;
                 shape.HalfSizes[i] = new Vector2(width * 0.5f * size, height * 0.5f * size);
                 shape.Colors[i] = Shape.FromRgb565(color);
-                shape.Shading[i] = Shape.DecodeNormal(r.Byte());
+                shape.Shading[i] = Shape.DecodeNormal(r.UShort());
                 shape.Order[i] = i;
             }
 

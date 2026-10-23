@@ -106,36 +106,81 @@ public sealed class CellVolume
         Vector3.Forward,
     ];
 
-    private static readonly byte[] FaceNormals = Array.ConvertAll(FaceVectors, Shape.EncodeNormal);
+    private static readonly ushort[] FaceNormals = Array.ConvertAll(
+        FaceVectors,
+        Shape.EncodeNormal
+    );
 
-    // Neighborhood the smoothed normals are estimated from, in cells
-    private const int SmoothRadius = 2;
+    // The occupancy blurred by a Gaussian of this width, in cells; smoothed normals are its
+    // gradient, so neighboring cells get nearly the same normal and shade without speckle
+    private const float SmoothSigma = 1.5f;
+    private const int SmoothRadius = 3;
 
-    // Smoothed normal code of each cell, computed when first needed, -1 before that
-    private int[] smoothNormals;
+    private float[] density;
 
-    // The surface normal at a filled cell: away from the filled cells around it. Where the
-    // neighborhood gives no clear direction, or one facing away from the face, the face's own.
-    private byte SmoothNormal(int x, int y, int z, int face)
+    private void BlurOccupancy()
     {
-        var i = Index(x, y, z);
-        if (smoothNormals[i] < 0)
-        {
-            var sum = Vector3.Zero;
-            for (var dz = -SmoothRadius; dz <= SmoothRadius; dz++)
-            for (var dy = -SmoothRadius; dy <= SmoothRadius; dy++)
-            for (var dx = -SmoothRadius; dx <= SmoothRadius; dx++)
-            {
-                if (Filled(x + dx, y + dy, z + dz))
-                    sum -= new Vector3(dx, dy, dz);
-            }
-            smoothNormals[i] = sum.LengthSquared() < 1 ? 255 : Shape.EncodeNormal(sum);
-        }
+        var kernel = new float[2 * SmoothRadius + 1];
+        for (var k = -SmoothRadius; k <= SmoothRadius; k++)
+            kernel[k + SmoothRadius] = (float)Math.Exp(-k * k / (2 * SmoothSigma * SmoothSigma));
 
-        var code = smoothNormals[i];
-        if (code == 255 || Vector3.Dot(Shape.DecodeNormal((byte)code), FaceVectors[face]) < 0.2f)
+        var source = new float[weight.Length];
+        for (var i = 0; i < source.Length; i++)
+            source[i] = weight[i] > 0 ? 1 : 0;
+
+        // Separable: along X, then Y, then Z; outside the volume is empty
+        var target = new float[source.Length];
+        var size = new[] { Size.X, Size.Y, Size.Z };
+        var p = new int[3];
+        for (var axis = 0; axis < 3; axis++)
+        {
+            for (p[2] = 0; p[2] < Size.Z; p[2]++)
+            for (p[1] = 0; p[1] < Size.Y; p[1]++)
+            for (p[0] = 0; p[0] < Size.X; p[0]++)
+            {
+                var sum = 0f;
+                var center = p[axis];
+                for (var k = -SmoothRadius; k <= SmoothRadius; k++)
+                {
+                    var c = center + k;
+                    if (c < 0 || c >= size[axis])
+                        continue;
+                    p[axis] = c;
+                    sum += kernel[k + SmoothRadius] * source[Index(p[0], p[1], p[2])];
+                }
+                p[axis] = center;
+                target[Index(p[0], p[1], p[2])] = sum;
+            }
+            (source, target) = (target, source);
+        }
+        density = source;
+    }
+
+    private float Density(int x, int y, int z)
+    {
+        if (x < 0 || y < 0 || z < 0 || x >= Size.X || y >= Size.Y || z >= Size.Z)
+            return 0;
+        return density[Index(x, y, z)];
+    }
+
+    // The surface normal at a filled cell: down the blurred occupancy. Where it points nearly
+    // along the face or away from it, it is tilted towards the face's own normal, gradually,
+    // so the shading has no steps there.
+    private ushort SmoothNormal(int x, int y, int z, int face)
+    {
+        var gradient = new Vector3(
+            Density(x - 1, y, z) - Density(x + 1, y, z),
+            Density(x, y - 1, z) - Density(x, y + 1, z),
+            Density(x, y, z - 1) - Density(x, y, z + 1)
+        );
+        if (gradient.LengthSquared() < 1e-8f)
             return FaceNormals[face];
-        return (byte)code;
+
+        var normal = Vector3.Normalize(gradient);
+        var facing = Vector3.Dot(normal, FaceVectors[face]);
+        if (facing < 0.3f)
+            normal = Vector3.Normalize(normal + FaceVectors[face] * (0.3f - facing) * 2);
+        return Shape.EncodeNormal(normal);
     }
 
     // Encodes the surface as a shape (see Shape in the protocol). Smooth normals shade curved
@@ -143,11 +188,7 @@ public sealed class CellVolume
     public byte[] ToShape(bool smooth = false)
     {
         if (smooth)
-        {
-            smoothNormals = new int[weight.Length];
-            for (var i = 0; i < smoothNormals.Length; i++)
-                smoothNormals[i] = -1;
-        }
+            BlurOccupancy();
 
         var writer = new ByteWriter(4096);
         writer.Byte(Lod);
@@ -169,7 +210,7 @@ public sealed class CellVolume
             var sizeV = size[v];
 
             // 1 + color + normal << 16 of the visible faces in one slice, 0 where there is none
-            var mask = new int[sizeU * sizeV];
+            var mask = new long[sizeU * sizeV];
             for (var s = 0; s < size[n]; s++)
             {
                 for (var j = 0; j < sizeV; j++)
@@ -189,7 +230,7 @@ public sealed class CellVolume
                             : FaceNormals[face];
                         cell[n] = s + step;
                         if (!Filled(cell[0], cell[1], cell[2]))
-                            mask[j * sizeU + i] = 1 + Color(index) + (normal << 16);
+                            mask[j * sizeU + i] = 1 + Color(index) + ((long)normal << 16);
                     }
                 }
 
@@ -237,7 +278,7 @@ public sealed class CellVolume
                         writer.Byte((byte)width);
                         writer.Byte((byte)height);
                         writer.UShort((ushort)(key - 1));
-                        writer.Byte((byte)((key - 1) >> 16));
+                        writer.UShort((ushort)((key - 1) >> 16));
                         quads++;
                     }
                 }
@@ -248,7 +289,7 @@ public sealed class CellVolume
         return writer.ToArray();
     }
 
-    private static bool RowMatches(int[] mask, int sizeU, int i, int j, int width, int key)
+    private static bool RowMatches(long[] mask, int sizeU, int i, int j, int width, long key)
     {
         for (var x = 0; x < width; x++)
             if (mask[j * sizeU + i + x] != key)
