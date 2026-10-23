@@ -30,8 +30,11 @@ public sealed class ImpostorEntry
     // Content hash of the shapes, 0 before the first build
     public int Version;
 
-    // Some player gets this impostor
+    // Some player gets this impostor, or the cluster may need it
     public bool Wanted;
+
+    // Some player of this server gets this impostor
+    public bool Viewed;
     public bool Building;
     public double LastBuild = double.NegativeInfinity;
     public int LastSeen;
@@ -102,6 +105,9 @@ public sealed class ImpostorEntry
 public abstract class ImpostorSource
 {
     public abstract ImpostorKind Kind { get; }
+
+    // Entries of other servers (cluster nodes): never replicated to this server's players
+    public virtual bool Remote => false;
 
     // Game thread: adds, updates and refreshes this source's entries through the registry
     public abstract void Scan(ImpostorRegistry registry);

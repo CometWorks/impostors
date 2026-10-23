@@ -218,24 +218,35 @@ quad budget when large on screen.
 
 ## Cluster
 
-Not implemented yet; the plan, from the cluster code (`se1/cluster`) and the Magnetar
-Plugin SDK:
+Grids of other nodes are not on the local node in any form. Partitions that have been quiet
+and far from players for a while are hosted by no node at all, which is where most far grids
+are. So far view needs their records from elsewhere. `ServerPlugin/Cluster` does it with the
+Magnetar Plugin SDK (`PluginSdk.Clustering`); the client side is unchanged.
 
-- Grids of other nodes are not on the local node in any form, so far view needs their
-  records from elsewhere. Partitions that have been quiet and far from players for a while
-  are hosted by no node at all, which is where most far grids are.
-- The server plugin uses `PluginSdk.Clustering` (`PluginCluster.ForPlugin`): each node
-  reports its entries (id, frame, velocity, AABB, version) to the World Authority every 5 s
-  as deltas, the WA merges them and broadcasts deltas, a node that missed one loads the whole
-  index. The same shape as the cluster's `AntennaGraphService`, which learned that full resends
-  don't scale.
-- Shapes are fetched by `(id, version)` and cached on the WA, under the SDK's 64 KiB payload
-  limit.
-- The WA keeps the last record of grids in offline partitions until a node reports them again.
-- On each node, remote entries are one more source. They skip the replication cube test,
-  since another node's grid is never replicated to this node's players.
-- Asteroids: saved voxel maps are replicas on every node already, so each node can build them
-  itself.
+- Every 5 s each node reports its grid entries to the World Authority (topic `report`): records
+  (id, version, frame, velocity, AABB) that changed noticeably since the WA acknowledged the
+  last report, and the ids that are gone. Gone means released when the entry's partition left
+  the node (handover or offline), deleted otherwise. The shapes of new versions go first
+  (`shape`, one message per level of detail).
+- The WA merges the reports into the index. A released record stays, without an owner, until
+  some node reports the grid again: that is how grids of offline partitions stay visible. Every
+  5 s the WA broadcasts the changes to the nodes (`index`) as consecutive revisions.
+- A node that missed a revision, or started after the last one, loads the whole index in pages
+  (`snapshot`).
+- On each node, `RemoteSource` turns the other nodes' records into entries. They skip the
+  replication cube test, another node's grid is never replicated to this node's players. Their
+  shapes come from the WA's cache by id and version (`shape-get`).
+- Nodes build every local grid entry, not only the ones their own players see, since players on
+  other nodes may need them.
+- The reply to a report carries the WA's instance id. A new one (a WA restart) makes the nodes
+  report everything again; the WA's index lives in memory only, so the records of grids that
+  went offline before such a restart are lost until they come back online.
+- Asteroids are not reported: saved voxel maps are replicas on every node already, each node
+  builds them itself.
+
+The same shape as the cluster's `AntennaGraphService`, which learned that full resends don't
+scale: deltas, a periodic cadence and rare full loads. Records are about 100 bytes, 500 go in
+one message under the SDK's 64 KiB payload limit.
 
 ## Budgets
 

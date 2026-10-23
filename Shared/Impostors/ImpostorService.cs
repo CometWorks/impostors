@@ -57,6 +57,12 @@ public sealed class ImpostorService : IDisposable
         public Vector3 Velocity;
     }
 
+    // Extra sources registered by the plugin, for example the cluster bridge
+    public static readonly List<Func<ImpostorSource>> ExtraSources = new();
+
+    // Builds every entry, not only the ones this server's players see
+    public static bool BuildAll;
+
     public static ImpostorService Instance => instance;
 
     public IEnumerable<ImpostorEntry> Entries => registry.Entries;
@@ -70,6 +76,8 @@ public sealed class ImpostorService : IDisposable
             sources.Add(new GridSource(config));
         if (config.Asteroids)
             sources.Add(new VoxelSource(config));
+        foreach (var factory in ExtraSources)
+            sources.Add(factory());
 
         MyAPIGateway.Multiplayer.RegisterSecureMessageHandler(Protocol.Channel, OnMessage);
         log.Info($"Impostors service started, instance {instanceId:x16}");
@@ -131,7 +139,11 @@ public sealed class ImpostorService : IDisposable
         }
 
         foreach (var entry in registry.Entries)
-            entry.Wanted = false;
+        {
+            // Cluster nodes build every local entry, players on other nodes may need it
+            entry.Wanted = BuildAll && !entry.Source.Remote;
+            entry.Viewed = false;
+        }
 
         foreach (var steamId in viewers.Keys.ToList())
         {
@@ -206,9 +218,11 @@ public sealed class ImpostorService : IDisposable
         var candidates = new List<(ImpostorEntry entry, double pixels, double distance)>();
         foreach (var entry in registry.Entries)
         {
-            // The client has the real entity, or will have it soon
+            // The client has the real entity, or will have it soon. Another node's entities are
+            // never replicated to this node's players.
             if (
-                entry.WorldAabb.Intersects(
+                !entry.Source.Remote
+                && entry.WorldAabb.Intersects(
                     entry.Kind == ImpostorKind.Voxel ? voxelReplicated : replicated
                 )
             )
@@ -246,6 +260,7 @@ public sealed class ImpostorService : IDisposable
         foreach (var (entry, pixels, distance) in shown)
         {
             entry.Wanted = true;
+            entry.Viewed = true;
             if (entry.Shapes == null)
                 continue;
 

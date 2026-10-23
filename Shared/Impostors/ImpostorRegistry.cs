@@ -87,7 +87,7 @@ public sealed class ImpostorRegistry
                 && !e.Building
                 && (
                     e.Shapes == null && now - e.LastBuild >= RetrySeconds
-                    || (e.Stale || now - e.LastBuild >= refreshSeconds)
+                    || (e.Stale || e.Viewed && now - e.LastBuild >= refreshSeconds)
                         && now - e.LastBuild >= rebuildSeconds
                 )
             )

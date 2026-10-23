@@ -2,6 +2,7 @@
 using System.IO;
 using System.Threading;
 using HarmonyLib;
+using ServerPlugin.Cluster;
 using Shared.Config;
 using Shared.Impostors;
 using Shared.Logging;
@@ -63,6 +64,8 @@ public class Plugin : IPlugin, ICommonPlugin
             return;
         }
 
+        ClusterBridge.Start(Log);
+
         Log.Debug("Successfully loaded");
     }
 
@@ -106,5 +109,6 @@ public class Plugin : IPlugin, ICommonPlugin
     {
         PatchHelpers.PatchUpdates();
         ImpostorService.UpdateStatic(Config, Log);
+        ClusterBridge.Instance?.Update();
     }
 }
