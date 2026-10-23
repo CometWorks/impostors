@@ -1,11 +1,12 @@
 """Side-by-side screenshots of a grid or an asteroid and its impostor at a range of
 distances, for judging how close the impostors look to the real thing.
 
-The world has the grid of a blueprint, or an asteroid of the game's voxel maps, and a sync
-distance of 16 km, so the client has the real one at every distance. The server sends its
-impostor anyway (ReplicationMargin covers the whole sync distance). At each distance the
-player looks at it from the same direction; one screenshot shows the real one, one the
-impostor:
+The world has the grid of a blueprint, or an asteroid of the game's voxel maps, and the
+largest sync and view distances the game allows (20 and 50 km), so the client has the real
+one up to there; farther out the real column is empty, as in the game without impostors.
+The server sends the impostor anyway (ReplicationMargin covers the whole sync distance). At
+each distance the player looks at it from the same direction; one screenshot shows the real
+one, one the impostor:
 
 - A grid is hidden by the mod's debug compare mode, which draws the impostor in its place.
 - An asteroid can't be hidden on the client (voxel clipmaps ignore Visible), so the mod
@@ -163,8 +164,10 @@ def crop(path: Path, row: dict):
 
 
 def main() -> None:
-    # Saved asteroids replicate to ViewDistance/sqrt(3) per axis at least
-    world.SETTINGS.update(SyncDistance="16000", ViewDistance="30000")
+    # Saved asteroids replicate to ViewDistance/sqrt(3) per axis at least. The game clamps
+    # the view distance to 50 km and the sync distance to 20 km: farther out the client has
+    # no real one, only the impostor, which MaxDistance lets through.
+    world.SETTINGS.update(SyncDistance="20000", ViewDistance="50000")
     if ASTEROID:
         size = int(re.search(r"Asteroid(\d+)", ASTEROID).group(1))
         corner = tuple(p - size / 2 for p in GRID_POSITION)
@@ -193,6 +196,7 @@ def main() -> None:
         rig.plugin_config(
             ReplicationMargin=100000,
             MinPixels=0,
+            MaxDistance=max(50000, max(DISTANCES) * 1.2),
             MinBlocks=1,
             # IMP_OCCLUSION=1 compares asteroids with ambient occlusion baked in
             AsteroidOcclusion=os.environ.get("IMP_OCCLUSION") == "1",
@@ -331,7 +335,7 @@ def compose(shots, sun, target: Path) -> None:
         draw.text((left + CELL + gap + CELL // 2 - 24, 24), "impostor", fill="black")
     for row_index, distance in enumerate(DISTANCES):
         top = header + row_index * (CELL + gap)
-        radius, level = 0.0, "?"
+        radius, level, viewport = 0.0, "?", 720
         for index in range(len(DIRECTIONS)):
             left = label + index * (pair + pair_gap)
             real, real_shot, impostor, impostor_shot = shots[index, distance]
@@ -346,9 +350,13 @@ def compose(shots, sun, target: Path) -> None:
                 if column == 0:
                     radius = max(radius, r)
             level = impostor.get("lod", level)
+            viewport = int(real.get("viewport", "1280x720").split("x")[1])
+        # The server's default MinPixels drops impostors under 3 pixels across at 1080p,
+        # this sheet shows them anyway
+        cut = "\ncut off by default" if 2 * radius * 1080 / viewport < 3 else ""
         draw.multiline_text(
             (8, top + 8),
-            f"{distance:.0f} m\nradius {radius:.1f} px\nlevel {level}",
+            f"{distance:.0f} m\nradius {radius:.1f} px\nlevel {level}{cut}",
             fill="black",
             spacing=6,
         )

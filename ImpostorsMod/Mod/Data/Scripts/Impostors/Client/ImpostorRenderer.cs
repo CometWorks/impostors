@@ -62,6 +62,9 @@ namespace Impostors
         // Debug: draws the impostors in place of the real entities, which it hides
         private bool compare;
 
+        // Debug: draws no impostors, only what the game itself has
+        private bool realOnly;
+
         // Debug: draws the impostors moved by this much, next to the real entities (voxel
         // maps can't be hidden on the client)
         private Vector3D shift;
@@ -131,7 +134,8 @@ namespace Impostors
         }
 
         // "impostor" in the mode file draws the impostors instead of the real entities,
-        // "shift x y z" draws them moved by that vector next to the real ones
+        // "shift x y z" draws them moved by that vector next to the real ones, "real" draws
+        // none of them
         private void ReadMode()
         {
             var mode = "";
@@ -157,6 +161,7 @@ namespace Impostors
                 mode = "";
             }
             compare = mode == "impostor";
+            realOnly = mode == "real";
 
             foreach (var id in impostors.Keys)
             {
@@ -357,7 +362,7 @@ namespace Impostors
         public override void Draw()
         {
             visible.Clear();
-            if (!active || impostors.Count == 0)
+            if (!active || impostors.Count == 0 || realOnly)
                 return;
 
             var camera = MyAPIGateway.Session.Camera;
