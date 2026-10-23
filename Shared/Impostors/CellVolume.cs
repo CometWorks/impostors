@@ -95,9 +95,60 @@ public sealed class CellVolume
         }
     }
 
-    // Encodes the surface as a shape (see Shape in the protocol)
-    public byte[] ToShape()
+    // The six face directions and their normal codes, for flat shading
+    private static readonly Vector3[] FaceVectors =
+    [
+        Vector3.Right,
+        Vector3.Left,
+        Vector3.Up,
+        Vector3.Down,
+        Vector3.Backward,
+        Vector3.Forward,
+    ];
+
+    private static readonly byte[] FaceNormals = Array.ConvertAll(FaceVectors, Shape.EncodeNormal);
+
+    // Neighborhood the smoothed normals are estimated from, in cells
+    private const int SmoothRadius = 2;
+
+    // Smoothed normal code of each cell, computed when first needed, -1 before that
+    private int[] smoothNormals;
+
+    // The surface normal at a filled cell: away from the filled cells around it. Where the
+    // neighborhood gives no clear direction, or one facing away from the face, the face's own.
+    private byte SmoothNormal(int x, int y, int z, int face)
     {
+        var i = Index(x, y, z);
+        if (smoothNormals[i] < 0)
+        {
+            var sum = Vector3.Zero;
+            for (var dz = -SmoothRadius; dz <= SmoothRadius; dz++)
+            for (var dy = -SmoothRadius; dy <= SmoothRadius; dy++)
+            for (var dx = -SmoothRadius; dx <= SmoothRadius; dx++)
+            {
+                if (Filled(x + dx, y + dy, z + dz))
+                    sum -= new Vector3(dx, dy, dz);
+            }
+            smoothNormals[i] = sum.LengthSquared() < 1 ? 255 : Shape.EncodeNormal(sum);
+        }
+
+        var code = smoothNormals[i];
+        if (code == 255 || Vector3.Dot(Shape.DecodeNormal((byte)code), FaceVectors[face]) < 0.2f)
+            return FaceNormals[face];
+        return (byte)code;
+    }
+
+    // Encodes the surface as a shape (see Shape in the protocol). Smooth normals shade curved
+    // surfaces like asteroids, flat ones suit grids.
+    public byte[] ToShape(bool smooth = false)
+    {
+        if (smooth)
+        {
+            smoothNormals = new int[weight.Length];
+            for (var i = 0; i < smoothNormals.Length; i++)
+                smoothNormals[i] = -1;
+        }
+
         var writer = new ByteWriter(4096);
         writer.Byte(Lod);
         writer.Float(CellSize);
@@ -117,7 +168,7 @@ public sealed class CellVolume
             var sizeU = size[u];
             var sizeV = size[v];
 
-            // Color + 1 of the visible faces in one slice, 0 where there is none
+            // 1 + color + normal << 16 of the visible faces in one slice, 0 where there is none
             var mask = new int[sizeU * sizeV];
             for (var s = 0; s < size[n]; s++)
             {
@@ -128,15 +179,17 @@ public sealed class CellVolume
                         cell[n] = s;
                         cell[u] = i;
                         cell[v] = j;
-                        var visible = false;
-                        var index = 0;
-                        if (Filled(cell[0], cell[1], cell[2]))
-                        {
-                            index = Index(cell[0], cell[1], cell[2]);
-                            cell[n] = s + step;
-                            visible = !Filled(cell[0], cell[1], cell[2]);
-                        }
-                        mask[j * sizeU + i] = visible ? Color(index) + 1 : 0;
+                        mask[j * sizeU + i] = 0;
+                        if (!Filled(cell[0], cell[1], cell[2]))
+                            continue;
+
+                        var index = Index(cell[0], cell[1], cell[2]);
+                        var normal = smooth
+                            ? SmoothNormal(cell[0], cell[1], cell[2], face)
+                            : FaceNormals[face];
+                        cell[n] = s + step;
+                        if (!Filled(cell[0], cell[1], cell[2]))
+                            mask[j * sizeU + i] = 1 + Color(index) + (normal << 16);
                     }
                 }
 
@@ -184,6 +237,7 @@ public sealed class CellVolume
                         writer.Byte((byte)width);
                         writer.Byte((byte)height);
                         writer.UShort((ushort)(key - 1));
+                        writer.Byte((byte)((key - 1) >> 16));
                         quads++;
                     }
                 }

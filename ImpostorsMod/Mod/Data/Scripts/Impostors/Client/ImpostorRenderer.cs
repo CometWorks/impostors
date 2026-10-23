@@ -38,7 +38,6 @@ namespace Impostors
         private readonly ByteWriter writer = new ByteWriter(16);
         private readonly Vector3[] lefts = new Vector3[6];
         private readonly Vector3[] ups = new Vector3[6];
-        private readonly float[] light = new float[6];
         private readonly bool[] facing = new bool[6];
         private long serverInstance;
         private bool active;
@@ -287,9 +286,7 @@ namespace Impostors
 
             for (var f = 0; f < 6; f++)
             {
-                var normal = ClientShape.Normals[f];
-                facing[f] = Vector3.Dot(normal, view) < 0;
-                light[f] = Ambient + Diffuse * Math.Max(0, Vector3.Dot(normal, sunLocal));
+                facing[f] = Vector3.Dot(ClientShape.Normals[f], view) < 0;
 
                 int n,
                     u,
@@ -309,7 +306,9 @@ namespace Impostors
                     continue;
 
                 var center = position + Vector3.TransformNormal(shape.Centers[i], rotation);
-                var color = new Vector4(shape.Colors[i] * light[face], 1f);
+                var light =
+                    Ambient + Diffuse * Math.Max(0, Vector3.Dot(shape.Shading[i], sunLocal));
+                var color = new Vector4(shape.Colors[i] * light, 1f);
                 var half = shape.HalfSizes[i];
                 MyTransparentGeometry.AddBillboardOriented(
                     Material,

@@ -10,7 +10,7 @@ namespace Impostors
     public static class Protocol
     {
         public const ushort Channel = 47213;
-        public const byte Version = 1;
+        public const byte Version = 2;
 
         // Client to server: byte version. Sent when the session is ready and then every
         // HelloInterval seconds, so a server that starts later or a cluster node the client
@@ -99,18 +99,56 @@ namespace Impostors
     }
 
     // The geometry of an impostor: axis aligned quads on the faces of a cell grid, each
-    // with a flat color. Encoding:
+    // with a flat color and the surface normal to shade it with. Encoding:
     //   byte lod (cells along the longest axis the shape was built for)
     //   float cellSize, meters
     //   float originX, originY, originZ: local position of the min corner of cell (0,0,0)
     //   ushort quad count
-    //   quads, 8 bytes each: byte face, byte x, y, z, byte width, height, ushort RGB565
+    //   quads, 9 bytes each: byte face, byte x, y, z, byte width, height, ushort RGB565,
+    //   byte normal (see EncodeNormal)
     // Faces are +X, -X, +Y, -Y, +Z, -Z (0 to 5). (x, y, z) is the cell holding the quad's
     // min corner. Width runs along axis U and height along axis V of the face (see Axes).
+    // The normal is the face's own for grids, and the smoothed surface's for asteroids, whose
+    // stair-stepped faces would otherwise shade as six flat directions.
     public static class Shape
     {
         public const int HeaderSize = 1 + 4 + 12 + 2;
-        public const int QuadSize = 8;
+        public const int QuadSize = 9;
+
+        // Octahedral encoding, 4 bits per coordinate (0..14, so 7 is exactly 0): within 17
+        // degrees of the encoded normal, plenty for a few pixels of shading
+        public static byte EncodeNormal(Vector3 n)
+        {
+            n /= Math.Abs(n.X) + Math.Abs(n.Y) + Math.Abs(n.Z);
+            var u = n.X;
+            var v = n.Y;
+            if (n.Z < 0)
+            {
+                u = (1 - Math.Abs(n.Y)) * Sign(n.X);
+                v = (1 - Math.Abs(n.X)) * Sign(n.Y);
+            }
+            var iu = (int)Math.Round((u * 0.5f + 0.5f) * 14);
+            var iv = (int)Math.Round((v * 0.5f + 0.5f) * 14);
+            return (byte)((MathHelper.Clamp(iu, 0, 14) << 4) | MathHelper.Clamp(iv, 0, 14));
+        }
+
+        public static Vector3 DecodeNormal(byte code)
+        {
+            var u = (code >> 4) / 14f * 2 - 1;
+            var v = (code & 15) / 14f * 2 - 1;
+            var n = new Vector3(u, v, 1 - Math.Abs(u) - Math.Abs(v));
+            if (n.Z < 0)
+            {
+                n.X = (1 - Math.Abs(v)) * Sign(u);
+                n.Y = (1 - Math.Abs(u)) * Sign(v);
+            }
+            return Vector3.Normalize(n);
+        }
+
+        private static float Sign(float x)
+        {
+            return x < 0 ? -1f : 1f;
+        }
 
         // The face normal's axis, then the U and V axes of the quad rectangle
         public static void Axes(int face, out int normal, out int u, out int v)

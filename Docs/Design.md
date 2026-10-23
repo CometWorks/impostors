@@ -50,8 +50,13 @@ greedily into rectangles of one color, so a flat painted side is a single quad.
   once its cells are as small as the content's own resolution (a block for grids).
 - The server sends one level per impostor and player, picked from the on-screen size on a
   1080p screen with a 70° field of view: about one cell per 2.5 pixels.
-- Encoding (`Protocol.cs`): a 19 byte header (level, cell size, origin) and 8 bytes per quad
-  (face, min cell, width, height, RGB565 color).
+- Encoding (`Protocol.cs`): a 19 byte header (level, cell size, origin) and 9 bytes per quad
+  (face, min cell, width, height, RGB565 color, normal).
+- Each quad carries the normal it is shaded with, octahedral in one byte (within 17°).
+  Grids use the face's own normal. Curved surfaces can use a smoothed one, pointing away from
+  the filled cells within two cells around: seen along an axis, a stair-stepped surface shows
+  only faces of one direction and would shade as one flat color. Quads merge only when color
+  and normal both match.
 - The version of a shape is a hash of the encoded shapes, so a rebuild that changes nothing
   sends nothing.
 
@@ -117,7 +122,7 @@ Each frame it:
 - keeps the nearest impostors within the 12000 quad budget,
 - draws them far to near, each with its back faces culled and its quads sorted back to front
   for the current view direction (re-sorted when the view turns by about 3°),
-- shades each of the six face directions with `0.35 + 0.65 × max(0, n·sun)`.
+- shades each quad with its normal: `0.35 + 0.65 × max(0, n·sun)`.
 
 The client plugin compiles the same files. That copy has no mod context; it stands down when
 a session mod contains the renderer, so it only draws on servers whose world lacks the mod.

@@ -11,11 +11,13 @@ namespace Impostors
         public float CellSize;
         public int Count;
 
-        // Per quad: center in local meters, face, half extents along the face's U and V axes, color
+        // Per quad: center in local meters, face, half extents along the face's U and V axes,
+        // color and the normal to shade it with
         public Vector3[] Centers;
         public byte[] Faces;
         public Vector2[] HalfSizes;
         public Vector3[] Colors;
+        public Vector3[] Shading;
 
         // Quad indices sorted back to front for the local view direction SortedFor
         public int[] Order;
@@ -46,6 +48,7 @@ namespace Impostors
             shape.Faces = new byte[count];
             shape.HalfSizes = new Vector2[count];
             shape.Colors = new Vector3[count];
+            shape.Shading = new Vector3[count];
 
             var size = shape.CellSize;
             shape.Order = new int[count];
@@ -72,6 +75,7 @@ namespace Impostors
                 shape.Faces[i] = face;
                 shape.HalfSizes[i] = new Vector2(width * 0.5f * size, height * 0.5f * size);
                 shape.Colors[i] = Shape.FromRgb565(color);
+                shape.Shading[i] = Shape.DecodeNormal(r.Byte());
                 shape.Order[i] = i;
             }
 
