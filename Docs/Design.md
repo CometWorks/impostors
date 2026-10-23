@@ -122,7 +122,8 @@ Each frame it:
 - keeps the nearest impostors within the 12000 quad budget,
 - draws them far to near, each with its back faces culled and its quads sorted back to front
   for the current view direction (re-sorted when the view turns by about 3°),
-- shades each quad with its normal: `0.5 + 0.6 × max(0, n·sun)`.
+- shades each quad with its normal: `0.08 + 1.6 × max(0, n·sun)`, fitted to
+  screenshots of real grids and asteroids from 8 directions.
 
 The client plugin compiles the same files. That copy has no mod context; it stands down when
 a session mod contains the renderer, so it only draws on servers whose world lacks the mod.
