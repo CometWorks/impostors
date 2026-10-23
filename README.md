@@ -27,7 +27,7 @@ How it works, its limits and the plans for clusters: [Docs/Design.md](Docs/Desig
 | `Grids` | true | Impostors of grids |
 | `MinBlocks` | 8 | Grid groups with fewer blocks are not shown |
 | `MaxDistance` | 0 | Farthest impostor in meters, 0 is the world's view distance |
-| `MinPixels` | 2 | Smallest impostor on a 1080p screen |
+| `MinPixels` | 3 | Impostors less than this many pixels across on a 1080p screen are not sent |
 | `MaxImpostorsPerPlayer` | 200 | The largest on screen win |
 | `ShapeBytesPerSecond` | 32768 | Shape data sent to one player per second |
 | `RebuildSeconds` | 60 | Shortest time between two rebuilds of an impostor |

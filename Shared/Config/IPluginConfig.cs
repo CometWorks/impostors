@@ -16,7 +16,8 @@ public interface IPluginConfig : INotifyPropertyChanged
     // Impostors farther than this are not shown, meters; 0 means the world's view distance
     float MaxDistance { get; set; }
 
-    // Impostors smaller than this on a 1080p screen with a 70 degree field of view are not shown
+    // Impostors less than this many pixels across on a 1080p screen with a 70 degree field of
+    // view are not shown, 3 cuts off those under 3x3 pixels
     float MinPixels { get; set; }
 
     // Most impostors one player gets, the largest on screen win

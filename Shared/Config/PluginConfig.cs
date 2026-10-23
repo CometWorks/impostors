@@ -27,7 +27,7 @@ public class PluginConfig : IPluginConfig
     private bool grids = true;
     private int minBlocks = 8;
     private float maxDistance;
-    private float minPixels = 2f;
+    private float minPixels = 3f;
     private int maxImpostorsPerPlayer = 200;
     private int shapeBytesPerSecond = 32 * 1024;
     private int rebuildSeconds = 60;

@@ -90,8 +90,9 @@ Every second it:
    matrix, a velocity, a world AABB and a cheap content signature).
 2. For each player whose client said hello, picks the candidates: not within the
    replication cube (half side `SyncDistance - ReplicationMargin` around the player's
-   controlled entity), within the view distance, at least `MinPixels` on screen. The largest
-   `MaxImpostorsPerPlayer` win.
+   controlled entity), within the view distance, at least `MinPixels` across on screen (3
+   by default, so nothing under 3x3 pixels; the size is that of the AABB's bounding
+   sphere). The largest `MaxImpostorsPerPlayer` win.
 3. Sends what changed for that player: removals, a state and a shape for new impostors or
    ones with a new version or level, and a state for moved ones. Shapes stay within
    `ShapeBytesPerSecond` per player; the rest wait for the next second.
