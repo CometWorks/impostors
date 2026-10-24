@@ -56,7 +56,9 @@ public class EnsureCode : Attribute
 
     private IEnumerable<CodeChange> VerifyMethod(MethodInfo patchMethod)
     {
-        Plugin.Common.Logger.Debug($"Verifying patch method: {patchMethod.DeclaringType.Name}.{patchMethod.Name}");
+        Plugin.Common.Logger.Debug(
+            $"Verifying patch method: {patchMethod.DeclaringType.Name}.{patchMethod.Name}"
+        );
 
         var methodPatch = patchMethod.GetCustomAttributes<HarmonyPatch>().FirstOrDefault();
         if (methodPatch == null)
@@ -66,42 +68,72 @@ public class EnsureCode : Attribute
         if (patchType == null)
             throw new Exception($"Method info has no DeclaringType: {patchMethod.Name}");
 
-        var patchedType = methodPatch.info.declaringType ?? patchType.GetCustomAttributes<HarmonyPatch>().FirstOrDefault()?.info.declaringType;
+        var patchedType =
+            methodPatch.info.declaringType
+            ?? patchType.GetCustomAttributes<HarmonyPatch>().FirstOrDefault()?.info.declaringType;
         if (patchedType == null)
-            throw new Exception($"Could not determine the patched type for patch method {patchType.Name}.{patchMethod.Name}");
+            throw new Exception(
+                $"Could not determine the patched type for patch method {patchType.Name}.{patchMethod.Name}"
+            );
 
         MethodInfo patchedMethod = null;
         ConstructorInfo patchedConstructor = null;
         switch (methodPatch.info.methodType)
         {
             case MethodType.Getter:
-                patchedMethod = AccessTools.PropertyGetter(patchedType, methodPatch.info.methodName);
+                patchedMethod = AccessTools.PropertyGetter(
+                    patchedType,
+                    methodPatch.info.methodName
+                );
                 break;
 
             case MethodType.Setter:
-                patchedMethod = AccessTools.PropertySetter(patchedType, methodPatch.info.methodName);
+                patchedMethod = AccessTools.PropertySetter(
+                    patchedType,
+                    methodPatch.info.methodName
+                );
                 break;
 
             case MethodType.Constructor:
-                patchedConstructor = AccessTools.Constructor(patchedType, methodPatch.info.argumentTypes);
+                patchedConstructor = AccessTools.Constructor(
+                    patchedType,
+                    methodPatch.info.argumentTypes
+                );
                 break;
 
             case MethodType.StaticConstructor:
-                patchedConstructor = AccessTools.Constructor(patchedType, methodPatch.info.argumentTypes, true);
+                patchedConstructor = AccessTools.Constructor(
+                    patchedType,
+                    methodPatch.info.argumentTypes,
+                    true
+                );
                 break;
 
             default:
-                patchedMethod = AccessTools.DeclaredMethod(patchedType, methodPatch.info.methodName, methodPatch.info.argumentTypes);
+                patchedMethod = AccessTools.DeclaredMethod(
+                    patchedType,
+                    methodPatch.info.methodName,
+                    methodPatch.info.argumentTypes
+                );
                 break;
         }
 
         if (patchedMethod == null && patchedConstructor == null)
-            throw new Exception($"Could not get patched method information for {patchType.Name}.{patchMethod.Name}");
+            throw new Exception(
+                $"Could not get patched method information for {patchType.Name}.{patchMethod.Name}"
+            );
 
-        var methodBodyHash = (patchedMethod != null ? patchedMethod.HashBody() : patchedConstructor.HashBody()).ToString("x8");
+        var methodBodyHash = (
+            patchedMethod != null ? patchedMethod.HashBody() : patchedConstructor.HashBody()
+        ).ToString("x8");
         if (IsAllowed(methodBodyHash))
             yield break;
 
-        yield return new CodeChange(patchedMethod, patchedConstructor, allowedHashes, methodBodyHash);
+        yield return new CodeChange(
+            patchedMethod,
+            patchedConstructor,
+            allowedHashes,
+            methodBodyHash
+        );
     }
 }

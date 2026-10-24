@@ -1,24 +1,22 @@
 ﻿using System;
 using System.IO;
 using System.Threading;
-using ClientPlugin.Settings;
-using ClientPlugin.Settings.Layouts;
 using HarmonyLib;
-using Sandbox.Graphics.GUI;
 using Shared.Config;
+using Shared.Impostors;
 using Shared.Logging;
 using Shared.Patches;
 using Shared.Plugin;
 using VRage.FileSystem;
 using VRage.Game;
 using VRage.Plugins;
-
 // Define assembly version when compiled by Pulsar
 #if !LOCAL_BUILD
 using System.Reflection;
 
 [assembly: AssemblyVersion("1.0.0.0")]
 [assembly: AssemblyFileVersion("1.0.0.0")]
+
 #endif
 
 namespace ClientPlugin;
@@ -28,7 +26,6 @@ public class Plugin : IPlugin, ICommonPlugin
 {
     public const string Name = "Impostors";
     public static Plugin Instance { get; private set; }
-    private SettingsGenerator settingsGenerator;
     public long Tick { get; private set; }
     private static bool failed;
 
@@ -39,7 +36,9 @@ public class Plugin : IPlugin, ICommonPlugin
     private PersistentConfig<PluginConfig> config;
     private static readonly string ConfigFileName = $"{Name}.cfg";
 
-    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    [System.Runtime.CompilerServices.MethodImpl(
+        System.Runtime.CompilerServices.MethodImplOptions.NoInlining
+    )]
     public void Init(object gameInstance)
     {
 #if DEBUG
@@ -48,7 +47,6 @@ public class Plugin : IPlugin, ICommonPlugin
 #endif
 
         Instance = this;
-        Instance.settingsGenerator = new SettingsGenerator();
 
         Log.Info("Loading");
 
@@ -71,8 +69,7 @@ public class Plugin : IPlugin, ICommonPlugin
     {
         try
         {
-            // TODO: Save state and close resources here, called when the game exists (not guaranteed!)
-            // IMPORTANT: Do NOT call harmony.UnpatchAll() here! It may break other plugins.
+            ImpostorService.Stop();
         }
         catch (Exception ex)
         {
@@ -90,7 +87,7 @@ public class Plugin : IPlugin, ICommonPlugin
 #if DEBUG
         CustomUpdate();
         Tick++;
-#else        
+#else
         try
         {
             CustomUpdate();
@@ -101,25 +98,14 @@ public class Plugin : IPlugin, ICommonPlugin
             Log.Critical(e, "Update failed");
             failed = true;
         }
-#endif       
+#endif
     }
 
     private void CustomUpdate()
     {
-        // TODO: Put your update code here. It is called on every simulation frame!
         PatchHelpers.PatchUpdates();
-    }
 
-    // ReSharper disable once UnusedMember.Global
-    public void OpenConfigDialog()
-    {
-        Instance.settingsGenerator.SetLayout<Simple>();
-        MyGuiSandbox.AddScreen(Instance.settingsGenerator.Dialog);
+        // Serves the players who joined when this client hosts a lobby
+        ImpostorService.UpdateStatic(Config, Log);
     }
-        
-    //TODO: Uncomment and use this method to load asset files
-    /*public void LoadAssets(string folder)
-    {
-
-    }*/
 }

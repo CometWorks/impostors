@@ -1,40 +1,53 @@
-# Space Engineers Plugin Template
+# Impostors
 
-[Client only version of this template](https://github.com/CometWorks/client-plugin-template)
+Far view for Space Engineers 1 multiplayer. The server doesn't send grids beyond the sync
+distance (3 km by default) to the players, and edited asteroids only to about 8.7 km, so
+players see empty space where a station or a fleet is. Impostors shows them out to the view
+distance as coarse, flat shaded models, built on the server from block and voxel data.
 
-## Prerequisites
+- **Server plugin** (Magnetar): picks what each player should see, builds the impostors and
+  sends them over mod networking.
+- **Impostors mod**: draws them on the clients. Players need no plugin, only the mod in the
+  world's mod list.
+- **Client plugin** (Pulsar): draws them on servers whose world doesn't have the mod, and
+  serves the players who joined when you host a lobby.
 
-- [Space Engineers](https://store.steampowered.com/app/244850/Space_Engineers/)
-- [Python 3.12](https://python.org) (requires 3.12 or newer)
-- [Pulsar](https://github.com/SpaceGT/Pulsar) — plugin loader for Space Engineers (game client)
-- [Magnetar](https://magnetar.se) — the Space Engineers server with plugin support
-- [.NET Framework 4.8.1 Developer Pack](https://dotnet.microsoft.com/en-us/download/dotnet-framework/net481) and
-  [.NET 10 SDK](https://dotnet.microsoft.com/en-us/download/dotnet/10.0)
+How it works, its limits and the plans for clusters: [Docs/Design.md](Docs/Design.md).
 
-## Create your plugin project
+## Server setup
 
-1. Click on **Use this template** (top right corner on GitHub) and follow the wizard to create your repository
-2. Clone your repository to have a local working copy
-3. Run `setup.py`, enter the name of your plugin project in `CapitalizedWords` format
-4. Let `setup.py` auto-detect your install locations or fill them in manually
-5. Open the solution in Visual Studio or Rider
-6. Make a test build
-7. Add the repository as a development folder to Pulsar (client) and Magnetar (server), then test that
-   the empty plugin can be enabled in both
-8. Replace the contents of this file with the description of your plugin
-9. Follow the TODO comments in the source code
-10. Look into the source code of other plugins for examples on how to patch the game
+1. Enable the Impostors server plugin in Magnetar.
+2. Add the Impostors mod to the world.
+3. Optionally edit `Impostors.cfg` in the server's data folder (written with the defaults on
+   the first start):
 
-You may find the source code of these plugins inspirational:
-- [Performance Improvements](https://github.com/viktor-ferenczi/se-performance-improvements)
-- [Multigrid Projector](https://github.com/viktor-ferenczi/se-multigrid-projector)
-- [Toolbar Manager](https://github.com/viktor-ferenczi/se-toolbar-manager)
+| Option | Default | Meaning |
+|---|---|---|
+| `Enabled` | true | Turns the plugin on |
+| `Grids` | true | Impostors of grids |
+| `Asteroids` | true | Impostors of asteroids |
+| `AsteroidOcclusion` | false | Darkens pits and crevices of asteroid impostors, doubles their build time |
+| `MinBlocks` | 8 | Grid groups with fewer blocks are not shown |
+| `MaxDistance` | 0 | Farthest impostor in meters, 0 is the world's view distance |
+| `MinPixels` | 3 | Impostors less than this many pixels across on a 1080p screen are not sent |
+| `MaxImpostorsPerPlayer` | 200 | The largest on screen win |
+| `MaxQuadsPerFrame` | 12000 | Most impostor quads a client draws per frame, nearest first; the game draws at most 32768 billboards per frame for every effect |
+| `ShapeBytesPerSecond` | 32768 | Shape data sent to one player per second, on average |
+| `RebuildSeconds` | 60 | Shortest time between two rebuilds of an impostor |
+| `RefreshSeconds` | 600 | Impostors in view are rebuilt this often to catch paint changes |
+| `ReplicationMargin` | 500 | Impostors arrive this far inside the sync distance already |
 
-In case of questions please feel free to ask the SE plugin developer community on the
-[Pulsar](https://discord.gg/z8ZczP2YZY) Discord server in their relevant text channels. They also have dedicated
-channels for plugin ideas, should you look for a new one.
+## Development
 
-_Good luck!_
+`ImpostorsMod/Mod` is the mod. Building `ImpostorsMod` links it into the game's local mods
+folder as `Impostors`. Its project exists for the IDE and compile checks; the game compiles
+the mod's scripts itself. The plugins compile parts of it too: the server plugin
+`Data/Scripts/Impostors/Common` (the protocol), the client plugin all of it.
+
+Mod code is C# 6 and may use only what the game's mod whitelist allows. A build doesn't check
+the whitelist, loading the mod in the game does.
+
+`tests/scenario.py` checks it all in game: see its docstring.
 
 ## Remarks
 
@@ -57,6 +70,9 @@ defaults:
   and their `Libraries`, which is where `PluginSdk.dll` is referenced from
 - `MagnetarData` — the Magnetar config folder the server plugin is deployed into, the one
   holding `Local`, `Sources` and `Profiles`, empty by default (see [Deployment](#deployment))
+- `Mods` — the game's local mods folder, `ImpostorsMod/Mod` is linked into it as `Impostors`
+  after each build of the mod project (auto-detected: `%APPDATA%\SpaceEngineers\Mods` on
+  Windows, `~/.config/SpaceEngineers/Mods` on Linux)
 
 It optionally imports `Directory.Build.props.user` from the repository root, which is **not
 committed** (matched by `*.user` in `.gitignore`), so each contributor keeps their own local
@@ -124,47 +140,6 @@ be deployed: the `net10.0` one, which is also the only one on Linux, where only 
 launchers exist. Run the launcher with `-useHome` or `-config` and set `MagnetarData` to
 that folder to deploy there instead.
 
-### Plugin configuration
-
-You can have a nice configuration dialog with little effort in the game client.
-Customize the `Config` class in the `ClientPlugin` project, just follow the examples.
-It supports many different data types, including key binding. Once you have more
-options than can fit on the screen the dialog will have a vertical scrollbar.
-
-![Example config dialog](Docs/ConfigDialogExample.png "Example config dialog")
-
-The server plugin configuration works differently, please see the `Config` folder
-of the `Shared` project for that. The client side `Config` class is not integrated
-with the server side configuration, currently.
-
-### Shared project
-
-- Put any code you can share between the plugin projects into the Shared project.
-  Try to keep the redundancy at the minimum.
-
-- The DLLs required by your Shared code need to be added as a dependency to all the projects,
-  even if some of the code is not used by one of the projects.
-
-- You can delete the projects you don't need. If you want only a single project,
-  then move over what is in the Shared one, then you can delete Shared.
-
-### How to prevent the potential crash after game updates
-
-Please use the `EnsureCode` attribute on patch methods to safely skip loading the plugin
-with an error logged should the code in any of the methods patched would change as part of
-a game update. It is a good way to prevent blaming crashes on your plugin after game updates,
-so your plugin can remain safely enabled (but effectively disabled) until you have a chance
-to release an update for compatibility with the new game version. Please see the examples in
-the `Shared/Patches` folder on how to use this attribute.
-
-The hexadecimal hash code is logged in case of a mismatch, so you can read them from the logs
-for any new method you patch, just leave the string initially empty in the `EnsureCode`
-attribute, then replace with the value from the error log line after you run your plugin
-with the patch for the first time.
-
-On Proton (Linux) this check tends to cause issues, therefore it is automatically skipped
-when the plugin detects it is running under Wine/Proton.
-
 ### Debugging
 
 - Always use a debug build if you want to set breakpoints and see variable values.
@@ -181,47 +156,3 @@ when the plugin detects it is running under Wine/Proton.
   of the method's IL code before and after the change made, so you can just diff them.
   Please see the transpiler example under the `Shared/Patches` folder for the details.
 
-### Accessing internal, protected and private members in game code
-
-Enable the Krafs publicizer to significantly reduce the amount of reflections you need to write.
-
-This can be done by systematically uncommenting the code sections marked with "Uncomment to enable publicizer support".
-Make sure not to miss any of those. List the game assemblies you need to publicize in `GameAssembliesToPublicize.cs`. 
-In case of problems read about the [Krafs Publicizer](https://github.com/krafs/Publicizer) or reach out on the [Pulsar](https://discord.gg/z8ZczP2YZY) Discord server.
-
-### AI assisted plugin development
-
-Please consider using [se-dev-skills](https://github.com/viktor-ferenczi/se-dev-skills/) for better outcomes.
-
-### Troubleshooting
-
-- If the IDE looks confused, then restarting it and the debugged game usually works.
-- If the restart did not work, then try to delete caches used by your IDE and restart.
-- If your build fails to copy the plugin into the `Local` folder, then something locks the DLL file.
-- Look for running game or server processes (maybe stuck running in the background) and kill them.
-
-### Release
-
-- Always make your final release from a RELEASE build. (More optimized, removes debug code.)
-- Always test your RELEASE build before publishing. Sometimes it behaves differently.
-- In case of client plugins the Pulsar compiles your code, watch out for differences.
-
-### Publishing your plugin
-
-- Register **client** plugins into [PluginHub](https://github.com/StarCpt/PluginHub/),
-  so they become available in Pulsar.
-- Register **server** plugins into [MagnetarHub](https://github.com/viktor-ferenczi/MagnetarHub),
-  so they become available in Magnetar.
-
-### Communication
-
-- In your documentation always include how players or server admins should report bugs.
-- Try to be reachable and respond on a timely manner over your communication channels.
-- Be open for constructive critics.
-
-### Abandoning your project
-
-- Always consider finding a new maintainer, ask around at least once.
-- If you ever abandon the project, then make it clear on its GitHub page.
-- Abandoned projects should be made hidden on PluginHub and MagnetarHub.
-- Keep the code available on GitHub, so it can be forked and continued by others.

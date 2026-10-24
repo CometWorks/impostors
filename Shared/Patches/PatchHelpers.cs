@@ -16,11 +16,11 @@ public static class PatchHelpers
     public static bool HarmonyPatchAll(IPluginLogger log, Harmony harmony)
     {
 #if DEBUG && LIST_ALL_TYPES
-            log.Info("All types:");
-            foreach (var typ in AccessTools.AllTypes())
-            {
-                log.Info(typ.FullName);
-            }
+        log.Info("All types:");
+        foreach (var typ in AccessTools.AllTypes())
+        {
+            log.Info(typ.FullName);
+        }
 #endif
 
         log.Debug("Scanning for conflicting code changes");

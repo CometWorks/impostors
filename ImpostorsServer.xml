@@ -1,67 +1,69 @@
 <?xml version="1.0"?>
-<PluginData xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="GitHubPlugin">
+<PluginData
+  xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:type="GitHubPlugin"
+>
+  <!-- The ID of your plugin, never change this -->
+  <Id>66AA3D09-1732-445D-A2B6-A377B31AE76C</Id>
 
-    <!-- The ID of your plugin, never change this -->
-    <Id>66AA3D09-1732-445D-A2B6-A377B31AE76C</Id>
+  <!-- GitHub repository ID -->
+  <RepoId>viktor-ferenczi/impostors</RepoId>
 
-    <!-- GitHub repository ID -->
-    <RepoId>todo-github-user/project-name</RepoId>
+  <!-- The name of your plugin that will appear in the plugin list -->
+  <FriendlyName>Impostors</FriendlyName>
 
-    <!-- The name of your plugin that will appear in the plugin list -->
-    <FriendlyName>TODO ImpostorsServer</FriendlyName>
+  <!-- The author name that you want to appear in the plugin list -->
+  <Author>Viktor</Author>
 
-    <!-- The author name that you want to appear in the plugin list -->
-    <Author>TODO Author Name</Author>
+  <!-- Optional tooltip for the plugin in the plugin list -->
+  <Tooltip>Shows far grids and asteroids beyond the sync distance as impostors</Tooltip>
 
-    <!-- Optional tooltip for the plugin in the plugin list -->
-    <Tooltip>TODO Short description</Tooltip>
+  <!-- Optional plugin description. If omitted, this will be the same as the Tooltip. 1000 characters max. -->
+  <Description>Shows grids and asteroids beyond the sync distance as impostors: coarse colored models
+        built on the server from block and voxel data. Players see them through the Impostors mod,
+        which has to be added to the world. No client plugin is needed.
+  </Description>
 
-    <!-- Optional plugin description. If omitted, this will be the same as the Tooltip. 1000 characters max. -->
-    <Description>TODO Long description, multiple lines.
+  <!-- Only source code in the Directory entries listed in SourceDirectories is compiled. Exclude any test projects or similar. -->
+  <SourceDirectories>
+    <Directory>ServerPlugin</Directory>
+    <Directory>Shared</Directory>
+    <Directory>ImpostorsMod/Mod/Data/Scripts/Impostors/Common</Directory>
+  </SourceDirectories>
 
-        This text is shown on the plugin details panel in a scrollable text box.
-
-        You can use links here, players can click on them. For example, add a Discord invite.
-    </Description>
-
-    <!-- Only source code in the Directory entries listed in SourceDirectories is compiled. Exclude any test projects or similar. -->
-    <SourceDirectories>
-        <Directory>ServerPlugin</Directory>
-        <Directory>Shared</Directory>
-    </SourceDirectories>
-
-    <!-- To specify asset files to be copied onto disk, use the AssetFolder tag.
+  <!-- To specify asset files to be copied onto disk, use the AssetFolder tag.
     <AssetFolder>Project/Assets/</AssetFolder>
     -->
 
-    <!-- To specify a required NuGet package, use either a list of PackageReference tags OR a Config tag.
+  <!-- To specify a required NuGet package, use either a list of PackageReference tags OR a Config tag.
     <NuGetReferences>
       <PackageReference Include="OVRSharp" Version="1.2.0" />
     </NuGetReferences> 
     -->
 
-    <!-- Optional tag that specifies what dependencies this plugin has. Dependencies will be automatically enabled when this plugin is enabled.
+  <!-- Optional tag that specifies what dependencies this plugin has. Dependencies will be automatically enabled when this plugin is enabled.
     <DependencyIds>
       <Id>TODO ID of the plugin this one depends on</Id>
     </DependencyIds> 
     -->
 
-    <!-- Optional tag that restricts the plugin to specific runtimes (case sensitive: NETFramework, NETCoreApp). List multiple, comma separated. If omitted, the runtime is detected from the compiled assembly.
+  <!-- Optional tag that restricts the plugin to specific runtimes (case sensitive: NETFramework, NETCoreApp). List multiple, comma separated. If omitted, the runtime is detected from the compiled assembly.
     <Runtimes>NETFramework,NETCoreApp</Runtimes>
     -->
 
-    <!-- Optional tag that restricts the plugin to specific platforms (case sensitive: Windows, Linux). List multiple, comma separated. If omitted, the plugin loads on all platforms.
+  <!-- Optional tag that restricts the plugin to specific platforms (case sensitive: Windows, Linux). List multiple, comma separated. If omitted, the plugin loads on all platforms.
     <Platforms>Windows,Linux</Platforms>
     -->
 
-    <!-- Optional tag that specifies whether the plugin is hidden. Hidden plugins only appear when they are enabled or searched for in the search box.
+  <!-- Optional tag that specifies whether the plugin is hidden. Hidden plugins only appear when they are enabled or searched for in the search box.
     <Hidden>true</Hidden>
     -->
 
-    <!-- The current plugin version's commit hash -->
-    <Commit>TODO Git commit hash</Commit>
+  <!-- The current plugin version's commit hash -->
+  <Commit>TODO Git commit hash</Commit>
 
-    <!-- Optional list of alternate versions of the plugin, use it for test or custom builds
+  <!-- Optional list of alternate versions of the plugin, use it for test or custom builds
     <AlternateVersions>
       <Version>
         <Name>Version Name</Name>
@@ -70,6 +72,5 @@
     </AlternateVersions> 
     -->
 
-    <!-- Feel free to delete the comments and the commented out optional blocks once you're done -->
-
+  <!-- Feel free to delete the comments and the commented out optional blocks once you're done -->
 </PluginData>
