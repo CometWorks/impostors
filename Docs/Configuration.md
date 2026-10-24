@@ -2,6 +2,7 @@
 
 The server plugin reads `Impostors.cfg` from the server's data folder. It writes the file with
 the defaults on the first start; a server that already has the file keeps the values in it.
+The file is read only when the server starts, so changes take effect after a restart.
 
 | Option | Default | Meaning |
 |---|---|---|
@@ -28,8 +29,8 @@ Notes:
   them. The client keeps the nearest impostors within the budget. How the value gets there:
   - When a client joins, the mod says hello and the server answers with a Welcome that
     carries `MaxQuadsPerFrame`. The mod takes it, capped at 32768.
-  - The mod says hello every 30 seconds and every Welcome carries the value again, so a
-    changed `Impostors.cfg` reaches the clients within about 30 seconds.
+  - The mod says hello every 30 seconds and every Welcome carries the value again, which
+    also covers a client moved to another cluster node.
   - Until the first Welcome the mod uses its own starting value, the same as the default
     (16000). It hardly matters: the server sends impostors only after the Welcome.
   - The client plugin draws with the same code, so it gets the budget the same way.
