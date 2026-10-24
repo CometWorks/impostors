@@ -11,19 +11,23 @@ the whitelist, loading the mod in the game does.
 ## Tests
 
 - `tests/scenario.py` checks it all in game: an isolated Magnetar server with the plugin and
-  a headless client that has only the mod. See its docstring.
-- `tests/compare.py` shoots a grid (from a blueprint) or an asteroid next to its impostor from
-  the 8 cube corners at a list of distances and puts the shots into one sheet, like the ones
-  on the [Grids](Grids.md) and [Asteroids](Asteroids.md) pages. With `IMP_ZOOMS` it makes
-  the zoom sheets of the [Zoomed views](Zoom.md) page instead; the client then runs the test
-  probe of `tests/clientprobe`, which sets the camera's field of view. See its docstring.
+  a headless client that has only the mod. `IMP_ONLY=zones` runs only the safe zone checks.
+  See its docstring.
+- `tests/compare.py` shoots a grid (from a blueprint), an asteroid or a safe zone next to its
+  impostor from the 8 cube corners at a list of distances and puts the shots into one sheet,
+  like the ones on the [Grids](Grids.md), [Asteroids](Asteroids.md) and
+  [Safe zones](SafeZones.md) pages. `IMP_ZONE` puts the grid inside a safe zone. With
+  `IMP_ZOOMS` it makes the zoom sheets of the [Zoomed views](Zoom.md) page instead; the
+  client then runs the test probe of `tests/clientprobe`, which sets the camera's field of
+  view. See its docstring.
 - `tests/zoom.py` checks the finer levels of a zoomed view: the client aims down the rifle's
   iron sight (70° to 40°) on a 1920x1080 screen, and it measures how soon the finer shapes
   arrive, in client ticks.
 - `tests/cluster_scenario.py` checks far view across a cluster on the cluster's scenario
   bench.
 - `tests/build_times.py` makes a table of the build times from the `Impostor build:` lines of
-  server logs, per object and level. Any run that builds impostors writes them.
+  server logs, per object and level. Any run that builds impostors writes them;
+  `scenario.py` and `compare.py` save the table as `build-times.md` next to their shots.
 
 ## Plugin version
 
