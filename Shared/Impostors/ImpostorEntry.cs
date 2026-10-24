@@ -54,7 +54,8 @@ public sealed class ImpostorEntry
             (WorldAabb.Center - WorldMatrix.Translation).Length() + WorldAabb.HalfExtents.Length()
         );
 
-    // Index of the best shape at or below the wanted level of detail
+    // Index of the coarsest shape at or above the wanted level of detail, or of the finest one
+    // built when none is that fine
     public int ShapeIndex(byte lod)
     {
         var best = 0;

@@ -67,7 +67,8 @@ ambient occlusion and the impostor with it.
 | 4 | 38 | 38 | level 8 |
 | 2 | 6 | 6 | level 8 |
 
-Each quad is 10 bytes, so level 64 is about 150 KB. The server sends one level per impostor
+Counts with ambient occlusion off; with it on they are about 3% higher. Each quad is 10
+bytes, so level 64 is about 150 KB. The server sends one level per impostor
 and player, about one cell per 2.5 pixels of the impostor's size on a 1080p screen.
 
 - Level 8 pools voxels two levels finer: a cell is filled when at least half of its voxels

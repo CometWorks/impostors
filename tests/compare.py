@@ -11,11 +11,15 @@ one, one the impostor:
 - A grid is hidden by the mod's debug compare mode, which draws the impostor in its place.
 - An asteroid can't be hidden on the client (voxel clipmaps ignore Visible), so the mod
   draws the impostor moved sideways by three radii, and the player moves along with it.
-  The server picks the level of detail from the player's distance to the real asteroid,
-  which is larger then: the label shows both levels where they differ.
+  The server picks the level of detail from the player's distance to the real asteroid.
 
-The result is one image, a row per distance: the real one on the left, the impostor on the
-right, both cropped around it and scaled up with nearest neighbor sampling.
+The result is one image about 3840 pixels wide: a row per distance and a column pair per
+view direction, the real one on the left and the impostor on the right, both cropped around
+it and scaled with nearest neighbor sampling. Every impostor cell names its level of detail.
+
+Environment: IMP_DIRECTIONS (corners, faces or "x,y,z;..."), IMP_SUN ("x,y,z"), IMP_TAG (a
+suffix for the output names), IMP_OCCLUSION=1 (asteroid occlusion on), IMP_KEEP=1 (leave the
+game running), and the rig's IMP_RESOLUTION and IMP_DISPLAY (see rig.py).
 
     uv run --no-project --with httpx --with pillow python tests/compare.py \\
         ["~/.config/SpaceEngineers/Blueprints/local/Visitor Ion" | asteroid:Asteroid512-008.vx2] \\

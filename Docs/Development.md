@@ -120,6 +120,6 @@ that folder to deploy there instead.
   builds. Never release a debug build to your users, because that would litter their desktop
   as well.
 - To debug transpiler changes to the IL code it is most practical to generate the files
-  of the method's IL code before and after the change made, so you can just diff them.
-  Please see the transpiler example under the `Shared/Patches` folder for the details.
+  of the method's IL code before and after the change made, so you can just diff them:
+  `TranspilerHelpers.RecordOriginalCode` and `RecordPatchedCode` in `Shared/Tools` do that.
 

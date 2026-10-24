@@ -216,8 +216,8 @@ from afar anyway.
   (at most every `RebuildSeconds`).
 - Frame: the voxel map's world matrix; asteroids don't move.
 
-Quads of a 512 m asteroid: 6, 38, 192, 513, 3635 and 14858 for levels 2 to 64, 10 bytes
-each. Asteroids are much more detailed than box-like grids, so they take most of the quad
+Quads of a 512 m asteroid without occlusion: 6, 38, 192, 513, 3635 and 14858 for levels 2
+to 64, 10 bytes each, about 3% more with occlusion. Asteroids are much more detailed than box-like grids, so they take most of the quad
 budget when large on screen.
 
 ## Cluster
