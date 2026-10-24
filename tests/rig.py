@@ -454,6 +454,8 @@ class Client:
         self.mod_storage.mkdir(parents=True, exist_ok=True)
         (self.mod_storage / "debug").write_text("")
         (self.mod_storage / "stats.txt").unlink(missing_ok=True)
+        # compare.py's last mode would carry over into the next run of any test
+        (self.mod_storage / "mode").unlink(missing_ok=True)
         self.appdata.mkdir(parents=True, exist_ok=True)
         (self.appdata / "Remote.cfg").write_text(
             '<?xml version="1.0" encoding="utf-8"?>\n'
