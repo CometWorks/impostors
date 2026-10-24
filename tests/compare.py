@@ -27,6 +27,8 @@ game running), and the rig's IMP_RESOLUTION and IMP_DISPLAY (see rig.py).
          | safezone:500 | safezone:600,300,400] [distances...]
 
 A safe zone target is an enabled admin zone: a sphere of that radius or a box of that size.
+IMP_ZONE=<radius> puts a grid inside a sphere zone of that radius around GRID_POSITION: the
+impostor shots show both, and the grid needs SafeZoneMinPixels (8) instead of MinPixels.
 
 The image lands in ~/.se-test/<task>-shots/compare-<name>.png.
 
@@ -96,6 +98,11 @@ CLIENT = rig.Client(1, "Alpha", quality="medium", probe=bool(ZOOMS))
 SHOTS = rig.TEST_ROOT / f"{rig.TASK}-shots"
 
 GRID_POSITION = (2000.0, 0.0, 0.0)
+
+# IMP_ZONE: radius of a sphere safe zone around the grid, 0 for none
+ZONE_AROUND = float(os.environ.get("IMP_ZONE", "0"))
+if ZONE_AROUND:
+    NAME += f"-in-zone-{ZONE_AROUND:.0f}"
 
 # The directions the player looks at the target from, at every distance: the 8 cube corners
 # by default, which put the sun in front, behind and to the sides; "faces" for the 6 cube
@@ -181,7 +188,14 @@ def crop(path: Path, row: dict):
     sx, sy = image.size[0] / vw, image.size[1] / vh
     x, y = (float(v) for v in row["screen"].split(","))
     radius = float(row["radius"])
-    half = max(16, min(image.size[1] // 2, int(radius * 1.6 * sy)))
+    view = radius * 1.6
+    if ZONE_AROUND:
+        # The zone around the grid fits too: its radius in pixels at this distance, 70 degrees
+        zone = (
+            ZONE_AROUND / float(row["distance"]) / math.tan(math.radians(35)) * vh / 2
+        )
+        view = max(view, zone * 1.2)
+    half = max(16, min(image.size[1] // 2, int(view * sy)))
     # Kept inside the screenshot: a target near the edge is off center rather than cut
     cx = min(max(int(x * sx), half), image.size[0] - half)
     cy = min(max(int(y * sy), half), image.size[1] - half)
@@ -229,6 +243,12 @@ def main() -> None:
         world.prepare(
             SERVER.world, CLIENT.steam_id, CLIENT.name, grids=(), asteroids=()
         )
+        if ZONE_AROUND:
+            grids_xml += world.zone_xml(
+                world.SafeZone(
+                    "Around", 140000000000000098, GRID_POSITION, radius=ZONE_AROUND
+                )
+            )
         sector = SERVER.world / "SANDBOX_0_0_0_.sbs"
         sector.write_text(
             sector.read_text(encoding="utf-8").replace(
@@ -456,6 +476,9 @@ def compose(shots, sun, target: Path) -> None:
             for column, (row, shot) in enumerate(
                 ((real, real_shot), (impostor, impostor_shot))
             ):
+                # An impostor the server cut off has no row: framed like the real one
+                if column == 1 and "screen" not in row:
+                    row = real
                 try:
                     cell, r = crop(shot, row)
                 except (KeyError, ValueError):
@@ -466,7 +489,9 @@ def compose(shots, sun, target: Path) -> None:
                     radius = max(radius, r)
                 else:
                     # The level of each impostor: one that kept a coarse level shows here
-                    text = f"level {impostor.get('lod', '?')}"
+                    text = (
+                        f"level {impostor['lod']}" if "lod" in impostor else "cut off"
+                    )
                     box = draw.textbbox((x + 6, top + 6), text, font=font)
                     draw.rectangle(
                         (box[0] - 4, box[1] - 3, box[2] + 4, box[3] + 3), fill="black"
@@ -475,7 +500,9 @@ def compose(shots, sun, target: Path) -> None:
             viewport = int(real.get("viewport", "1280x720").split("x")[1])
         # The server's default MinPixels drops impostors under 3 pixels across at 1080p,
         # this sheet shows them anyway
-        cut = "\ncut off by default" if 2 * radius * 1080 / viewport < 3 else ""
+        # In a safe zone the grid needs SafeZoneMinPixels (8) instead
+        least = 8 if ZONE_AROUND else 3
+        cut = "\ncut off by default" if 2 * radius * 1080 / viewport < least else ""
         text = f"{distance:.0f} m\nradius {radius:.1f} px{cut}"
         if ZOOMS:
             fov = 2 * math.degrees(math.atan(math.tan(math.radians(35)) / zoom))
