@@ -285,6 +285,14 @@ def run_zones(api):
             g.entity_id not in impostors,
             impostors.get(g.entity_id, ""),
         )
+    # The sphere's mesh follows its size on screen: 29 px in radius at 9 km on a 720p screen
+    i = impostors.get(zone.entity_id, {})
+    check("Zone 512 quads at 9 km", i.get("zonequads") == "512", i)
+    check(
+        "BoxZone 6 quads",
+        impostors.get(box.entity_id, {}).get("zonequads") == "6",
+        impostors.get(box.entity_id),
+    )
     print("server:", command(api, "!iprobe zones"))
     for z in (zone, box):
         print("screenshot", shot(api, f"home-{z.name}", z.position))
@@ -302,6 +310,14 @@ def run_zones(api):
         "impostor Zone at 4 km", drawn(impostors, zone), impostors.get(zone.entity_id)
     )
     print("screenshot", shot(api, "4km-Zone", zone.position))
+
+    # 12 km from the zone it is 21 px in radius: the coarser sphere
+    api.character_teleport(zone.position[0], zone.position[1] + 12000, zone.position[2])
+    totals, impostors = wait_stats(
+        lambda i: i.get(zone.entity_id, {}).get("zonequads") == "128", 30
+    )
+    i = impostors.get(zone.entity_id, {})
+    check("Zone 128 quads at 12 km", i.get("zonequads") == "128", i)
 
     # A line of sight past the zone: Behind is 3.3 px across, the normal cut-off applies
     api.character_teleport(4000.0, 0.0, 0.0)

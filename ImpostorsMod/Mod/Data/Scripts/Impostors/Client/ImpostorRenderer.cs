@@ -250,6 +250,15 @@ namespace Impostors
                 + v.Z.ToString("0.000");
         }
 
+        // The quads a safe zone draws at the current camera
+        private string ZoneStats(ClientImpostor impostor)
+        {
+            var camera = MyAPIGateway.Session.Camera;
+            if (impostor.Shape == null || !impostor.Shape.IsZone || camera == null)
+                return "";
+            return " zonequads=" + ZoneQuads(impostor, camera.Position).Length;
+        }
+
         // Where an impostor is on screen, in pixels, and its radius there
         private string ScreenPosition(ImpostorState state)
         {
@@ -343,6 +352,7 @@ namespace Impostors
                         + state.Position.Y.ToString("0.0")
                         + ","
                         + state.Position.Z.ToString("0.0")
+                        + ZoneStats(impostor)
                         + ScreenPosition(state)
                 );
             }
@@ -476,8 +486,8 @@ namespace Impostors
 
             var quads = 0;
             var count = 0;
-            while (count < visible.Count && quads + visible[count].Shape.Count / 2 <= maxQuads)
-                quads += visible[count++].Shape.Count / 2;
+            while (count < visible.Count && quads + Cost(visible[count], eye) <= maxQuads)
+                quads += Cost(visible[count++], eye);
 
             var sun = MyVisualScriptLogicProvider.GetSunDirection();
 
@@ -539,7 +549,7 @@ namespace Impostors
             var color = zone.Color.ToVector3();
             var quad = new MyQuadD();
 
-            foreach (var q in ZoneMesh.Quads(zone.Box))
+            foreach (var q in ZoneQuads(impostor, eye))
             {
                 var center =
                     position + Vector3D.TransformNormal(q.Center * zone.HalfExtents, rotation);
@@ -571,6 +581,33 @@ namespace Impostors
                 );
                 drawnQuads++;
             }
+        }
+
+        // A safe zone's mesh for its size on screen, the finest one when the camera is inside
+        private ZoneQuad[] ZoneQuads(ClientImpostor impostor, Vector3D eye)
+        {
+            var zone = impostor.Shape.Zone;
+            var distance = Vector3D.Distance(eye, impostor.State.Position + shift);
+            var radius = zone.Box ? zone.HalfExtents.Length() : zone.HalfExtents.X;
+            var camera = MyAPIGateway.Session.Camera;
+            var pixels =
+                distance <= radius
+                    ? double.MaxValue
+                    : radius
+                        / distance
+                        / Math.Tan(camera.FovWithZoom / 2)
+                        * camera.ViewportSize.Y
+                        / 2;
+            return ZoneMesh.Quads(zone.Box, pixels);
+        }
+
+        // Quads an impostor draws: about half of a shape's face the camera, a safe zone draws
+        // both of its halves
+        private int Cost(ClientImpostor impostor, Vector3D eye)
+        {
+            return impostor.Shape.IsZone
+                ? ZoneQuads(impostor, eye).Length
+                : impostor.Shape.Count / 2;
         }
 
         private static float Brightness(ImpostorState state, double distance)

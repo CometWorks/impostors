@@ -48,7 +48,7 @@ namespace Impostors
             {
                 shape.IsZone = true;
                 shape.Zone = ZoneShape.Read(r);
-                shape.Count = ZoneMesh.Quads(shape.Zone.Box).Length;
+                shape.Count = shape.Zone.Box ? 6 : ZoneMesh.MaxQuads;
                 return shape;
             }
 
