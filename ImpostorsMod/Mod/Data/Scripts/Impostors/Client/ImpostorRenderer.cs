@@ -62,6 +62,7 @@ namespace Impostors
         private double sentZoom;
         private Vector3 sentForward;
         private int sentViewTick;
+        private int zoomTick;
         private bool active;
         private bool debug;
 
@@ -175,6 +176,8 @@ namespace Impostors
             writer.Float(forward.Y);
             writer.Float(forward.Z);
             MyAPIGateway.Multiplayer.SendMessageToServer(Protocol.Channel, writer.ToArray());
+            if (zoomed && !viewZoomed)
+                zoomTick = tick;
             viewZoomed = zoomed;
             sentZoom = zoom;
             sentForward = forward;
@@ -289,11 +292,15 @@ namespace Impostors
                     + " tick="
                     + tick
                     + " fov="
-                    + (camera != null ? MathHelper.ToDegrees(camera.FovWithZoom) : 0).ToString("0.0")
+                    + (camera != null ? MathHelper.ToDegrees(camera.FovWithZoom) : 0).ToString(
+                        "0.0"
+                    )
                     + " zoomed="
                     + (viewZoomed ? 1 : 0)
                     + " viewtick="
                     + sentViewTick
+                    + " zoomtick="
+                    + zoomTick
             );
             foreach (var impostor in impostors.Values)
             {

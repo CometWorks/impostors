@@ -31,9 +31,9 @@ EYE = (world.STATION.position[0] - 6000, 0.0, 400.0)
 RIFLE = "AutomaticRifleItem"
 
 
-def sight_shot(api, name: str, target) -> Path:
+def sight_shot(api, name: str, entity_id: int, target) -> Path:
     """A screenshot with the target 8 degrees above the screen center, clear of the
-    rifle's iron sight, and a crop around it (name-crop.png)"""
+    rifle's iron sight, and a crop around where the mod says it is (name-crop.png)"""
     d = [t - e for t, e in zip(target, EYE)]
     distance = math.sqrt(sum(v * v for v in d))
     d = [v / distance for v in d]
@@ -50,11 +50,14 @@ def sight_shot(api, name: str, target) -> Path:
     path = SHOTS / f"{name}.png"
     path.write_bytes(api.screenshot_bytes(ignore_sprites=True))
 
-    image = Image.open(path)
-    w, h = image.size
-    fov = math.radians(float(CLIENT.stats()[0].get("fov", 70)))
-    y = h / 2 - math.tan(math.radians(8)) / math.tan(fov / 2) * h / 2
-    image.crop((w // 2 - 150, int(y) - 150, w // 2 + 150, int(y) + 150)).save(
+    # The stats of the next second, with the same view
+    time.sleep(1.2)
+    screen = CLIENT.stats()[1].get(entity_id, {}).get("screen", "")
+    print(name, "at", screen)
+    if "," not in screen:
+        return path
+    x, y = (int(v) for v in screen.split(","))
+    Image.open(path).crop((x - 150, y - 150, x + 150, y + 150)).save(
         SHOTS / f"{name}-crop.png"
     )
     return path
@@ -84,7 +87,7 @@ def zoomed(api, on: bool) -> dict:
 
 
 def latency(entity_id: int, finer_than: int, since: int | None = None, timeout=10.0):
-    """Seconds from the View message (or from the client tick since) to a shape finer
+    """Seconds from the start of the zoom (or from the client tick since) to a shape finer
     than the given level, or None"""
     totals, impostors = wait_stats(
         lambda i: lod(i, entity_id) > finer_than, timeout, interval=0.5
@@ -92,7 +95,7 @@ def latency(entity_id: int, finer_than: int, since: int | None = None, timeout=1
     i = impostors.get(entity_id, {})
     if lod(impostors, entity_id) <= finer_than:
         return None, i
-    start = int(totals["viewtick"]) if since is None else since
+    start = int(totals["zoomtick"]) if since is None else since
     return (int(i["shapetick"]) - start) / 60, i
 
 
@@ -120,10 +123,15 @@ def run(api):
     api.key("D1")
     time.sleep(3)
 
-    print("screenshot", sight_shot(api, "zoom-Station-wide", station.position))
+    print(
+        "screenshot",
+        sight_shot(api, "zoom-Station-wide", station.entity_id, station.position),
+    )
 
     # Zooming in while looking at the asteroid: one View message
-    print("screenshot", sight_shot(api, "zoom-RockFar-wide", rock.center))
+    print(
+        "screenshot", sight_shot(api, "zoom-RockFar-wide", rock.entity_id, rock.center)
+    )
     totals = zoomed(api, True)
     check("narrow view", float(totals.get("fov", 0)) < 50, totals)
     check("mod reports the zoom", totals.get("zoomed") == "1", totals)
@@ -134,7 +142,10 @@ def run(api):
         f"{seconds} s {i}",
     )
     time.sleep(2)
-    print("screenshot", sight_shot(api, "zoom-RockFar-narrow", rock.center))
+    print(
+        "screenshot",
+        sight_shot(api, "zoom-RockFar-narrow", rock.entity_id, rock.center),
+    )
 
     # Turning onto the station while zoomed sends new View messages. The client tick
     # read before the turn is at most a second old, so this measures a bit long.
@@ -147,7 +158,10 @@ def run(api):
         f"{seconds} s {i}",
     )
     time.sleep(2)
-    print("screenshot", sight_shot(api, "zoom-Station-narrow", station.position))
+    print(
+        "screenshot",
+        sight_shot(api, "zoom-Station-narrow", station.entity_id, station.position),
+    )
 
     # The others keep streaming: still drawn, with their shapes
     _, impostors = CLIENT.stats()
@@ -165,7 +179,10 @@ def run(api):
         lod(impostors, rock.entity_id) > rock_lod,
         impostors.get(rock.entity_id),
     )
-    print("screenshot", sight_shot(api, "zoom-RockFar-wide-kept", rock.center))
+    print(
+        "screenshot",
+        sight_shot(api, "zoom-RockFar-wide-kept", rock.entity_id, rock.center),
+    )
 
     # ... and the normal level comes back after ZoomKeepSeconds (30)
     _, impostors = wait_stats(lambda i: lod(i, rock.entity_id) == rock_lod, 45)
