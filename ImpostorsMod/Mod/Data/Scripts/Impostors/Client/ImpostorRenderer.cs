@@ -38,6 +38,11 @@ namespace Impostors
         private const float SmallFromPixels = 13f;
         private const float SmallToPixels = 27f;
 
+        // Small grids go the other way: under the same sizes the real ones carry more light
+        // than their impostors (0.68 to 0.82 of it at level 16, measured against dark
+        // backgrounds), the coarser levels under 16 even less
+        private const float SmallGridBrightness = 1.35f;
+
         // Re-sort a shape's quads when the view direction turned by about 3 degrees
         private const float ResortCosine = 0.9986f;
 
@@ -293,14 +298,13 @@ namespace Impostors
 
         private static float Brightness(ImpostorState state, double distance)
         {
-            if (state.Kind != ImpostorKind.Voxel)
-                return 1f;
+            var small = state.Kind == ImpostorKind.Voxel ? SmallBrightness : SmallGridBrightness;
 
             var camera = MyAPIGateway.Session.Camera;
             var pixels =
                 state.Radius / Math.Max(distance, 1) / Math.Tan(camera.FovWithZoom / 2) * 540;
             var t = (float)((pixels - SmallFromPixels) / (SmallToPixels - SmallFromPixels));
-            return MathHelper.Lerp(SmallBrightness, 1f, MathHelper.Clamp(t, 0f, 1f));
+            return MathHelper.Lerp(small, 1f, MathHelper.Clamp(t, 0f, 1f));
         }
 
         private void DrawImpostor(ClientImpostor impostor, Vector3D eye, Vector3 sun)
