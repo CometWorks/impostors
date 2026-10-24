@@ -143,9 +143,9 @@ ticks. For that player the server then:
   direction, less the impostor's angular radius, within the half diagonal) by the zoom,
   32 times at most. They sort first, so they get the shape credit first and their finer
   shapes go out ahead of the rest.
-- picks the player's impostors again on the next tick instead of at the next full second.
-  The credit is paid by the time since the last pick, so the extra picks don't raise the
-  bandwidth.
+- picks the player's impostors again within 10 ticks instead of at the next full second,
+  six times per second at most. The credit is paid by the time since the last pick, so the
+  extra picks don't raise the bandwidth.
 - takes a zoomed level only while its shape has at most `MaxQuadsPerFrame` quads, about
   half of them facing the camera, so one zoomed impostor can't take the client's whole
   budget.

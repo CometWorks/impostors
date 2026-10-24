@@ -147,10 +147,11 @@ public sealed class ImpostorService : IDisposable
     {
         if (++tick % 60 != 0)
         {
-            // A zoom gets its finer levels within a few ticks, not at the next full second
+            // A zoom gets its finer levels within a few ticks, not at the next full second.
+            // Six picks per second at most, however many View messages a client sends.
             foreach (var viewer in viewers.Values)
             {
-                if (viewer.Dirty)
+                if (viewer.Dirty && tick - viewer.LastTick >= 10)
                     TryUpdateViewer(viewer);
             }
             return;
