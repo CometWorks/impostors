@@ -294,12 +294,18 @@ def normalize(v):
     return [x / length for x in v]
 
 
+LAST_EYE: list = []
+
+
 def look(api, entity_id, eye, target, distance, drawn=False) -> dict:
     """Moves the player (unless eye is None), aims at the target and waits for stats of
     this view: the target near the screen center at the right distance"""
     if eye is not None:
+        # After a long jump the game takes a while to load the near models of the target
+        far = math.dist(eye, LAST_EYE[0]) > 5000 if LAST_EYE else True
+        LAST_EYE[:] = [eye]
         api.character_teleport(*eye)
-        time.sleep(2)
+        time.sleep(12 if far else 2)
     api.character_look_at(*target, tolerance=0.2)
 
     def ready(row):
