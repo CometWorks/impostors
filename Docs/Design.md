@@ -5,6 +5,9 @@ Far view for Space Engineers 1 multiplayer. Players see nothing beyond the sync 
 about `ViewDistance/√3`. Impostors fill that gap with coarse models of far grids and asteroids,
 out to the view distance.
 
+For what they look like, with screenshots, see [Grids](Grids.md) and
+[Asteroids](Asteroids.md). This page is about how it works inside.
+
 Tickets: SE-381 (shared design), SE-382 (grids), SE-383 (asteroids) in Vikunja. This document
 replaces the 2026-10-15 draft (`plans/se1-0199-far-view/PLAN.md`, attached to SE-381) where
 the two disagree.
@@ -138,7 +141,7 @@ Mod networking on channel 47213, reliable messages up to 16 KB:
 | Message | Direction | Content |
 |---|---|---|
 | Hello | client to server | protocol version; at load and every 30 s |
-| Welcome | server to client | protocol version, server instance id |
+| Welcome | server to client | protocol version, server instance id, `MaxQuadsPerFrame` |
 | States | server to client | impostor states: id, kind, version, level, radius, position, orientation, velocity (70 bytes each) |
 | Remove | server to client | impostor ids |
 | ShapeData | server to client | count, then id, version and shape per impostor |
@@ -158,7 +161,9 @@ Each frame it:
 - draws them far to near, each with its back faces culled and its quads sorted back to front
   for the current view direction (re-sorted when the view turns by about 3°),
 - shades each quad with its normal: `0.08 + 1.6 × max(0, n·sun)`, fitted to
-  screenshots of real grids and asteroids from 8 directions.
+  screenshots of real grids and asteroids from 8 directions. Under 27 pixels in radius on a
+  1080p screen it brightens grids (up to 1.35 times under 13 pixels) and dims asteroids (down
+  to 0.82), where the real ones carry more or less light than their impostors.
 
 The client plugin compiles the same files. That copy has no mod context; it stands down when
 a session mod contains the renderer, so it only draws on servers whose world lacks the mod.
@@ -172,8 +177,7 @@ a session mod contains the renderer, so it only draws on servers whose world lac
 - Groups below `MinBlocks` blocks (8) are left out, so are projections and previews.
 - Signature: the members' ids, block counts and min/max cells.
 - A build snapshots every cube of every block on the game thread (position in the main
-  grid's frame, size, color) and rasterizes the levels on a background thread. A block larger
-  than a cell fills every cell it covers.
+  grid's frame, size, color) and rasterizes the levels on a background thread.
 
 Concealed grids (CometWorks Concealment) stay in the scene and replicated, so they get
 impostors like any other grid; they don't change while concealed.
@@ -212,9 +216,9 @@ from afar anyway.
   (at most every `RebuildSeconds`).
 - Frame: the voxel map's world matrix; asteroids don't move.
 
-Sizes on the test rig, a 512 m asteroid: 235, 2211, 15379 and 61579 bytes for the 8, 16, 32
-and 64 levels. Asteroids are much more detailed than box-like grids, so they take most of the
-quad budget when large on screen.
+Quads of a 512 m asteroid: 6, 38, 192, 513, 3635 and 14858 for levels 2 to 64, 10 bytes
+each. Asteroids are much more detailed than box-like grids, so they take most of the quad
+budget when large on screen.
 
 ## Cluster
 
