@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
 using Shared.Logging;
@@ -102,6 +103,7 @@ public sealed class ImpostorRegistry
             entry.LastBuild = now;
 
             Func<byte[][]> build;
+            var snapshot = Stopwatch.StartNew();
             try
             {
                 build = entry.Source.PrepareBuild(entry);
@@ -115,11 +117,14 @@ public sealed class ImpostorRegistry
             if (build == null)
                 continue;
 
+            var snapshotMs = snapshot.Elapsed.TotalMilliseconds;
+            var size = entry.Source.Describe(entry);
             entry.Building = true;
             running++;
             Task.Run(() =>
             {
                 byte[][] shapes = null;
+                var timing = BuildTiming.Start();
                 try
                 {
                     shapes = build();
@@ -128,6 +133,13 @@ public sealed class ImpostorRegistry
                 {
                     log.Error(e, $"Failed to build impostor {entry.Id}");
                 }
+                BuildTiming.Stop();
+
+                // One line per build for tests/build_times.py
+                if (shapes != null && !entry.Source.Remote)
+                    log.Info(
+                        $"Impostor build: id={entry.Id} kind={entry.Kind} {size} snapshot={snapshotMs:0.00}{timing}"
+                    );
                 finished.Enqueue((entry, shapes));
             });
         }

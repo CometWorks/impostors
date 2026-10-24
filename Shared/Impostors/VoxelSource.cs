@@ -89,6 +89,11 @@ public sealed class VoxelSource : ImpostorSource
         }
     }
 
+    public override string Describe(ImpostorEntry entry) =>
+        entry.Tag is MyVoxelMap { Storage: not null } map
+            ? $"voxels={map.Storage.Size.X}x{map.Storage.Size.Y}x{map.Storage.Size.Z} occlusion={config.AsteroidOcclusion}"
+            : "";
+
     public override Func<byte[][]> PrepareBuild(ImpostorEntry entry)
     {
         if (entry.Tag is not MyVoxelMap map || map.Closed || map.Storage == null)
@@ -196,6 +201,7 @@ public sealed class VoxelSource : ImpostorSource
             if (extent == 0 && max.X >= min.X)
                 extent = (max - min + 1).AbsMax() * voxelSize;
             shapes[i] = volume.ToShape(smooth: true, occluded);
+            BuildTiming.Mark(ImpostorEntry.Lods[i], shapes[i]);
             if (i == first)
                 level8 = volume;
         }
@@ -214,6 +220,7 @@ public sealed class VoxelSource : ImpostorSource
                 coarse = finer.Downsample(ImpostorEntry.Lods[i], 1);
                 shapes[i] = coarse.ToShape(smooth: true, occluded);
             }
+            BuildTiming.Mark(ImpostorEntry.Lods[i], shapes[i]);
         }
         return shapes;
     }

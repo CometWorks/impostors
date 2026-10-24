@@ -71,6 +71,11 @@ Counts with ambient occlusion off; with it on they are about 3% higher. Each qua
 bytes, so level 64 is about 150 KB. The server sends one level per impostor
 and player, about one cell per 2.5 pixels of the impostor's size on a 1080p screen.
 
+A zoomed view, like the rifle's iron sight or a camera or telescope mod, shows impostors
+larger than that estimate. The mod tells the server, which sends finer levels for the
+impostors inside the view within a fraction of a second and lets them stay for 30 seconds
+after the zoom. See [Zoomed views](Zoom.md).
+
 - Level 8 pools voxels two levels finer: a cell is filled when at least half of its voxels
   are. The game's own coarse voxels erode thin parts, and level 8 looked half as large as
   level 16 when read directly. A rock that is small for its voxel storage gets at least 6
@@ -78,6 +83,26 @@ and player, about one cell per 2.5 pixels of the impostor's size on a 1080p scre
 - Levels 4 and 2 are downsampled from 8, a cell filled when half of its 8 children are, or
   any of them if the rock would vanish. They are for the far ones that cover a few pixels:
   an asteroid ring shows hundreds at once, and level 16 costs 15 times the quads of level 8.
+
+## Build time
+
+One build of each asteroid on sirius (AMD Ryzen 7 9800X3D), from the `Impostor build:` log
+lines (`tests/build_times.py`). Milliseconds of wall clock and CPU time on the background
+thread that builds it; they are the same, a build doesn't wait on anything.
+
+| Level | 512 m | 512 m, occlusion | 256 m | 256 m, occlusion |
+|---|---:|---:|---:|---:|
+| 64 | 35.1 | 70.4 | 35.0 | 71.5 |
+| 32 | 3.7 | 9.2 | 3.0 | 7.3 |
+| 16 | 0.5 | 0.9 | 0.9 | 1.2 |
+| 8 | 5.8 | 3.1 | 5.2 | 1.9 |
+| 4 | 0.3 | 0.2 | 0.3 | 0.3 |
+| 2 | 0.0 | 0.0 | 0.0 | 0.0 |
+| All | 45.8 | 84.2 | 44.9 | 82.5 |
+
+Level 64 reads the storage voxel by voxel and makes most of the quads, so it takes most of
+the time; ambient occlusion doubles it. Level 8 reads voxels two levels finer and pools
+them. The snapshot on the game thread (the material colors) took 1.2 to 1.5 ms.
 
 ## Rebuilds
 

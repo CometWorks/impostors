@@ -116,4 +116,7 @@ public abstract class ImpostorSource
     // Game thread: snapshots the entry's content and returns the work that builds its shapes
     // (one per level of detail) on a background thread, or null if it is gone
     public abstract Func<byte[][]> PrepareBuild(ImpostorEntry entry);
+
+    // The entry's size for the build log, like "blocks=120"
+    public virtual string Describe(ImpostorEntry entry) => "";
 }

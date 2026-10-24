@@ -91,6 +91,9 @@ public sealed class GridSource : ImpostorSource
         && grid.Projector == null
         && grid.InScene;
 
+    public override string Describe(ImpostorEntry entry) =>
+        entry.Tag is MyCubeGrid[] grids ? $"blocks={grids.Sum(g => g.BlocksCount)}" : "";
+
     public override Func<byte[][]> PrepareBuild(ImpostorEntry entry)
     {
         if (entry.Tag is not MyCubeGrid[] grids || grids.Length == 0 || grids.Any(g => g.Closed))
@@ -166,6 +169,7 @@ public sealed class GridSource : ImpostorSource
             foreach (var s in samples)
                 AddSample(volume, s);
             shapes[i] = volume.ToShape();
+            BuildTiming.Mark(lod, shapes[i]);
             level16 ??= volume;
 
             // Finer levels would show no more detail than this one
@@ -179,6 +183,7 @@ public sealed class GridSource : ImpostorSource
         {
             coarse = coarse.Downsample(ImpostorEntry.Lods[i], 2);
             shapes[i] = coarse.ToShape();
+            BuildTiming.Mark(ImpostorEntry.Lods[i], shapes[i]);
         }
         return shapes;
     }

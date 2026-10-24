@@ -32,6 +32,16 @@ namespace Impostors
         // (see Shape). Small shapes share a message.
         public const byte ShapeData = 5;
 
+        // Client to server: float vertical field of view with zoom (radians), ushort viewport
+        // width and height, float forward x, y, z of the camera. Sent while the view is zoomed
+        // (see Zoom), when it zoomed or turned noticeably, and once more after leaving the zoom.
+        // The server sends finer levels for the impostors inside the view. Older servers
+        // ignore it.
+        public const byte View = 6;
+
+        // Views at least this much larger than the server's default estimate count as zoomed
+        public const double MinZoom = 1.5;
+
         public const int HelloInterval = 30;
 
         // The game draws at most this many billboards per frame, shared with every effect
@@ -39,6 +49,16 @@ namespace Impostors
 
         // Reliable messages are split around this size, so a burst doesn't hold up other traffic
         public const int MaxMessageSize = 16 * 1024;
+
+        // Pixels per radian near the screen center the server assumes: a 1080p screen with a
+        // 70 degree vertical field of view
+        public const double PixelsPerRadian = 540 / 0.7002075382097097;
+
+        // How many times larger a view shows things than the server's default estimate
+        public static double Zoom(double fov, double height)
+        {
+            return height / 2 / Math.Tan(fov / 2) / PixelsPerRadian;
+        }
     }
 
     public enum ImpostorKind : byte

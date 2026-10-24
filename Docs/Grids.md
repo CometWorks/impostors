@@ -54,6 +54,30 @@ impostor's size on a 1080p screen. Grids keep level 16 down to half the size whe
 impostors switch, since their coarser levels lose the shape fast. Levels under 16 are
 downsampled from 16: a cell is filled when 2 of its 8 children are, with their average color.
 
+A zoomed view, like the rifle's iron sight or a camera or telescope mod, shows impostors
+larger than that estimate. The mod tells the server, which sends finer levels for the
+impostors inside the view within a fraction of a second and lets them stay for 30 seconds
+after the zoom. See [Zoomed views](Zoom.md).
+
+## Build time
+
+One build of IMDC Rhea v2.3 on sirius (AMD Ryzen 7 9800X3D), from the `Impostor build:` log
+line (`tests/build_times.py`). The build saw 9265 blocks in the group. Times are milliseconds
+on the background thread that builds it; CPU is that thread's CPU time.
+
+| Level | Quads | Wall ms | CPU ms |
+|---|---:|---:|---:|
+| 64 | 4353 | 4.9 | 4.9 |
+| 32 | 860 | 5.9 | 5.9 |
+| 16 | 272 | 4.9 | 4.9 |
+| 8 | 79 | 0.1 | 0.1 |
+| 4 | 26 | 0.1 | 0.1 |
+| 2 | 10 | 0.0 | 0.0 |
+| All | | 15.8 | 15.8 |
+
+The snapshot of the blocks on the game thread took 5.4 ms. Level 16 includes finding the
+bounds; the levels under 16 are cheap, they are downsampled from 16.
+
 ## Rebuilds
 
 A group is rebuilt when blocks are added or removed or its bounds change, at most every
