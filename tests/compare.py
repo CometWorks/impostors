@@ -94,8 +94,9 @@ SUN = (
     else None
 )
 
-# Side of one image cell, pixels: half the screen height (IMP_RESOLUTION)
-CELL = int(rig.RESOLUTION.split("x")[1]) // 2
+# Side of one image cell, pixels: the sheet is about 3840 pixels wide (label column,
+# then per direction two cells and the gaps, see compose)
+CELL = int(3840 / (230 / 360 + len(DIRECTIONS) * (2 + 34 / 360)))
 
 
 def blueprint_xml(path: Path, position) -> tuple[str, list[int]]:
