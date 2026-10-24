@@ -94,7 +94,8 @@ SUN = (
     else None
 )
 
-CELL = 360  # Side of one image cell, pixels
+# Side of one image cell, pixels: half the screen height (IMP_RESOLUTION)
+CELL = int(rig.RESOLUTION.split("x")[1]) // 2
 
 
 def blueprint_xml(path: Path, position) -> tuple[str, list[int]]:
@@ -334,8 +335,9 @@ def compose(shots, sun, target: Path) -> None:
     """A row per distance; per direction a real and an impostor cell"""
     from PIL import Image, ImageDraw, ImageFont
 
-    font = ImageFont.load_default(size=22)
-    label, gap, pair_gap, header = 230, 6, 28, 80
+    k = CELL / 360  # Layout scale
+    font = ImageFont.load_default(size=round(22 * k))
+    label, gap, pair_gap, header = (round(v * k) for v in (230, 6, 28, 80))
     pair = 2 * CELL + gap
     width = label + len(DIRECTIONS) * (pair + pair_gap)
     height = header + len(DISTANCES) * (CELL + gap)
@@ -349,13 +351,15 @@ def compose(shots, sun, target: Path) -> None:
         )
         name = "".join(f"{'+' if v > 0 else '-'}{a}" for v, a in zip(view, "XYZ") if v)
         draw.text(
-            (left, 8),
+            (left, round(8 * k)),
             f"from {name}, {angle:.0f} deg from the sun",
             fill="black",
             font=font,
         )
-        draw.text((left + 8, 44), "real", fill="black", font=font)
-        draw.text((left + CELL + gap + 8, 44), "impostor", fill="black", font=font)
+        draw.text((left + 8, round(44 * k)), "real", fill="black", font=font)
+        draw.text(
+            (left + CELL + gap + 8, round(44 * k)), "impostor", fill="black", font=font
+        )
     for row_index, distance in enumerate(DISTANCES):
         top = header + row_index * (CELL + gap)
         radius, viewport = 0.0, 720
@@ -386,7 +390,7 @@ def compose(shots, sun, target: Path) -> None:
         # this sheet shows them anyway
         cut = "\ncut off by default" if 2 * radius * 1080 / viewport < 3 else ""
         draw.multiline_text(
-            (12, top + 12),
+            (12, top + round(12 * k)),
             f"{distance:.0f} m\nradius {radius:.1f} px{cut}",
             fill="black",
             spacing=8,

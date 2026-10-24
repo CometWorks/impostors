@@ -33,10 +33,11 @@ Paths, all overridable by environment variables:
     IMP_REMOTE_REPO           Remote plugin working copy
     IMP_DIRECT_TRANSPORT_REPO DirectTransport working copy
 
-IMP_DISPLAY=:N gives the clients a real window on that X display instead of
---headless. Headless clients can't render on the NVIDIA GPU (Remote drops its
-Vulkan driver), windowed ones can; with the XWayland display of a headless
-weston (weston --backend=headless --xwayland) nothing shows on the desktop.
+IMP_RESOLUTION sets the clients' screen size (1280x720). IMP_DISPLAY=:N gives
+the clients a real window on that X display instead of --headless. Headless
+clients can't render on the NVIDIA GPU (Remote drops its Vulkan driver),
+windowed ones can; with the XWayland display of a headless weston (weston
+--backend=headless --xwayland) nothing shows on the desktop.
 
 The server and the clients download hub plugins from GitHub. On a machine
 GitHub's API rate limits, export PULSAR_GITHUB_TOKEN: Pulsar and Magnetar read
@@ -92,6 +93,8 @@ from se_remote import RemoteAPI  # noqa: E402
 
 TASK = os.environ.get("IMP_TASK", "impostors")
 DISPLAY = os.environ.get("IMP_DISPLAY")
+# Screen size of the clients, WIDTHxHEIGHT
+RESOLUTION = os.environ.get("IMP_RESOLUTION", "1280x720")
 TEST_ROOT = HOME / ".se-test"
 
 IMPOSTORS_ID = "66AA3D09-1732-445D-A2B6-A377B31AE76C"
@@ -417,7 +420,7 @@ class Client:
             "--quality",
             self.quality,
             "--resolution",
-            "1280x720",
+            RESOLUTION,
             "--no-audio",
             *([] if DISPLAY else ["--headless"]),
             "--connect",
