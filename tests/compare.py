@@ -250,11 +250,18 @@ def main() -> None:
                         [p + v for p, v in zip(GRID_POSITION, shift)],
                         distance,
                         drawn=True,
+                        aim=False,
                     )
                 else:
                     write_mode("impostor")
                     impostor = look(
-                        api, main_id, None, GRID_POSITION, distance, drawn=True
+                        api,
+                        main_id,
+                        None,
+                        GRID_POSITION,
+                        distance,
+                        drawn=True,
+                        aim=False,
                     )
                 impostor_shot = shoot(
                     api, f"compare-{NAME}-{index}-{int(distance)}-impostor"
@@ -295,16 +302,19 @@ def normalize(v):
 LAST_EYE: list = []
 
 
-def look(api, entity_id, eye, target, distance, drawn=False) -> dict:
+def look(api, entity_id, eye, target, distance, drawn=False, aim=True) -> dict:
     """Moves the player (unless eye is None), aims at the target and waits for stats of
-    this view: the target near the screen center at the right distance"""
+    this view: the target near the screen center at the right distance. The impostor shot
+    doesn't aim again: aiming in zero gravity can end in another roll of the camera, and
+    the two shots wouldn't line up."""
     if eye is not None:
         # After a long jump the game takes a while to load the near models of the target
         far = math.dist(eye, LAST_EYE[0]) > 5000 if LAST_EYE else True
         LAST_EYE[:] = [eye]
         api.character_teleport(*eye)
         time.sleep(12 if far else 2)
-    api.character_look_at(*target, tolerance=0.2)
+    if aim:
+        api.character_look_at(*target, tolerance=0.2)
 
     def ready(row):
         if "screen" not in row or row["screen"] == "behind":
