@@ -342,6 +342,7 @@ def main() -> None:
             SERVER.stop()
 
     compose(shots, sun, SHOTS / f"compare-{NAME}.png")
+    rig.write_build_times(SERVER, SHOTS / f"compare-{NAME}-build-times.md")
     # The stats of every shot, for measuring them later
     (SHOTS / f"compare-{NAME}.json").write_text(
         json.dumps(

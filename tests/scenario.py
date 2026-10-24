@@ -348,6 +348,7 @@ def main():
         if os.environ.get("IMP_KEEP") != "1":
             CLIENT.stop()
             SERVER.stop()
+        print("build times", rig.write_build_times(SERVER, SHOTS / "build-times.md"))
     print(f"{'PASSED' if failures == 0 else 'FAILED'}: {failures} failure(s)")
     sys.exit(failures)
 

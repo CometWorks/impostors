@@ -53,6 +53,17 @@ public sealed class SafeZoneSource : ImpostorSource
         return () => shapes;
     }
 
+    // For the build time log
+    public override string Describe(ImpostorEntry entry)
+    {
+        if (entry.Tag is not MySafeZone zone)
+            return "";
+        var size = zone.Size;
+        return zone.Shape == MySafeZoneShape.Box
+            ? $"zone=box-{size.X:0}x{size.Y:0}x{size.Z:0}"
+            : $"zone=sphere-{zone.Radius:0}";
+    }
+
     private static ZoneShape Shape(MySafeZone zone)
     {
         var box = zone.Shape == MySafeZoneShape.Box;

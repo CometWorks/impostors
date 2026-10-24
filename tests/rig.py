@@ -240,6 +240,21 @@ def plugin_config(**options) -> str:
     )
 
 
+def write_build_times(server, target: Path) -> Path | None:
+    """The server's build times as a Markdown table (tests/build_times.py)"""
+    log = server.game_log()
+    if log is None:
+        return None
+    result = subprocess.run(
+        [sys.executable, str(TESTS / "build_times.py"), str(log)],
+        capture_output=True,
+        text=True,
+    )
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(result.stdout or result.stderr)
+    return target
+
+
 def stage_mod(mods_folder: Path) -> None:
     """Links the mod of this working copy into a Mods folder under its
     stand-in Workshop id"""

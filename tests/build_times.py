@@ -41,7 +41,7 @@ def parse(paths):
                 fields["kind"],
                 " ".join(
                     f"{k}={fields[k]}"
-                    for k in ("blocks", "voxels", "occlusion")
+                    for k in ("blocks", "voxels", "occlusion", "zone")
                     if k in fields
                 ),
             )
