@@ -175,6 +175,7 @@ public sealed class ImpostorService : IDisposable
         writer.Byte(Protocol.Welcome);
         writer.Byte(Protocol.Version);
         writer.Long(instanceId);
+        writer.Int(config.MaxQuadsPerFrame);
         Send(sender);
     }
 

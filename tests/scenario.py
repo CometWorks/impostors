@@ -92,7 +92,9 @@ def drawn(impostors: dict, grid: world.Grid) -> bool:
 def start():
     world.prepare(SERVER.world, CLIENT.steam_id, CLIENT.name, mod=not PLUGIN)
     SERVER.prepare([CLIENT.steam_id])
-    SERVER.write_plugin_config(rig.plugin_config(RebuildSeconds=10, RefreshSeconds=20))
+    SERVER.write_plugin_config(
+        rig.plugin_config(RebuildSeconds=10, RefreshSeconds=20, MaxQuadsPerFrame=20000)
+    )
     SERVER.start()
     CLIENT.launch(SERVER.port)
     api = CLIENT.wait_api()
@@ -126,6 +128,7 @@ def run(api):
         impostors.get(world.NEAR.entity_id, ""),
     )
     check("quads drawn", int(totals.get("quads", 0)) > 0, totals)
+    check("quad budget from the server", totals.get("maxquads") == "20000", totals)
     print("server:", command(api, "!iprobe stats"))
 
     for g in far + (world.NEAR,):

@@ -23,6 +23,11 @@ public interface IPluginConfig : INotifyPropertyChanged
     // Most impostors one player gets, the largest on screen win
     int MaxImpostorsPerPlayer { get; set; }
 
+    // Most impostor quads a client draws per frame, the nearest impostors first. The game
+    // draws at most 32768 billboards per frame, shared with thruster flames, glare, tracers
+    // and other effects.
+    int MaxQuadsPerFrame { get; set; }
+
     // Shape data sent to one player per second on average, bytes
     int ShapeBytesPerSecond { get; set; }
 

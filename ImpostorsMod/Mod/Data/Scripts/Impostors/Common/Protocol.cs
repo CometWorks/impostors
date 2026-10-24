@@ -10,15 +10,16 @@ namespace Impostors
     public static class Protocol
     {
         public const ushort Channel = 47213;
-        public const byte Version = 3;
+        public const byte Version = 4;
 
         // Client to server: byte version. Sent when the session is ready and then every
         // HelloInterval seconds, so a server that starts later or a cluster node the client
         // was moved to learns that this client draws impostors.
         public const byte Hello = 1;
 
-        // Server to client: byte version, long server instance id. A new instance id means
-        // a different server (process or cluster node): the client drops every impostor it has.
+        // Server to client: byte version, long server instance id, int most impostor quads the
+        // client draws per frame (MaxQuadsPerFrame). A new instance id means a different
+        // server (process or cluster node): the client drops every impostor it has.
         public const byte Welcome = 2;
 
         // Server to client: ushort count, then count states (see ImpostorState).
@@ -31,6 +32,9 @@ namespace Impostors
         public const byte ShapeData = 5;
 
         public const int HelloInterval = 30;
+
+        // The game draws at most this many billboards per frame, shared with every effect
+        public const int BillboardLimit = 32768;
 
         // Reliable messages are split around this size, so a burst doesn't hold up other traffic
         public const int MaxMessageSize = 16 * 1024;

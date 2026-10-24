@@ -30,7 +30,8 @@ Billboard facts this design depends on (decompiled game 1.210):
 - No distance culling, and the projection has no far plane: billboards at 50 km draw fine,
   vertices are made camera relative in double precision.
 - 32768 billboards per frame for everything, vanilla effects included. The overflow is
-  dropped silently. The renderer caps itself at 12000 quads.
+  dropped silently. The renderer caps itself at `MaxQuadsPerFrame` quads (12000 by default),
+  which the server sends with its Welcome.
 - Billboards are depth tested against the scene but never write depth. The `Standard` blend
   is weighted blended OIT, so overlapping opaque quads mix and look see-through. The `LDR`
   blend draws in submission order with premultiplied alpha after tone mapping. Impostors use
@@ -147,7 +148,7 @@ Each frame it:
 
 - skips impostors whose real entity exists on the client (`EntityExists` by id): within the
   replication range the real grid draws itself,
-- keeps the nearest impostors within the 12000 quad budget,
+- keeps the nearest impostors within the `MaxQuadsPerFrame` quad budget,
 - draws them far to near, each with its back faces culled and its quads sorted back to front
   for the current view direction (re-sorted when the view turns by about 3°),
 - shades each quad with its normal: `0.08 + 1.6 × max(0, n·sun)`, fitted to
@@ -213,7 +214,7 @@ Plugin SDK:
 | Server game thread | one scan per second; a build's snapshot copies every cube of the group |
 | Server background | 2 builds at a time |
 | Network per player | `ShapeBytesPerSecond` (32 KB/s) for shapes, about 70 bytes per moving impostor per second |
-| Client | 12000 quads per frame |
+| Client | `MaxQuadsPerFrame` quads per frame (12000) |
 
 Typical shapes, measured on the test grids: see the test results in the ticket.
 

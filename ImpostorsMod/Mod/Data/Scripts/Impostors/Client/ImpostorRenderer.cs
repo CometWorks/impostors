@@ -21,8 +21,8 @@ namespace Impostors
     {
         private const string MarkerFile = "Data/Scripts/Impostors/Client/ImpostorRenderer.cs";
 
-        // Billboards are shared with every effect of the game, which has 32768 per frame
-        private const int MaxQuads = 12000;
+        // Most quads drawn per frame, the server's MaxQuadsPerFrame once it welcomed us
+        private int maxQuads = 12000;
 
         // Fitted to screenshots of real grids and asteroids from 8 directions:
         // sides away from the sun are nearly black in space, and the game's tone mapping makes
@@ -110,7 +110,14 @@ namespace Impostors
         {
             var text = new System.Text.StringBuilder();
             text.AppendLine(
-                "impostors=" + impostors.Count + " drawn=" + visible.Count + " quads=" + drawnQuads
+                "impostors="
+                    + impostors.Count
+                    + " drawn="
+                    + visible.Count
+                    + " quads="
+                    + drawnQuads
+                    + " maxquads="
+                    + maxQuads
             );
             foreach (var impostor in impostors.Values)
             {
@@ -178,6 +185,7 @@ namespace Impostors
                     if (r.Byte() != Protocol.Version)
                         return;
                     var instance = r.Long();
+                    maxQuads = MathHelper.Clamp(r.Int(), 0, Protocol.BillboardLimit);
                     if (instance != serverInstance)
                     {
                         impostors.Clear();
@@ -260,7 +268,7 @@ namespace Impostors
 
             var quads = 0;
             var count = 0;
-            while (count < visible.Count && quads + visible[count].Shape.Count / 2 <= MaxQuads)
+            while (count < visible.Count && quads + visible[count].Shape.Count / 2 <= maxQuads)
                 quads += visible[count++].Shape.Count / 2;
 
             var sun = MyVisualScriptLogicProvider.GetSunDirection();

@@ -29,6 +29,7 @@ public class PluginConfig : IPluginConfig
     private float maxDistance;
     private float minPixels = 3f;
     private int maxImpostorsPerPlayer = 200;
+    private int maxQuadsPerFrame = 12000;
     private int shapeBytesPerSecond = 32 * 1024;
     private int rebuildSeconds = 60;
     private int refreshSeconds = 600;
@@ -68,6 +69,12 @@ public class PluginConfig : IPluginConfig
     {
         get => maxImpostorsPerPlayer;
         set => SetValue(ref maxImpostorsPerPlayer, value);
+    }
+
+    public int MaxQuadsPerFrame
+    {
+        get => maxQuadsPerFrame;
+        set => SetValue(ref maxQuadsPerFrame, value);
     }
 
     public int ShapeBytesPerSecond
