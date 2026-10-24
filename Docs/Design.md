@@ -33,7 +33,7 @@ Billboard facts this design depends on (decompiled game 1.210):
 - No distance culling, and the projection has no far plane: billboards at 50 km draw fine,
   vertices are made camera relative in double precision.
 - 32768 billboards per frame for everything, vanilla effects included. The overflow is
-  dropped silently. The renderer caps itself at `MaxQuadsPerFrame` quads (12000 by default),
+  dropped silently. The renderer caps itself at `MaxQuadsPerFrame` quads (16000 by default),
   which the server sends with its Welcome.
 - Billboards are depth tested against the scene but never write depth. The `Standard` blend
   is weighted blended OIT, so overlapping opaque quads mix and look see-through. The `LDR`
@@ -209,7 +209,7 @@ from afar anyway.
   1080p screen down to 0.82 times as bright under 13 pixels, where the real asteroids look
   darker than their lit impostors.
 - With `AsteroidOcclusion` on, their colors get ambient occlusion baked in, so pits and
-  crevices darken like the real ones. It's off by default: in 8-direction comparisons it made
+  crevices darken like the real ones. It's on by default. In 8-direction comparisons it made
   the impostors closer to the real asteroids at some distances and farther at others, for twice
   the build time.
 - Signature: a counter of the storage's `RangeChanged` events, so mining or a blast rebuilds it
@@ -259,7 +259,7 @@ one message under the SDK's 64 KiB payload limit.
 | Server game thread | one scan per second; a build's snapshot copies every cube of the group |
 | Server background | 2 builds at a time |
 | Network per player | `ShapeBytesPerSecond` (32 KB/s) for shapes, about 70 bytes per moving impostor per second |
-| Client | `MaxQuadsPerFrame` quads per frame (12000) |
+| Client | `MaxQuadsPerFrame` quads per frame (16000) |
 
 Typical shapes, measured on the test grids: see the test results in the ticket.
 

@@ -1,19 +1,19 @@
 # Configuration
 
 The server plugin reads `Impostors.cfg` from the server's data folder. It writes the file with
-the defaults on the first start.
+the defaults on the first start; a server that already has the file keeps the values in it.
 
 | Option | Default | Meaning |
 |---|---|---|
 | `Enabled` | true | Turns the plugin on |
 | `Grids` | true | Impostors of grids, see [Grids](Grids.md) |
 | `Asteroids` | true | Impostors of asteroids, see [Asteroids](Asteroids.md) |
-| `AsteroidOcclusion` | false | Darkens pits and crevices of asteroid impostors, doubles their build time |
+| `AsteroidOcclusion` | true | Darkens pits and crevices of asteroid impostors, doubles their build time |
 | `MinBlocks` | 8 | Grid groups with fewer blocks are not shown |
 | `MaxDistance` | 0 | Farthest impostor in meters, 0 is the world's view distance |
 | `MinPixels` | 3 | Impostors less than this many pixels across on a 1080p screen are not sent |
-| `MaxImpostorsPerPlayer` | 200 | The largest on screen win |
-| `MaxQuadsPerFrame` | 12000 | Most impostor quads a client draws per frame, nearest first |
+| `MaxImpostorsPerPlayer` | 1000 | The largest on screen win |
+| `MaxQuadsPerFrame` | 16000 | Most impostor quads a client draws per frame, nearest first |
 | `ShapeBytesPerSecond` | 32768 | Shape data sent to one player per second, on average |
 | `RebuildSeconds` | 60 | Shortest time between two rebuilds of an impostor |
 | `RefreshSeconds` | 600 | Impostors in view are rebuilt this often to catch paint changes |

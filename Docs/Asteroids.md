@@ -4,13 +4,13 @@ Saved and edited asteroids beyond the range the game replicates them to. That ra
 `ViewDistance/√3` per axis around the player (8.7 km at the default 15 km view distance), so
 past it players see no rock where a mined or saved asteroid is.
 
-The two sheets below compare real asteroids with their impostors, ambient occlusion off (the
-default). Each row is a distance, from close up to where the default `MinPixels` drops the
-impostor. Each column pair is a view from one of the 8 cube corners, with the angle to the
-sun on top: the real asteroid on the left, its impostor on the right. The impostor is shot
-three radii to the side of the real one, since the game can't hide a real asteroid. Every
-impostor cell names its level of detail. Where the real cell is empty, the game no longer
-draws that asteroid. Rendered at 2560x1440 with `tests/compare.py`.
+The two sheets below compare real asteroids with their impostors, ambient occlusion off.
+Each row is a distance, from close up to where the default `MinPixels` drops the impostor.
+Each column pair is a view from one of the 8 cube corners, with the angle to the sun on top:
+the real asteroid on the left, its impostor on the right. The impostor is shot three radii
+to the side of the real one, since the game can't hide a real asteroid. Every impostor cell
+names its level of detail. Where the real cell is empty, the game no longer draws that
+asteroid. Rendered at 2560x1440 with `tests/compare.py`.
 
 **512 m asteroid** (`Asteroid512-008`), 800 m to 227 km. The game stops drawing it past
 about 50 km.
@@ -41,9 +41,9 @@ the rest).
   one flat color.
 - Small impostors are dimmed by the mod, down to 0.82 times as bright under 13 pixels in
   radius on a 1080p screen: real asteroids look darker than their lit impostors at that size.
-- `AsteroidOcclusion` bakes ambient occlusion into the colors, which darkens pits and
-  crevices. It is off by default: against the real asteroids it helped at some distances and
-  hurt at others, and it doubles the build time.
+- `AsteroidOcclusion` (on by default) bakes ambient occlusion into the colors, which darkens
+  pits and crevices. Against the real asteroids it helped at some distances and hurt at
+  others, and it doubles the build time.
 
 The same asteroids with three columns per direction: the real asteroid, the impostor without
 ambient occlusion and the impostor with it.
