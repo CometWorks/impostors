@@ -122,10 +122,12 @@ public sealed class VoxelSource : ImpostorSource
         bool occluded
     )
     {
-        // The levels to build: up to the first that reads single voxels
+        // The levels read from the storage, from 8 up to the first that reads single voxels;
+        // levels 4 and 2 are downsampled from 8
         var shapes = new byte[ImpostorEntry.Lods.Length][];
+        var first = Array.IndexOf(ImpostorEntry.Lods, (byte)8);
         var levels = new List<(int index, int voxelLod)>();
-        for (var i = 0; i < shapes.Length; i++)
+        for (var i = first; i < shapes.Length; i++)
         {
             // The coarsest voxel level of detail with at least this many voxels along the longest axis
             var voxelLod = Math.Max(
@@ -143,6 +145,7 @@ public sealed class VoxelSource : ImpostorSource
         // also gets at least CoarsestCells cells across a rock that is small for its storage.
         var extent = 0f;
         var data = new MyStorageData();
+        CellVolume level8 = null;
         for (var k = levels.Count - 1; k >= 0; k--)
         {
             var (i, voxelLod) = levels[k];
@@ -193,6 +196,24 @@ public sealed class VoxelSource : ImpostorSource
             if (extent == 0 && max.X >= min.X)
                 extent = (max - min + 1).AbsMax() * voxelSize;
             shapes[i] = volume.ToShape(smooth: true, occluded);
+            if (i == first)
+                level8 = volume;
+        }
+
+        // Far asteroids cover a few pixels, where only their color is left to see. A coarse
+        // cell is filled when half of its 8 children are, which keeps the volume; a thin rock
+        // that would vanish that way keeps every cell with a filled child.
+        var coarse = level8;
+        for (var i = first - 1; i >= 0 && coarse != null; i--)
+        {
+            var finer = coarse;
+            coarse = finer.Downsample(ImpostorEntry.Lods[i], 4);
+            shapes[i] = coarse.ToShape(smooth: true, occluded);
+            if (shapes[i].Length <= Shape.HeaderSize)
+            {
+                coarse = finer.Downsample(ImpostorEntry.Lods[i], 1);
+                shapes[i] = coarse.ToShape(smooth: true, occluded);
+            }
         }
         return shapes;
     }

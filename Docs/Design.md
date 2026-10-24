@@ -198,8 +198,9 @@ from afar anyway.
 - The coarsest level is pooled from voxels two levels finer: a cell is filled when at least
   half of its voxels are. The game's own coarse voxels erode thin parts, and level 8 looked
   half as large as level 16. That level also gets at least 6 cells across a rock that is
-  small for its voxel storage. Asteroids keep level 8: their 16 costs about 15 times the
-  quads (513 instead of 34 for a 512 m one).
+  small for its voxel storage. Levels 4 and 2 are downsampled from 8, a cell filled when
+  half of its 8 children are (or any, if the rock would vanish). Level 16 costs about 15
+  times the quads of level 8 (513 instead of 34 for a 512 m one), so far rocks stay coarse.
 - The mod dims asteroid impostors that are small on screen: from 27 pixels in radius on a
   1080p screen down to 0.82 times as bright under 13 pixels, where the real asteroids look
   darker than their lit impostors.
