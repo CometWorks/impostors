@@ -121,7 +121,9 @@ Every second it:
    ones wait until the following seconds have paid off the debt. New impostors don't wait.
    The states go first, then the shapes, small ones sharing a message up to 16 KB.
 4. Starts background builds for the wanted entries that have no shapes yet, or whose content
-   changed, at most two at a time.
+   changed, at most two at a time. Each finished build logs an `Impostor build:` line with
+   the snapshot time on the game thread and the wall clock time, thread CPU time and quads
+   of each level; `tests/build_times.py` turns server logs into a table.
 
 Rebuilds: an entry whose signature changed is rebuilt at most every `RebuildSeconds` (60).
 Changes the signature misses, like paint, are caught by rebuilding entries in view every
@@ -136,8 +138,8 @@ narrows the field of view, and the impostors in view show larger than the defaul
 The mod reads the camera's `FovWithZoom` and viewport size. While the view shows things at
 least 1.5 times larger than a 1080p screen at 70° does, it sends a `View` message: when the
 zoom starts, when it changes by 5%, when the view turns by an eighth of its field of view,
-and once more when the zoom ends. That is a few per second at most, it is checked every 10
-ticks. For that player the server then:
+and once more when the zoom ends. It checks every 10 ticks, so that is six messages per
+second at most. For that player the server then:
 
 - multiplies the on-screen size of the impostors inside the view (the angle off its
   direction, less the impostor's angular radius, within the half diagonal) by the zoom,
