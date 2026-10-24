@@ -22,7 +22,7 @@ namespace Impostors
         private const string MarkerFile = "Data/Scripts/Impostors/Client/ImpostorRenderer.cs";
 
         // Most quads drawn per frame, the server's MaxQuadsPerFrame once it welcomed us
-        private int maxQuads = 12000;
+        private int maxQuads = 16000;
 
         // Fitted to screenshots of real grids and asteroids from 8 directions:
         // sides away from the sun are nearly black in space, and the game's tone mapping makes
