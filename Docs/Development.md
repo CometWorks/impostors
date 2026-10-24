@@ -15,8 +15,13 @@ the whitelist, loading the mod in the game does.
 - `tests/compare.py` shoots a grid (from a blueprint) or an asteroid next to its impostor from
   the 8 cube corners at a list of distances and puts the shots into one sheet, like the ones
   on the [Grids](Grids.md) and [Asteroids](Asteroids.md) pages. See its docstring.
+- `tests/zoom.py` checks the finer levels of a zoomed view: the client aims down the rifle's
+  iron sight (70° to 40°) on a 1920x1080 screen, and it measures how soon the finer shapes
+  arrive, in client ticks.
 - `tests/cluster_scenario.py` checks far view across a cluster on the cluster's scenario
   bench.
+- `tests/build_times.py` makes a table of the build times from the `Impostor build:` lines of
+  server logs, per object and level. Any run that builds impostors writes them.
 
 ## Plugin version
 

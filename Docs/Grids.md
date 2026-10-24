@@ -54,6 +54,11 @@ impostor's size on a 1080p screen. Grids keep level 16 down to half the size whe
 impostors switch, since their coarser levels lose the shape fast. Levels under 16 are
 downsampled from 16: a cell is filled when 2 of its 8 children are, with their average color.
 
+A zoomed view, like the rifle's iron sight or a camera or telescope mod, shows impostors
+larger than that estimate. The mod tells the server, which sends finer levels for the
+impostors inside the view within a fraction of a second and lets them stay for 30 seconds
+after the zoom. See [Design](Design.md), "Zoomed views".
+
 ## Rebuilds
 
 A group is rebuilt when blocks are added or removed or its bounds change, at most every

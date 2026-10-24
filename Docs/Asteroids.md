@@ -71,6 +71,11 @@ Counts with ambient occlusion off; with it on they are about 3% higher. Each qua
 bytes, so level 64 is about 150 KB. The server sends one level per impostor
 and player, about one cell per 2.5 pixels of the impostor's size on a 1080p screen.
 
+A zoomed view, like the rifle's iron sight or a camera or telescope mod, shows impostors
+larger than that estimate. The mod tells the server, which sends finer levels for the
+impostors inside the view within a fraction of a second and lets them stay for 30 seconds
+after the zoom. See [Design](Design.md), "Zoomed views".
+
 - Level 8 pools voxels two levels finer: a cell is filled when at least half of its voxels
   are. The game's own coarse voxels erode thin parts, and level 8 looked half as large as
   level 16 when read directly. A rock that is small for its voxel storage gets at least 6
