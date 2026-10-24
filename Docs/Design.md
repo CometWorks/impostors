@@ -274,8 +274,9 @@ The game draws a zone's surface with a distorting shield effect, which blurs and
 is inside. Impostors are billboards drawn after tone mapping, so they show undistorted on top
 of it. A grid or asteroid impostor whose AABB center is inside an enabled zone therefore gets
 one level of detail lower than it would outside, and its state carries the zone's color
-(`Tint`, 4 bytes, alpha 0 outside of zones). The mod blends its quad colors that much towards
-the zone's color (`ZoneTint` in the renderer), fitted to comparison sheets. The level picked
+(`Tint`, 4 bytes, alpha 0 outside of zones). The mod blends its quad colors 35% towards the
+zone's surface color, the zone's color 60% of the way to white (`ZoneTint`, `ZoneTintPale` in
+the renderer), fitted to comparison sheets. The level picked
 before the drop is kept for the hysteresis, so the drop doesn't repeat every second.
 
 On a cluster, admin zones are on every node (the cluster plugin's `AdminSafeZones`), so each
