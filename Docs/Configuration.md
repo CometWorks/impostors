@@ -23,8 +23,15 @@ Notes:
 
 - `MaxDistance` may be larger than the view distance, which the game caps at 50 km.
   Impostors draw fine far beyond it.
-- `MaxQuadsPerFrame` reaches the clients with the server's Welcome. The game draws at most
-  32768 billboards per frame for every effect (thruster flames, glare, tracers), so leave room
-  for them. The client keeps the nearest impostors within the budget.
+- `MaxQuadsPerFrame` is the clients' budget, sent by the server. The game draws at most 32768
+  billboards per frame for every effect (thruster flames, glare, tracers), so leave room for
+  them. The client keeps the nearest impostors within the budget. How the value gets there:
+  - When a client joins, the mod says hello and the server answers with a Welcome that
+    carries `MaxQuadsPerFrame`. The mod takes it, capped at 32768.
+  - The mod says hello every 30 seconds and every Welcome carries the value again, so a
+    changed `Impostors.cfg` reaches the clients within about 30 seconds.
+  - Until the first Welcome the mod uses its own starting value, the same as the default
+    (16000). It hardly matters: the server sends impostors only after the Welcome.
+  - The client plugin draws with the same code, so it gets the budget the same way.
 - A larger shape than `ShapeBytesPerSecond` still goes out; the following ones wait until the
   player's next seconds have paid it off. New impostors never wait.
