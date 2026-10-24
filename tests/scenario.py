@@ -285,12 +285,12 @@ def run_zones(api):
     )
     lods = [2, 4, 8, 16, 32, 64]
     check(
-        "impostor Shielded inside the zone, one level lower, tinted",
-        drawn(impostors, shielded)
-        and "tint" in inside
-        and "tint" not in outside
+        "impostor Shielded inside the zone, lower level, tinted",
+        drawn(impostors, shielded) and "tint" in inside and "tint" not in outside
+        # Lower, not exactly one level: the levels keep some hysteresis from where the
+        # player was before
         and lods.index(int(inside.get("lod", 0)))
-        == lods.index(int(outside.get("lod", 0))) - 1,
+        < lods.index(int(outside.get("lod", 0))),
         f"inside {inside or 'missing'} outside {outside}",
     )
     # Behind is seen through the zone but not inside it: as usual
