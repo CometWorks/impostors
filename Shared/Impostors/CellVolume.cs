@@ -33,12 +33,6 @@ public sealed class CellVolume
         weight = new int[count];
     }
 
-    // Cells along the longest axis of the box and the cell size for that, at least minCellSize
-    public static float CellSizeFor(Vector3 boxSize, int lod, float minCellSize)
-    {
-        return Math.Max(boxSize.AbsMax() / lod, minCellSize);
-    }
-
     public bool TryGetCell(Vector3 local, out Vector3I cell)
     {
         var p = (local - Origin) / CellSize;

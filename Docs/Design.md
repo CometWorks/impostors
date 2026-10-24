@@ -46,8 +46,14 @@ The server rasterizes the content into a cell grid in the impostor's own frame: 
 filled or empty and has an average color. The surface faces of the filled cells are merged
 greedily into rectangles of one color, so a flat painted side is a single quad.
 
-- Levels of detail: 8, 16, 32 and 64 cells along the longest axis. A level stops being built
+- Levels of detail: 8, 16, 32 and 64 cells along the longest axis, fewer for grids where
+  that would split blocks. A level stops being built
   once its cells are as small as the content's own resolution (a block for grids).
+- A grid's cells are a whole number of its main grid's blocks and sit on that grid's block
+  lattice, so its finest level is block for block, and the cells sticking out are shared by
+  both sides. A block fills the cells whose centers it contains, or the one holding its own
+  center (smaller blocks of subgrids). Cells of other sizes cut blocks into uneven parts,
+  which showed as stripes and a shape shifted and grown by up to a cell.
 - The server sends one level per impostor and player, picked from the on-screen size on a
   1080p screen with a 70° field of view: about one cell per 2.5 pixels.
 - Encoding (`Protocol.cs`): a 19 byte header (level, cell size, origin) and 10 bytes per quad

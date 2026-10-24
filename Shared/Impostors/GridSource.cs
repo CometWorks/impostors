@@ -98,12 +98,10 @@ public sealed class GridSource : ImpostorSource
         var main = grids.FirstOrDefault(g => g.EntityId == entry.Id) ?? grids[0];
         var toMain = MatrixD.Invert(main.WorldMatrix);
         var samples = new List<Sample>(grids.Sum(g => g.BlocksCount));
-        var minCellSize = float.MaxValue;
         foreach (var grid in grids)
         {
             var toFrame = grid.WorldMatrix * toMain;
             var size = grid.GridSize;
-            minCellSize = Math.Min(minCellSize, size);
             foreach (var block in grid.GetBlocks())
             {
                 var color = BlockColor(block);
@@ -124,10 +122,13 @@ public sealed class GridSource : ImpostorSource
             }
         }
 
-        return () => Build(samples, minCellSize);
+        return () => Build(samples, main.GridSize);
     }
 
-    private static byte[][] Build(List<Sample> samples, float minCellSize)
+    // Cells are a whole number of the main grid's blocks and sit on its block lattice, so at the
+    // finest level the main grid comes out block for block: cells of another size cut blocks
+    // in uneven parts, which shows as stripes and a shape shifted by up to a cell
+    private static byte[][] Build(List<Sample> samples, float lattice)
     {
         var min = new Vector3(float.MaxValue);
         var max = new Vector3(float.MinValue);
@@ -138,40 +139,51 @@ public sealed class GridSource : ImpostorSource
         }
         var box = max - min;
 
+        // The main grid's block faces are at (n + 0.5) * lattice in its frame
+        var start = (new Vector3(Vector3I.Floor(min / lattice - 0.5f)) + 0.5f) * lattice;
+
         var shapes = new byte[ImpostorEntry.Lods.Length][];
         for (var i = 0; i < shapes.Length; i++)
         {
             var lod = ImpostorEntry.Lods[i];
-            var cellSize = CellVolume.CellSizeFor(box, lod, minCellSize);
-            var cells = Vector3I.Ceiling(box / cellSize);
-            var volume = new CellVolume(cells, cellSize, min, lod);
+            var blocks = Math.Max(1, (int)Math.Ceiling(box.AbsMax() / lod / lattice - 0.01f));
+            var cellSize = blocks * lattice;
+            var cells = Vector3I.Ceiling((max - start) / cellSize - 0.001f);
+
+            // Moved back by whole blocks, so the cells sticking out are shared by both sides
+            var spare = new Vector3(cells) * cellSize - box;
+            var shift = Vector3.Max(spare / 2 - (min - start), Vector3.Zero) / lattice;
+            var origin = start - new Vector3(Vector3I.Floor(shift)) * lattice;
+            var volume = new CellVolume(cells, cellSize, origin, lod);
             foreach (var s in samples)
                 AddSample(volume, s);
             shapes[i] = volume.ToShape();
 
             // Finer levels would show no more detail than this one
-            if (cellSize <= minCellSize)
+            if (blocks == 1)
                 break;
         }
         return shapes;
     }
 
+    // Fills the cells whose centers are inside the cube, or the one holding its center: a
+    // cube marking every cell it touches would make the shape grow by up to a cell per side
     private static void AddSample(CellVolume volume, Sample s)
     {
-        if (s.Size <= volume.CellSize)
+        var lo = (s.Center - s.Size / 2 - volume.Origin) / volume.CellSize - 0.5f;
+        var hi = (s.Center + s.Size / 2 - volume.Origin) / volume.CellSize - 0.5f;
+        var first = Vector3I.Ceiling(lo);
+        var last = Vector3I.Floor(hi);
+        if (first.X > last.X || first.Y > last.Y || first.Z > last.Z)
         {
             volume.Add(s.Center, s.Color);
             return;
         }
 
-        // A cube larger than a cell covers several of them
-        var steps = (int)Math.Ceiling(s.Size / volume.CellSize);
-        var step = s.Size / steps;
-        var start = s.Center - (s.Size - step) / 2;
-        for (var x = 0; x < steps; x++)
-        for (var y = 0; y < steps; y++)
-        for (var z = 0; z < steps; z++)
-            volume.Add(start + new Vector3(x, y, z) * step, s.Color);
+        for (var x = first.X; x <= last.X; x++)
+        for (var y = first.Y; y <= last.Y; y++)
+        for (var z = first.Z; z <= last.Z; z++)
+            volume.Add(volume.Origin + (new Vector3(x, y, z) + 0.5f) * volume.CellSize, s.Color);
     }
 
     // The painted color: block models are painted over most of their surface, functional
