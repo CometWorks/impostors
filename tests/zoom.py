@@ -42,8 +42,10 @@ def sight_shot(api, name: str, target) -> Path:
     length = math.sqrt(sum(v * v for v in down))
     offset = distance * math.tan(math.radians(8))
     aim = [t + v / length * offset for t, v in zip(target, down)]
-    api.character_look_at(*aim, tolerance=0.2)
-    time.sleep(2)
+    # The character turns over a few frames; the second call settles the aim
+    for _ in range(2):
+        api.character_look_at(*aim, tolerance=0.2)
+        time.sleep(2)
     SHOTS.mkdir(parents=True, exist_ok=True)
     path = SHOTS / f"{name}.png"
     path.write_bytes(api.screenshot_bytes(ignore_sprites=True))
@@ -174,10 +176,35 @@ def run(api):
     )
 
 
+def sheet() -> Path:
+    """The wide crops scaled up by the zoom next to the zoomed ones: what the zoom shows
+    with the unzoomed level, and with the finer one"""
+    names = [
+        ("zoom-Station-wide", True),
+        ("zoom-Station-narrow", False),
+        ("zoom-RockFar-wide", True),
+        ("zoom-RockFar-narrow", False),
+    ]
+    zoom = math.tan(math.radians(35)) / math.tan(math.radians(20))
+    out = Image.new("RGB", (300 * len(names), 300))
+    for k, (name, wide) in enumerate(names):
+        crop = Image.open(SHOTS / f"{name}-crop.png").convert("RGB")
+        if wide:
+            size = int(300 / zoom)
+            crop = crop.crop(
+                (150 - size // 2, 150 - size // 2, 150 + size // 2, 150 + size // 2)
+            ).resize((300, 300), Image.NEAREST)
+        out.paste(crop, (300 * k, 0))
+    path = SHOTS / "zoom-sheet.png"
+    out.save(path)
+    return path
+
+
 def main():
     try:
         api = scenario.start()
         run(api)
+        print("sheet", sheet())
     finally:
         if os.environ.get("IMP_KEEP") != "1":
             CLIENT.stop()
