@@ -67,6 +67,43 @@ public sealed class CellVolume
         }
     }
 
+    // A level half as fine: each cell pools its 8 child cells, filled when at least minFilled
+    // of them are, with their average color. Downsampling keeps the cells on this volume's
+    // lattice, where building a coarse level from the content again would not.
+    public CellVolume Downsample(byte lod, int minFilled)
+    {
+        var coarse = new CellVolume((Size + 1) / 2, CellSize * 2, Origin, lod);
+        var filled = new int[coarse.weight.Length];
+        for (var z = 0; z < Size.Z; z++)
+        for (var y = 0; y < Size.Y; y++)
+        for (var x = 0; x < Size.X; x++)
+        {
+            var i = Index(x, y, z);
+            if (weight[i] == 0)
+                continue;
+            var j = coarse.Index(x / 2, y / 2, z / 2);
+            coarse.red[j] += red[i];
+            coarse.green[j] += green[i];
+            coarse.blue[j] += blue[i];
+            coarse.weight[j] += weight[i];
+            if (angled != null && angled[i] > 0)
+            {
+                coarse.angled ??= new int[coarse.weight.Length];
+                coarse.angled[j] += angled[i];
+            }
+            filled[j]++;
+        }
+        for (var j = 0; j < filled.Length; j++)
+        {
+            if (filled[j] >= minFilled)
+                continue;
+            coarse.red[j] = coarse.green[j] = coarse.blue[j] = coarse.weight[j] = 0;
+            if (coarse.angled != null)
+                coarse.angled[j] = 0;
+        }
+        return coarse;
+    }
+
     private bool Angled(int index) => angled != null && angled[index] * 2 > weight[index];
 
     private int Index(int x, int y, int z) => (z * Size.Y + y) * Size.X + x;

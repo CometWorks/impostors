@@ -47,21 +47,26 @@ The server rasterizes the content into a cell grid in the impostor's own frame: 
 filled or empty and has an average color. The surface faces of the filled cells are merged
 greedily into rectangles of one color, so a flat painted side is a single quad.
 
-- Levels of detail: 8, 16, 32 and 64 cells along the longest axis, fewer for grids where
-  that would split blocks. Grids start at 16: their level 8 saved little (a 18k block
-  ship: 104 instead of 246 quads) and lost most of the detail.
+- Levels of detail: 2, 4, 8, 16, 32 and 64 cells along the longest axis, fewer for grids
+  where that would split blocks. A level stops being built once its cells are as small as
+  the content's own resolution (a block for grids). Levels 2 and 4 are for the many far
+  ones that cover a few pixels, where only the color is left to see: an asteroid ring
+  shows hundreds at once.
+- A grid's levels under 16 are downsampled from 16, a cell filled when 2 of its 8
+  children are, with their average color: built from the blocks again, level 8 lost most
+  of the detail (a 18k block ship: 104 quads against 246 at 16).
 - Faces of sloped armor (Slope, Corner and Round blocks) are shaded with the smoothed
   surface normal, like asteroids: as cube faces their stair steps alternate between lit
   and dark, and the whole grid came out brighter or darker than the real one depending on
-  the angle. A level stops being built
-  once its cells are as small as the content's own resolution (a block for grids).
+  the angle.
 - A grid's cells are a whole number of its main grid's blocks and sit on that grid's block
   lattice, so its finest level is block for block, and the cells sticking out are shared by
   both sides. A block fills the cells whose centers it contains, or the one holding its own
   center (smaller blocks of subgrids). Cells of other sizes cut blocks into uneven parts,
   which showed as stripes and a shape shifted and grown by up to a cell.
 - The server sends one level per impostor and player, picked from the on-screen size on a
-  1080p screen with a 70° field of view: about one cell per 2.5 pixels.
+  1080p screen with a 70° field of view: about one cell per 2.5 pixels. Grids keep level
+  16 down to half that size, as their coarser levels lose the shape fast.
 - Encoding (`Protocol.cs`): a 19 byte header (level, cell size, origin) and 10 bytes per quad
   (face, min cell, width, height, RGB565 color, normal).
 - Each quad carries the normal it is shaded with, octahedral with 6 bits per coordinate
@@ -110,6 +115,7 @@ Every second it:
    `ShapeBytesPerSecond` per player: one goes out while the player has credit left, even
    if it is larger than that (an asteroid's finest level is about 150 KB), and the next
    ones wait until the following seconds have paid off the debt. New impostors don't wait.
+   The states go first, then the shapes, small ones sharing a message up to 16 KB.
 4. Starts background builds for the wanted entries that have no shapes yet, or whose content
    changed, at most two at a time.
 
@@ -135,7 +141,7 @@ Mod networking on channel 47213, reliable messages up to 16 KB:
 | Welcome | server to client | protocol version, server instance id |
 | States | server to client | impostor states: id, kind, version, level, radius, position, orientation, velocity (70 bytes each) |
 | Remove | server to client | impostor ids |
-| ShapeData | server to client | id, version, shape |
+| ShapeData | server to client | count, then id, version and shape per impostor |
 
 The repeated hello means the server needs no state about clients across restarts, and a
 cluster node a player was moved to learns about the client within 30 s. A different server

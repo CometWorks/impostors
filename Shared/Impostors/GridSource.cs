@@ -145,10 +145,13 @@ public sealed class GridSource : ImpostorSource
         // The main grid's block faces are at (n + 0.5) * lattice in its frame
         var start = (new Vector3(Vector3I.Floor(min / lattice - 0.5f)) + 0.5f) * lattice;
 
-        // Level 8 of a grid saves little against 16 (Rhea, 18k blocks: 104 instead of 246
-        // quads, 1.4 KB less) and loses most of the detail, so grids start at 16
+        // Built from the blocks from level 16 up; the coarser levels are downsampled from 16,
+        // which keeps their cells on the block lattice and the average colors. Built from the
+        // blocks again, level 8 lost most of the detail.
         var shapes = new byte[ImpostorEntry.Lods.Length][];
-        for (var i = 1; i < shapes.Length; i++)
+        var first = Array.IndexOf(ImpostorEntry.Lods, (byte)16);
+        CellVolume level16 = null;
+        for (var i = first; i < shapes.Length; i++)
         {
             var lod = ImpostorEntry.Lods[i];
             var blocks = Math.Max(1, (int)Math.Ceiling(box.AbsMax() / lod / lattice - 0.01f));
@@ -163,12 +166,20 @@ public sealed class GridSource : ImpostorSource
             foreach (var s in samples)
                 AddSample(volume, s);
             shapes[i] = volume.ToShape();
+            level16 ??= volume;
 
             // Finer levels would show no more detail than this one
             if (blocks == 1)
                 break;
         }
-        shapes[0] = shapes[1];
+
+        // A coarse cell is filled when 2 of its 8 children are, so thin parts last a little
+        var coarse = level16;
+        for (var i = first - 1; i >= 0; i--)
+        {
+            coarse = coarse.Downsample(ImpostorEntry.Lods[i], 2);
+            shapes[i] = coarse.ToShape();
+        }
         return shapes;
     }
 

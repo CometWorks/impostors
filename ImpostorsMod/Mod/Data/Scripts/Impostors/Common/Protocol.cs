@@ -28,7 +28,8 @@ namespace Impostors
         // Server to client: ushort count, then count long ids of impostors to drop.
         public const byte Remove = 4;
 
-        // Server to client: long id, int version, then a shape (see Shape).
+        // Server to client: ushort count, then count times long id, int version and a shape
+        // (see Shape). Small shapes share a message.
         public const byte ShapeData = 5;
 
         public const int HelloInterval = 30;

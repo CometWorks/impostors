@@ -216,9 +216,13 @@ namespace Impostors
 
                 case Protocol.ShapeData:
                 {
-                    var id = r.Long();
-                    var version = r.Int();
-                    Get(id).Shape = ClientShape.Read(r, version);
+                    var count = r.UShort();
+                    for (var i = 0; i < count; i++)
+                    {
+                        var id = r.Long();
+                        var version = r.Int();
+                        Get(id).Shape = ClientShape.Read(r, version);
+                    }
                     break;
                 }
             }

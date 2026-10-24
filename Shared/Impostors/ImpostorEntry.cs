@@ -8,7 +8,7 @@ namespace Shared.Impostors;
 public sealed class ImpostorEntry
 {
     // Levels of detail: cells along the longest axis of the shape
-    public static readonly byte[] Lods = [8, 16, 32, 64];
+    public static readonly byte[] Lods = [2, 4, 8, 16, 32, 64];
 
     public readonly long Id;
     public readonly ImpostorSource Source;

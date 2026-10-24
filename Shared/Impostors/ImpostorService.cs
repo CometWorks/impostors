@@ -225,6 +225,7 @@ public sealed class ImpostorService : IDisposable
         SendRemove(viewer.SteamId, removed);
 
         var states = new List<ImpostorState>();
+        var shapes = new List<(ImpostorEntry entry, byte[] shape)>();
         viewer.ShapeCredit = Math.Min(
             viewer.ShapeCredit + config.ShapeBytesPerSecond,
             config.ShapeBytesPerSecond
@@ -236,8 +237,8 @@ public sealed class ImpostorService : IDisposable
                 continue;
 
             viewer.Sent.TryGetValue(entry.Id, out var sent);
-            // The level of the shape at hand: a grid has no level 8, its 16 stands in
-            var shape = entry.Shapes[entry.ShapeIndex(PickLod(pixels, sent?.Lod ?? 0))];
+            // The level of the shape at hand, which may be coarser than the wanted one
+            var shape = entry.Shapes[entry.ShapeIndex(PickLod(pixels, sent?.Lod ?? 0, entry.Kind))];
             var lod = shape[0];
             var state = entry.State(lod);
 
@@ -249,9 +250,9 @@ public sealed class ImpostorService : IDisposable
                     continue;
                 viewer.ShapeCredit -= shape.Length;
 
-                // The state goes first, so the client knows the version the shape belongs to
-                SendStates(viewer.SteamId, [state]);
-                SendShape(viewer.SteamId, entry, shape);
+                // The states go first, so the client knows the version a shape belongs to
+                states.Add(state);
+                shapes.Add((entry, shape));
                 viewer.Sent[entry.Id] = sent = new Sent();
             }
             else if (!Moved(sent, state, distance))
@@ -271,12 +272,18 @@ public sealed class ImpostorService : IDisposable
         }
 
         SendStates(viewer.SteamId, states);
+        SendShapes(viewer.SteamId, shapes);
     }
 
     // Level of detail for this on-screen radius, with some hysteresis around the current one
-    private static byte PickLod(double pixels, byte current)
+    private static byte PickLod(double pixels, byte current, ImpostorKind kind)
     {
         var wanted = 2 * pixels * CellsPerPixel;
+
+        // Grids keep level 16 down to half the size: their coarser levels lose the shape
+        // fast, and a zoomed camera shows them larger than this estimate
+        if (kind == ImpostorKind.Grid && wanted < 16)
+            wanted = Math.Min(16, wanted * 2);
         var lod = ImpostorEntry.Lods.Last();
         foreach (var l in ImpostorEntry.Lods)
         {
@@ -333,14 +340,37 @@ public sealed class ImpostorService : IDisposable
         }
     }
 
-    private void SendShape(ulong steamId, ImpostorEntry entry, byte[] shape)
+    // Small shapes share a message up to MaxMessageSize: hundreds of far asteroids at levels 2
+    // and 4 take a few dozen bytes each. A larger shape goes alone.
+    private void SendShapes(ulong steamId, List<(ImpostorEntry entry, byte[] shape)> shapes)
     {
-        writer.Clear();
-        writer.Byte(Protocol.ShapeData);
-        writer.Long(entry.Id);
-        writer.Int(entry.Version);
-        writer.Bytes(shape);
-        Send(steamId);
+        var start = 0;
+        while (start < shapes.Count)
+        {
+            writer.Clear();
+            writer.Byte(Protocol.ShapeData);
+            var countPosition = writer.Length;
+            writer.UShort(0);
+            var count = 0;
+            while (
+                start + count < shapes.Count
+                && (
+                    count == 0
+                    || writer.Length + 12 + shapes[start + count].shape.Length
+                        <= Protocol.MaxMessageSize
+                )
+            )
+            {
+                var (entry, shape) = shapes[start + count];
+                writer.Long(entry.Id);
+                writer.Int(entry.Version);
+                writer.Bytes(shape);
+                count++;
+            }
+            writer.UShortAt(countPosition, (ushort)count);
+            Send(steamId);
+            start += count;
+        }
     }
 
     private void Send(ulong steamId)
