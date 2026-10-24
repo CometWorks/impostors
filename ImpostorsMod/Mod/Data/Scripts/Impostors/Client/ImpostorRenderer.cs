@@ -43,12 +43,14 @@ namespace Impostors
         // backgrounds), the coarser levels under 16 even less
         private const float SmallGridBrightness = 1.35f;
 
-        // Safe zones: the share of light behind a zone's surface it covers seen face on, and
-        // the share added where the line of sight grazes it, so the outline shows like the
-        // game's shield does
-        private const float ZoneAlpha = 0.08f;
-        private const float ZoneRimAlpha = 0.5f;
-        private const float ZoneBrightness = 1f;
+        // Safe zones, fitted to comparison sheets of real ones: nearly clear seen face on, a
+        // thin pale rim where the line of sight grazes the surface. The share of light behind
+        // the surface it covers face on, the share added at the rim and how fast it falls off,
+        // and how much the rim pales towards white.
+        private const float ZoneAlpha = 0.02f;
+        private const float ZoneRimAlpha = 0.8f;
+        private const int ZoneRimPower = 6;
+        private const float ZoneRimWhite = 0.4f;
 
         // Re-sort a shape's quads when the view direction turned by about 3 degrees
         private const float ResortCosine = 0.9986f;
@@ -534,7 +536,7 @@ namespace Impostors
             var zone = impostor.Shape.Zone;
             var position = impostor.State.Position + shift;
             var rotation = MatrixD.CreateFromQuaternion(impostor.State.Orientation);
-            var color = zone.Color.ToVector3() * ZoneBrightness;
+            var color = zone.Color.ToVector3();
             var quad = new MyQuadD();
 
             foreach (var q in ZoneMesh.Quads(zone.Box))
@@ -548,7 +550,9 @@ namespace Impostors
                     continue;
 
                 var rim = 1 - Math.Abs(cosine);
-                var alpha = (float)Math.Min(1, ZoneAlpha + ZoneRimAlpha * rim * rim * rim);
+                var edge = (float)Math.Pow(rim, ZoneRimPower);
+                var alpha = Math.Min(1, ZoneAlpha + ZoneRimAlpha * edge);
+                var tint = Vector3.Lerp(color, Vector3.One, ZoneRimWhite * edge);
                 quad.Point0 =
                     position + Vector3D.TransformNormal(q.P0 * zone.HalfExtents, rotation);
                 quad.Point1 =
@@ -560,7 +564,7 @@ namespace Impostors
                 MyTransparentGeometry.AddQuad(
                     Material,
                     ref quad,
-                    new Vector4(color * alpha, alpha),
+                    new Vector4(tint * alpha, alpha),
                     ref center,
                     -1,
                     MyBillboard.BlendTypeEnum.LDR

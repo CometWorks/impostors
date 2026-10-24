@@ -18,8 +18,8 @@ namespace Impostors
     public static class ZoneMesh
     {
         // Enough for a round outline at the few hundred pixels a far zone covers at most
-        private const int Segments = 24;
-        private const int Rings = 12;
+        private const int Segments = 32;
+        private const int Rings = 16;
 
         private static ZoneQuad[] sphere;
         private static ZoneQuad[] box;
