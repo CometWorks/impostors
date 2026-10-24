@@ -99,5 +99,6 @@ namespace Impostors
         public ImpostorState State;
         public int ReceivedTick;
         public ClientShape Shape;
+        public int ShapeTick;
     }
 }

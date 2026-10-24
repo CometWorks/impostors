@@ -69,7 +69,8 @@ greedily into rectangles of one color, so a flat painted side is a single quad.
   which showed as stripes and a shape shifted and grown by up to a cell.
 - The server sends one level per impostor and player, picked from the on-screen size on a
   1080p screen with a 70° field of view: about one cell per 2.5 pixels. Grids keep level
-  16 down to half that size, as their coarser levels lose the shape fast.
+  16 down to half that size, as their coarser levels lose the shape fast. A zoomed view
+  gets finer levels inside it, see "Zoomed views" below.
 - Encoding (`Protocol.cs`): a 19 byte header (level, cell size, origin) and 10 bytes per quad
   (face, min cell, width, height, RGB565 color, normal).
 - Each quad carries the normal it is shaded with, octahedral with 6 bits per coordinate
@@ -130,6 +131,30 @@ The replication margin makes the hand-off seamless: the client has the impostor 
 real grid is still replicated (and hides it), so there is no gap when the grid leaves the
 replication range.
 
+Zoomed views (SE-659): a rifle's iron sight, a spectator or camera zoom or a telescope mod
+narrows the field of view, and the impostors in view show larger than the default estimate.
+The mod reads the camera's `FovWithZoom` and viewport size. While the view shows things at
+least 1.5 times larger than a 1080p screen at 70° does, it sends a `View` message: when the
+zoom starts, when it changes by 5%, when the view turns by an eighth of its field of view,
+and once more when the zoom ends. That is a few per second at most, it is checked every 10
+ticks. For that player the server then:
+
+- multiplies the on-screen size of the impostors inside the view (the angle off its
+  direction, less the impostor's angular radius, within the half diagonal) by the zoom,
+  32 times at most. They sort first, so they get the shape credit first and their finer
+  shapes go out ahead of the rest.
+- picks the player's impostors again on the next tick instead of at the next full second.
+  The credit is paid by the time since the last pick, so the extra picks don't raise the
+  bandwidth.
+- takes a zoomed level only while its shape has at most `MaxQuadsPerFrame` quads, about
+  half of them facing the camera, so one zoomed impostor can't take the client's whole
+  budget.
+- keeps a level sent for the zoom for 30 seconds after it was last wanted, so looking
+  through the zoom again soon costs nothing.
+
+The server's eye is still the player's controlled entity; the camera of a third person or
+cockpit view is close enough to it for impostors kilometers away.
+
 Motion: a state is resent when the impostor moved more than about a pixel compared to where
 the client extrapolates it, turned by more than about 1.6° or changed its velocity. The
 client extrapolates with the velocity for up to 10 seconds.
@@ -145,6 +170,7 @@ Mod networking on channel 47213, reliable messages up to 16 KB:
 | States | server to client | impostor states: id, kind, version, level, radius, position, orientation, velocity (70 bytes each) |
 | Remove | server to client | impostor ids |
 | ShapeData | server to client | count, then id, version and shape per impostor |
+| View | client to server | field of view with zoom, viewport width and height, view direction; while zoomed |
 
 The repeated hello means the server needs no state about clients across restarts, and a
 cluster node a player was moved to learns about the client within 30 s. A different server

@@ -56,6 +56,12 @@ namespace Impostors
         private readonly Vector3[] ups = new Vector3[6];
         private readonly bool[] facing = new bool[6];
         private long serverInstance;
+
+        // The view last reported to the server, while it is zoomed
+        private bool viewZoomed;
+        private double sentZoom;
+        private Vector3 sentForward;
+        private int sentViewTick;
         private bool active;
         private bool debug;
 
@@ -126,11 +132,53 @@ namespace Impostors
                 MyAPIGateway.Multiplayer.SendMessageToServer(Protocol.Channel, writer.ToArray());
             }
 
+            // A few View messages per second at most
+            if (tick % 10 == 0)
+                SendView();
+
             if (debug && tick % 60 == 0)
             {
                 ReadMode();
                 WriteStats();
             }
+        }
+
+        // Tells the server about a zoomed view (see Protocol.View): when it starts, changes
+        // its zoom by 5% or turns by an eighth of its field of view, and when it ends
+        private void SendView()
+        {
+            var camera = MyAPIGateway.Session.Camera;
+            if (camera == null || serverInstance == 0)
+                return;
+
+            var fov = camera.FovWithZoom;
+            var size = camera.ViewportSize;
+            var zoom = Protocol.Zoom(fov, size.Y);
+            var forward = (Vector3)camera.WorldMatrix.Forward;
+            var zoomed = zoom >= Protocol.MinZoom;
+            if (!zoomed && !viewZoomed)
+                return;
+            if (
+                zoomed
+                && viewZoomed
+                && Math.Abs(zoom / sentZoom - 1) < 0.05
+                && Vector3.Dot(forward, sentForward) > Math.Cos(fov / 8)
+            )
+                return;
+
+            writer.Clear();
+            writer.Byte(Protocol.View);
+            writer.Float(fov);
+            writer.UShort((ushort)MathHelper.Clamp(size.X, 1, ushort.MaxValue));
+            writer.UShort((ushort)MathHelper.Clamp(size.Y, 1, ushort.MaxValue));
+            writer.Float(forward.X);
+            writer.Float(forward.Y);
+            writer.Float(forward.Z);
+            MyAPIGateway.Multiplayer.SendMessageToServer(Protocol.Channel, writer.ToArray());
+            viewZoomed = zoomed;
+            sentZoom = zoom;
+            sentForward = forward;
+            sentViewTick = tick;
         }
 
         // "impostor" in the mode file draws the impostors instead of the real entities,
@@ -225,6 +273,7 @@ namespace Impostors
 
         private void WriteStats()
         {
+            var camera = MyAPIGateway.Session.Camera;
             var text = new System.Text.StringBuilder();
             text.AppendLine(
                 "impostors="
@@ -237,6 +286,14 @@ namespace Impostors
                     + maxQuads
                     + " sun="
                     + Vec(MyVisualScriptLogicProvider.GetSunDirection())
+                    + " tick="
+                    + tick
+                    + " fov="
+                    + (camera != null ? MathHelper.ToDegrees(camera.FovWithZoom) : 0).ToString("0.0")
+                    + " zoomed="
+                    + (viewZoomed ? 1 : 0)
+                    + " viewtick="
+                    + sentViewTick
             );
             foreach (var impostor in impostors.Values)
             {
@@ -257,6 +314,8 @@ namespace Impostors
                                 ? "none"
                                 : shape.Version + "/" + shape.Lod + "/" + shape.Count
                         )
+                        + " shapetick="
+                        + impostor.ShapeTick
                         + " real="
                         + (MyAPIGateway.Entities.EntityExists(state.Id) ? 1 : 0)
                         + " drawn="
@@ -310,6 +369,9 @@ namespace Impostors
                     {
                         impostors.Clear();
                         serverInstance = instance;
+
+                        // A new server knows nothing of the zoom yet
+                        viewZoomed = false;
                     }
                     break;
                 }
@@ -342,6 +404,7 @@ namespace Impostors
                         var id = r.Long();
                         var version = r.Int();
                         Get(id).Shape = ClientShape.Read(r, version);
+                        Get(id).ShapeTick = tick;
                     }
                     break;
                 }
