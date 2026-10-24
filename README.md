@@ -25,6 +25,8 @@ shaded models, built on the server from block and voxel data.
   screenshots.
 - [Asteroids](Docs/Asteroids.md): the same for asteroids, with and without ambient
   occlusion.
+- [Zoomed views](Docs/Zoom.md): finer levels through a zoomed camera, with comparison
+  screenshots.
 - [Configuration](Docs/Configuration.md): the options of `Impostors.cfg`.
 - [Design](Docs/Design.md): how it works inside, the protocol, clusters and the limits.
 - [Development](Docs/Development.md): building, deployment, debugging and tests.

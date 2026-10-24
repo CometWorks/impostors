@@ -14,7 +14,9 @@ the whitelist, loading the mod in the game does.
   a headless client that has only the mod. See its docstring.
 - `tests/compare.py` shoots a grid (from a blueprint) or an asteroid next to its impostor from
   the 8 cube corners at a list of distances and puts the shots into one sheet, like the ones
-  on the [Grids](Grids.md) and [Asteroids](Asteroids.md) pages. See its docstring.
+  on the [Grids](Grids.md) and [Asteroids](Asteroids.md) pages. With `IMP_ZOOMS` it makes
+  the zoom sheets of the [Zoomed views](Zoom.md) page instead; the client then runs the test
+  probe of `tests/clientprobe`, which sets the camera's field of view. See its docstring.
 - `tests/zoom.py` checks the finer levels of a zoomed view: the client aims down the rifle's
   iron sight (70° to 40°) on a 1920x1080 screen, and it measures how soon the finer shapes
   arrive, in client ticks.

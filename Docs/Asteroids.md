@@ -74,7 +74,7 @@ and player, about one cell per 2.5 pixels of the impostor's size on a 1080p scre
 A zoomed view, like the rifle's iron sight or a camera or telescope mod, shows impostors
 larger than that estimate. The mod tells the server, which sends finer levels for the
 impostors inside the view within a fraction of a second and lets them stay for 30 seconds
-after the zoom. See [Design](Design.md), "Zoomed views".
+after the zoom. See [Zoomed views](Zoom.md).
 
 - Level 8 pools voxels two levels finer: a cell is filled when at least half of its voxels
   are. The game's own coarse voxels erode thin parts, and level 8 looked half as large as

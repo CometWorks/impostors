@@ -57,7 +57,7 @@ downsampled from 16: a cell is filled when 2 of its 8 children are, with their a
 A zoomed view, like the rifle's iron sight or a camera or telescope mod, shows impostors
 larger than that estimate. The mod tells the server, which sends finer levels for the
 impostors inside the view within a fraction of a second and lets them stay for 30 seconds
-after the zoom. See [Design](Design.md), "Zoomed views".
+after the zoom. See [Zoomed views](Zoom.md).
 
 ## Build time
 

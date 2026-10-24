@@ -26,6 +26,12 @@ game running), and the rig's IMP_RESOLUTION and IMP_DISPLAY (see rig.py).
         [distances...]
 
 The image lands in ~/.se-test/<task>-shots/compare-<name>.png.
+
+IMP_ZOOMS=1,2,4,8,16 makes a zoom sheet instead, from the first distance D only: a row per
+zoom factor z, the real one seen from D/z with the player's 70 degree view next to the
+impostor seen from D through a view narrowed z times (the client probe sets the field of
+view), so both are the same size on screen. Run it at 1920x1080 (IMP_RESOLUTION), the
+screen the server's estimate is for.
 """
 
 from __future__ import annotations
@@ -67,10 +73,20 @@ DISTANCES = [float(d) for d in sys.argv[2:]] or [
     12800,
 ]
 
+# Zoom factors of a zoom sheet, see the docstring
+ZOOMS = [float(z) for z in os.environ.get("IMP_ZOOMS", "").split(",") if z]
+
+# Rows of the sheet: distance of the real shot, distance of the impostor shot, zoom
+ROWS = (
+    [(DISTANCES[0] / z, DISTANCES[0], z) for z in ZOOMS]
+    if ZOOMS
+    else [(d, d, 1.0) for d in DISTANCES]
+)
+
 SERVER = rig.Server()
 # Medium: on the high preset the headless client (integrated GPU) draws asteroids without
 # sunlight. Low and minimal may break other rendering.
-CLIENT = rig.Client(1, "Alpha", quality="medium")
+CLIENT = rig.Client(1, "Alpha", quality="medium", probe=bool(ZOOMS))
 SHOTS = rig.TEST_ROOT / f"{rig.TASK}-shots"
 
 GRID_POSITION = (2000.0, 0.0, 0.0)
@@ -221,7 +237,7 @@ def main() -> None:
 
     shots = (
         {}
-    )  # (direction index, distance) -> (real row, real shot, impostor row, impostor shot)
+    )  # (direction index, row index) -> (real row, real shot, impostor row, impostor shot)
     sun = None
     try:
         SERVER.start()
@@ -241,11 +257,22 @@ def main() -> None:
             if sum(v * v for v in side) < 0.01:
                 side = [1.0, 0.0, 0.0]
             shift = [v * shift_length for v in normalize(side)]
-            for distance in DISTANCES:
+            # The levels of the last zoom stay 30 seconds (ZoomKeepSeconds)
+            if ZOOMS and index > 0:
+                time.sleep(35)
+            for row_index, (distance, far, zoom) in enumerate(ROWS):
                 eye = [p + d * distance for p, d in zip(GRID_POSITION, direction)]
                 write_mode("real")
                 real = look(api, main_id, eye, GRID_POSITION, distance)
                 real_shot = shoot(api, f"compare-{NAME}-{index}-{int(distance)}-real")
+
+                # A zoom sheet takes the impostor from the far distance, through the zoom
+                moved = far != distance
+                if moved:
+                    eye = [p + d * far for p, d in zip(GRID_POSITION, direction)]
+                    CLIENT.set_fov(
+                        2 * math.degrees(math.atan(math.tan(math.radians(35)) / zoom))
+                    )
 
                 if ASTEROID:
                     write_mode("shift " + " ".join(f"{v:.0f}" for v in shift))
@@ -254,26 +281,32 @@ def main() -> None:
                         main_id,
                         [e + v for e, v in zip(eye, shift)],
                         [p + v for p, v in zip(GRID_POSITION, shift)],
-                        distance,
+                        far,
                         drawn=True,
-                        aim=False,
+                        aim=moved,
                     )
                 else:
                     write_mode("impostor")
                     impostor = look(
                         api,
                         main_id,
-                        None,
+                        eye if moved else None,
                         GRID_POSITION,
-                        distance,
+                        far,
                         drawn=True,
-                        aim=False,
+                        aim=moved,
                     )
+                if moved:
+                    impostor = settle(main_id) or impostor
                 impostor_shot = shoot(
-                    api, f"compare-{NAME}-{index}-{int(distance)}-impostor"
+                    api, f"compare-{NAME}-{index}-{int(distance)}-x{zoom:g}-impostor"
                 )
-                print(f"{view} {distance:.0f} m: {impostor.get('lod')}", flush=True)
-                shots[index, distance] = (real, real_shot, impostor, impostor_shot)
+                CLIENT.set_fov(None)
+                print(
+                    f"{view} {far:.0f} m zoom {zoom:g}: {impostor.get('lod')}",
+                    flush=True,
+                )
+                shots[index, row_index] = (real, real_shot, impostor, impostor_shot)
         write_mode("real")
         sun = SUN or tuple(
             float(v) for v in CLIENT.stats()[0].get("sun", "0,1,0").split(",")
@@ -291,8 +324,15 @@ def main() -> None:
                 "sun": sun,
                 "directions": DIRECTIONS,
                 "shots": [
-                    {"direction": i, "distance": d, "real": r, "impostor": m}
-                    for (i, d), (r, _, m, _) in shots.items()
+                    {
+                        "direction": i,
+                        "distance": ROWS[k][0],
+                        "impostor_distance": ROWS[k][1],
+                        "zoom": ROWS[k][2],
+                        "real": r,
+                        "impostor": m,
+                    }
+                    for (i, k), (r, _, m, _) in shots.items()
                 ],
             },
             indent=1,
@@ -336,6 +376,22 @@ def look(api, entity_id, eye, target, distance, drawn=False, aim=True) -> dict:
     return stats_row(entity_id) or row
 
 
+def settle(entity_id: int, timeout: float = 20) -> dict:
+    """The stats once the impostor's level held for 3 seconds. A finer shape larger than
+    the shape credit left can wait a second or two behind the ones sent before it."""
+    start = time.monotonic()
+    last, changed = None, start
+    while time.monotonic() - start < timeout:
+        lod = stats_row(entity_id).get("lod")
+        if lod != last:
+            last, changed = lod, time.monotonic()
+        elif time.monotonic() - changed > 3:
+            break
+        time.sleep(0.5)
+    print(f"level {last} after {changed - start:.1f} s", flush=True)
+    return stats_row(entity_id)
+
+
 def compose(shots, sun, target: Path) -> None:
     """A row per distance; per direction a real and an impostor cell"""
     from PIL import Image, ImageDraw, ImageFont
@@ -345,7 +401,7 @@ def compose(shots, sun, target: Path) -> None:
     label, gap, pair_gap, header = (round(v * k) for v in (230, 6, 28, 80))
     pair = 2 * CELL + gap
     width = label + len(DIRECTIONS) * (pair + pair_gap)
-    height = header + len(DISTANCES) * (CELL + gap)
+    height = header + len(ROWS) * (CELL + gap)
     sheet = Image.new("RGB", (width, height), "white")
     draw = ImageDraw.Draw(sheet)
     sun = normalize(sun)
@@ -365,12 +421,12 @@ def compose(shots, sun, target: Path) -> None:
         draw.text(
             (left + CELL + gap + 8, round(44 * k)), "impostor", fill="black", font=font
         )
-    for row_index, distance in enumerate(DISTANCES):
+    for row_index, (distance, far, zoom) in enumerate(ROWS):
         top = header + row_index * (CELL + gap)
         radius, viewport = 0.0, 720
         for index in range(len(DIRECTIONS)):
             left = label + index * (pair + pair_gap)
-            real, real_shot, impostor, impostor_shot = shots[index, distance]
+            real, real_shot, impostor, impostor_shot = shots[index, row_index]
             for column, (row, shot) in enumerate(
                 ((real, real_shot), (impostor, impostor_shot))
             ):
@@ -394,9 +450,16 @@ def compose(shots, sun, target: Path) -> None:
         # The server's default MinPixels drops impostors under 3 pixels across at 1080p,
         # this sheet shows them anyway
         cut = "\ncut off by default" if 2 * radius * 1080 / viewport < 3 else ""
+        text = f"{distance:.0f} m\nradius {radius:.1f} px{cut}"
+        if ZOOMS:
+            fov = 2 * math.degrees(math.atan(math.tan(math.radians(35)) / zoom))
+            text = (
+                f"zoom {zoom:g}x\nreal {distance:.0f} m\nimpostor {far:.0f} m,"
+                f"\n  {fov:.1f} deg view\nradius {radius:.1f} px"
+            )
         draw.multiline_text(
             (12, top + round(12 * k)),
-            f"{distance:.0f} m\nradius {radius:.1f} px{cut}",
+            text,
             fill="black",
             spacing=8,
             font=font,

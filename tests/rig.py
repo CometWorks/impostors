@@ -99,6 +99,8 @@ TEST_ROOT = HOME / ".se-test"
 
 IMPOSTORS_ID = "66AA3D09-1732-445D-A2B6-A377B31AE76C"
 PROBE_ID = "5B1E3C7A-9D2F-4E61-8A47-2C0F9B6D1E35"
+CLIENT_PROBE = TESTS / "clientprobe"
+CLIENT_PROBE_ID = "7B028E03-D161-477F-BF54-F6B8AD94BFDE"
 
 # Stand-in Workshop id of the Impostors mod in the test world
 MOD_ID = 900000199
@@ -379,14 +381,21 @@ class Server:
 
 class Client:
     """Client i of the slot. With plugin=True it also runs the Impostors client
-    plugin, otherwise it is vanilla as far as Impostors goes."""
+    plugin, otherwise it is vanilla as far as Impostors goes. With probe=True it runs
+    the test probe of tests/clientprobe, which set_fov needs."""
 
     def __init__(
-        self, index: int, name: str, plugin: bool = False, quality: str = "minimal"
+        self,
+        index: int,
+        name: str,
+        plugin: bool = False,
+        quality: str = "minimal",
+        probe: bool = False,
     ):
         self.index = index
         self.name = name
         self.plugin = plugin
+        self.probe = probe
         self.quality = quality
         self.pulsar = TEST_ROOT / f"{TASK}-c{index}"
         self.launcher = self.pulsar / "Interim.bin"
@@ -445,6 +454,12 @@ class Client:
         if self.plugin:
             dev_folders.append(IMPOSTORS_ID)
             sources["impostors"] = (REPO, "ImpostorsClient.xml")
+        if self.probe:
+            dev_folders.append(CLIENT_PROBE_ID)
+            sources["impostors-client-probe"] = (
+                CLIENT_PROBE,
+                "ImpostorsClientProbe.xml",
+            )
         (legacy / "Profiles" / "Current.xml").write_text(
             profile_xml(dev_folders), encoding="utf-8"
         )
@@ -456,6 +471,7 @@ class Client:
         (self.mod_storage / "stats.txt").unlink(missing_ok=True)
         # compare.py's last mode would carry over into the next run of any test
         (self.mod_storage / "mode").unlink(missing_ok=True)
+        self.set_fov(None)
         self.appdata.mkdir(parents=True, exist_ok=True)
         (self.appdata / "Remote.cfg").write_text(
             '<?xml version="1.0" encoding="utf-8"?>\n'
@@ -512,6 +528,15 @@ class Client:
             fields = parse(line)
             impostors[int(fields["id"])] = fields
         return parse(lines[0]) if lines else {}, impostors
+
+    def set_fov(self, degrees: float | None) -> None:
+        """The camera's vertical field of view through the client probe, None for the
+        player's own; applied within half a second"""
+        file = self.appdata / "fov.txt"
+        if degrees is None:
+            file.unlink(missing_ok=True)
+        else:
+            file.write_text(f"{degrees:.4f}")
 
     def api(self) -> RemoteAPI:
         return RemoteAPI(
