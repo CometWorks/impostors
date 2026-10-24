@@ -61,7 +61,7 @@ count against `MaxQuadsPerFrame`, since both halves of the shell are drawn.
 The game draws a zone's surface with a distorting shield effect, which blurs and tints what
 is inside. Impostors are drawn on top of it, undistorted. To make up for that, a grid or
 asteroid whose center is inside an enabled zone gets an impostor one level of detail lower
-than outside, and the mod blends its colors 30% towards the zone's color. The same
+than outside, and the mod blends its colors 35% towards the zone's color. The same
 `MinPixels` applies as everywhere else.
 
 `tests/scenario.py` checks it with two grids alike, as far from the player: the one inside a

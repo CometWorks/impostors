@@ -53,8 +53,9 @@ namespace Impostors
         private const float ZoneRimWhite = 0.4f;
 
         // An impostor inside a safe zone is seen through the zone's surface: its colors are
-        // blended this much towards the zone's color
-        private const float ZoneTint = 0.3f;
+        // blended this much towards the zone's color. Fitted to the colors of a ship in a zone,
+        // real against impostor, in comparison sheets (least squares, 0.37).
+        private const float ZoneTint = 0.35f;
 
         // Re-sort a shape's quads when the view direction turned by about 3 degrees
         private const float ResortCosine = 0.9986f;
