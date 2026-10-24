@@ -25,8 +25,9 @@ from scenario import CLIENT, SERVER, SHOTS, check, drawn, wait_stats  # noqa: E4
 
 import scenario  # noqa: E402
 
-# 6 km from the station: level 16 at a 70 degree view, 32 zoomed
-EYE = (world.STATION.position[0] - 6000, 0.0, 0.0)
+# 6 km from the station: level 16 at a 70 degree view, 32 zoomed. Off the x axis, where
+# the Near grid hides the far asteroid.
+EYE = (world.STATION.position[0] - 6000, 0.0, 400.0)
 RIFLE = "AutomaticRifleItem"
 
 
