@@ -95,6 +95,8 @@ public sealed class ImpostorService : IDisposable
             sources.Add(new GridSource(config));
         if (config.Asteroids)
             sources.Add(new VoxelSource(config));
+        if (config.SafeZones)
+            sources.Add(new SafeZoneSource());
         foreach (var factory in ExtraSources)
             sources.Add(factory());
 
@@ -168,8 +170,9 @@ public sealed class ImpostorService : IDisposable
 
         foreach (var entry in registry.Entries)
         {
-            // Cluster nodes build every local entry, players on other nodes may need it
-            entry.Wanted = BuildAll && !entry.Source.Remote;
+            // Cluster nodes build every local entry, players on other nodes may need it. Safe
+            // zones are always built, the stricter cut-off near them needs their shapes.
+            entry.Wanted = BuildAll && !entry.Source.Remote || entry.Kind == ImpostorKind.SafeZone;
             entry.Viewed = false;
         }
 
@@ -285,6 +288,8 @@ public sealed class ImpostorService : IDisposable
         );
         var voxelReplicated = new BoundingBoxD(eye - voxelHalf, eye + voxelHalf);
 
+        var zones = registry.Entries.Select(ZoneVolume.Of).Where(z => z.HasValue).ToList();
+
         // Pixels on a default screen, and how many times larger the player's view shows them
         var candidates =
             new List<(ImpostorEntry entry, double pixels, double zoom, double distance)>();
@@ -313,12 +318,23 @@ public sealed class ImpostorService : IDisposable
             if (2 * pixels * zoom < config.MinPixels)
                 continue;
 
+            // A safe zone's surface distorts what is inside or behind it: small impostors there
+            // show as noise
+            if (
+                entry.Kind != ImpostorKind.SafeZone
+                && 2 * pixels * zoom < config.SafeZoneMinPixels
+                && zones.Any(z => z.Value.Hits(eye, entry.WorldAabb.Center))
+            )
+                continue;
+
             candidates.Add((entry, pixels, zoom, distance));
         }
 
-        // Zoomed ones are larger, so they come first and get the shape credit first
+        // Safe zones are few and show where players are protected, they go first. Zoomed ones
+        // are larger, so they come next and get the shape credit first.
         var shown = candidates
-            .OrderByDescending(c => c.pixels * c.zoom)
+            .OrderByDescending(c => c.entry.Kind == ImpostorKind.SafeZone)
+            .ThenByDescending(c => c.pixels * c.zoom)
             .Take(config.MaxImpostorsPerPlayer)
             .ToList();
         var shownIds = new HashSet<long>(shown.Select(c => c.entry.Id));

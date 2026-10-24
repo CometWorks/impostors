@@ -27,9 +27,11 @@ public class PluginConfig : IPluginConfig
     private bool grids = true;
     private bool asteroids = true;
     private bool asteroidOcclusion = true;
+    private bool safeZones = true;
     private int minBlocks = 8;
     private float maxDistance;
     private float minPixels = 3f;
+    private float safeZoneMinPixels = 8f;
     private int maxImpostorsPerPlayer = 1000;
     private int maxQuadsPerFrame = 16000;
     private int shapeBytesPerSecond = 32 * 1024;
@@ -61,6 +63,12 @@ public class PluginConfig : IPluginConfig
         set => SetValue(ref asteroidOcclusion, value);
     }
 
+    public bool SafeZones
+    {
+        get => safeZones;
+        set => SetValue(ref safeZones, value);
+    }
+
     public int MinBlocks
     {
         get => minBlocks;
@@ -77,6 +85,12 @@ public class PluginConfig : IPluginConfig
     {
         get => minPixels;
         set => SetValue(ref minPixels, value);
+    }
+
+    public float SafeZoneMinPixels
+    {
+        get => safeZoneMinPixels;
+        set => SetValue(ref safeZoneMinPixels, value);
     }
 
     public int MaxImpostorsPerPlayer

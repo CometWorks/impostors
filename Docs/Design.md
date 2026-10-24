@@ -169,7 +169,7 @@ Mod networking on channel 47213, reliable messages up to 16 KB:
 |---|---|---|
 | Hello | client to server | protocol version; at load and every 30 s |
 | Welcome | server to client | protocol version, server instance id, `MaxQuadsPerFrame` |
-| States | server to client | impostor states: id, kind, version, level, radius, position, orientation, velocity (70 bytes each) |
+| States | server to client | impostor states: id, kind (grid, voxel or safe zone), version, level, radius, position, orientation, velocity (70 bytes each) |
 | Remove | server to client | impostor ids |
 | ShapeData | server to client | count, then id, version and shape per impostor |
 | View | client to server | field of view with zoom, viewport width and height, view direction; while zoomed |
@@ -248,6 +248,38 @@ Quads of a 512 m asteroid without occlusion: 6, 38, 192, 513, 3635 and 14858 for
 to 64, 10 bytes each, about 3% more with occlusion. Asteroids are much more detailed than box-like grids, so they take most of the quad
 budget when large on screen.
 
+## Safe zones (SE-660)
+
+`SafeZoneSource`: one impostor per enabled safe zone, so players see from afar where the
+protected areas are. Disabled zones protect nothing and the game draws them white with
+another texture, so they are left out. The zone builder's `IsVisible` flag is ignored: the
+game never reads it and draws those zones anyway.
+
+- The shape is not a cell grid but the zone itself (`ZoneShape` in `Protocol.cs`, 17 bytes):
+  a leading 0 where other shapes have their level, sphere or box, the half extents and the
+  zone's color. The frame is the zone's world matrix.
+- The mod draws it as a translucent shell of flat quads, 24 by 12 around a sphere or one per
+  side of a box, in the zone's color. Each quad covers 8% of the light behind it face on,
+  up to 58% where the line of sight grazes it, so the outline shows like the game's shield.
+  The far half is drawn before the impostors inside the zone, the near half after them.
+- Zones go first among a player's `MaxImpostorsPerPlayer`, and they keep `MinPixels`. They
+  are always built, even when nobody is shown them, because the cut-off below needs them.
+
+The game draws a zone's surface with a distorting shield effect. Impostors are billboards
+drawn after tone mapping, so they show undistorted on top of it, and the small ones look
+like noise there. The server therefore applies `SafeZoneMinPixels` (8 by default) instead of
+`MinPixels` (3) to every impostor whose line of sight from the player passes through an
+enabled zone or ends inside one. That is the segment from the player's controlled entity to
+the center of the impostor's AABB, tested against the zone's sphere or box. A player inside a
+zone sees everything through its surface, so the stricter cut-off then applies to all of it.
+Larger impostors stay: their shape still reads through the distortion.
+
+On a cluster, admin zones are on every node (the cluster plugin's `AdminSafeZones`), so each
+node shows them itself, like asteroids. The zone of a safe zone block travels with the
+block's grid, so nodes report it to the World Authority like a grid entry, located by the
+partition of the block's grid. Other nodes show it through `RemoteSource` and use it for the
+cut-off.
+
 ## Cluster
 
 Grids of other nodes are not on the local node in any form. Partitions that have been quiet
@@ -275,6 +307,7 @@ Magnetar Plugin SDK (`PluginSdk.Clustering`); the client side is unchanged.
   went offline before such a restart are lost until they come back online.
 - Asteroids are not reported: saved voxel maps are replicas on every node already, each node
   builds them itself.
+- Safe zones of blocks are reported like grids, admin safe zones are not (see "Safe zones").
 
 The same shape as the cluster's `AntennaGraphService`, which learned that full resends don't
 scale: deltas, a periodic cadence and rare full loads. Records are about 100 bytes, 500 go in

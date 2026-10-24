@@ -11,6 +11,10 @@ namespace Impostors
         public float CellSize;
         public int Count;
 
+        // A safe zone's bubble instead of quads, a shape of level 0
+        public bool IsZone;
+        public ZoneShape Zone;
+
         // Per quad: center in local meters, face, half extents along the face's U and V axes,
         // color and the normal to shade it with
         public Vector3[] Centers;
@@ -40,6 +44,14 @@ namespace Impostors
             var shape = new ClientShape();
             shape.Version = version;
             shape.Lod = r.Byte();
+            if (shape.Lod == 0)
+            {
+                shape.IsZone = true;
+                shape.Zone = ZoneShape.Read(r);
+                shape.Count = ZoneMesh.Quads(shape.Zone.Box).Length;
+                return shape;
+            }
+
             shape.CellSize = r.Float();
             var origin = new Vector3(r.Float(), r.Float(), r.Float());
             var count = r.UShort();

@@ -17,6 +17,9 @@ public interface IPluginConfig : INotifyPropertyChanged
     // building takes about twice as long
     bool AsteroidOcclusion { get; set; }
 
+    // Sends impostors of enabled safe zones
+    bool SafeZones { get; set; }
+
     // Grid groups with fewer blocks are not shown
     int MinBlocks { get; set; }
 
@@ -26,6 +29,10 @@ public interface IPluginConfig : INotifyPropertyChanged
     // Impostors less than this many pixels across on a 1080p screen with a 70 degree field of
     // view are not shown, 3 cuts off those under 3x3 pixels
     float MinPixels { get; set; }
+
+    // Stricter MinPixels for impostors inside a safe zone or seen through one, whose surface
+    // distorts what is behind it. Safe zones themselves keep MinPixels.
+    float SafeZoneMinPixels { get; set; }
 
     // Most impostors one player gets, the largest on screen win
     int MaxImpostorsPerPlayer { get; set; }

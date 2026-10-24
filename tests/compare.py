@@ -8,7 +8,8 @@ The server sends the impostor anyway (ReplicationMargin covers the whole sync di
 each distance the player looks at it from the same direction; one screenshot shows the real
 one, one the impostor:
 
-- A grid is hidden by the mod's debug compare mode, which draws the impostor in its place.
+- A grid or a safe zone is hidden by the mod's debug compare mode, which draws the
+  impostor in its place.
 - An asteroid can't be hidden on the client (voxel clipmaps ignore Visible), so the mod
   draws the impostor moved sideways by three radii, and the player moves along with it.
   The server picks the level of detail from the player's distance to the real asteroid.
@@ -22,8 +23,10 @@ suffix for the output names), IMP_OCCLUSION=1 (asteroid occlusion on), IMP_KEEP=
 game running), and the rig's IMP_RESOLUTION and IMP_DISPLAY (see rig.py).
 
     uv run --no-project --with httpx --with pillow python tests/compare.py \\
-        ["~/.config/SpaceEngineers/Blueprints/local/Visitor Ion" | asteroid:Asteroid512-008.vx2] \\
-        [distances...]
+        ["~/.config/SpaceEngineers/Blueprints/local/Visitor Ion" | asteroid:Asteroid512-008.vx2
+         | safezone:500 | safezone:600,300,400] [distances...]
+
+A safe zone target is an enabled admin zone: a sphere of that radius or a box of that size.
 
 The image lands in ~/.se-test/<task>-shots/compare-<name>.png.
 
@@ -55,9 +58,12 @@ TARGET = (
     else str(Path.home() / ".config/SpaceEngineers/Blueprints/local/Visitor Ion")
 )
 ASTEROID = TARGET.removeprefix("asteroid:") if TARGET.startswith("asteroid:") else None
-NAME = (ASTEROID.removesuffix(".vx2") if ASTEROID else Path(TARGET).name).replace(
-    " ", "-"
-)
+ZONE = TARGET.removeprefix("safezone:") if TARGET.startswith("safezone:") else None
+NAME = (
+    "safezone-" + ZONE.replace(",", "x")
+    if ZONE
+    else (ASTEROID.removesuffix(".vx2") if ASTEROID else Path(TARGET).name)
+).replace(" ", "-")
 # Tells runs with other settings apart, for example another sun
 if os.environ.get("IMP_TAG"):
     NAME += "-" + os.environ["IMP_TAG"]
@@ -196,6 +202,25 @@ def main() -> None:
         shift_length = 3 * size / 2 * math.sqrt(3)
         world.prepare(
             SERVER.world, CLIENT.steam_id, CLIENT.name, grids=(), asteroids=(asteroid,)
+        )
+    elif ZONE:
+        values = [float(v) for v in ZONE.split(",")]
+        zone = world.SafeZone(
+            "Compare",
+            140000000000000099,
+            GRID_POSITION,
+            radius=values[0],
+            size=tuple(values) if len(values) == 3 else None,
+        )
+        main_id = zone.entity_id
+        shift_length = 0
+        world.prepare(
+            SERVER.world,
+            CLIENT.steam_id,
+            CLIENT.name,
+            grids=(),
+            asteroids=(),
+            zones=(zone,),
         )
     else:
         grids_xml, ids = blueprint_xml(Path(TARGET).expanduser(), GRID_POSITION)

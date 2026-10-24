@@ -104,7 +104,14 @@ def drawn(impostors: dict, grid: world.Grid) -> bool:
 
 
 def start():
-    world.prepare(SERVER.world, CLIENT.steam_id, CLIENT.name, mod=not PLUGIN)
+    world.prepare(
+        SERVER.world,
+        CLIENT.steam_id,
+        CLIENT.name,
+        grids=world.GRIDS + world.ZONE_GRIDS,
+        zones=world.ZONES,
+        mod=not PLUGIN,
+    )
     SERVER.prepare([CLIENT.steam_id])
     SERVER.write_plugin_config(
         rig.plugin_config(RebuildSeconds=10, RefreshSeconds=20, MaxQuadsPerFrame=20000)
@@ -240,6 +247,78 @@ def run(api):
         i,
     )
     print("screenshot", shot(api, "home-Station-repainted", station.position))
+
+    run_zones(api)
+
+
+def run_zones(api):
+    """Safe zones (SE-660): enabled ones show from afar, small impostors inside or behind
+    one need SafeZoneMinPixels (8) instead of MinPixels (3)"""
+    zone, box, off = world.ZONE, world.BOX_ZONE, world.OFF_ZONE
+    shielded, behind, open_ = world.SHIELDED, world.BEHIND, world.OPEN
+
+    api.character_teleport(*world.HOME)
+    totals, impostors = wait_stats(
+        lambda i: drawn(i, zone) and drawn(i, box) and drawn(i, open_), 90
+    )
+    for z in (zone, box):
+        i = impostors.get(z.entity_id, {})
+        check(
+            f"impostor {z.name}",
+            drawn(impostors, z) and i.get("kind") == "SafeZone",
+            i or "missing",
+        )
+    check(
+        "no impostor of the disabled zone",
+        off.entity_id not in impostors,
+        impostors.get(off.entity_id, ""),
+    )
+    check(
+        "impostor Open, 4.6 px",
+        drawn(impostors, open_),
+        impostors.get(open_.entity_id, "missing"),
+    )
+    for g, where in ((shielded, "inside"), (behind, "behind")):
+        check(
+            f"no impostor {g.name}, 3 to 8 px {where} the zone",
+            g.entity_id not in impostors,
+            impostors.get(g.entity_id, ""),
+        )
+    print("server:", command(api, "!iprobe stats"))
+    for z in (zone, box):
+        print("screenshot", shot(api, f"home-{z.name}", z.position))
+
+    # Closer: Shielded is 10 px across, more than the stricter cut-off
+    eye = (zone.position[0], zone.position[1] + 4000, zone.position[2])
+    api.character_teleport(*eye)
+    totals, impostors = wait_stats(lambda i: drawn(i, shielded), 60)
+    check(
+        "impostor Shielded at 4 km, 10 px",
+        drawn(impostors, shielded),
+        impostors.get(shielded.entity_id, "missing"),
+    )
+    check(
+        "impostor Zone at 4 km", drawn(impostors, zone), impostors.get(zone.entity_id)
+    )
+    print("screenshot", shot(api, "4km-Zone", zone.position))
+
+    # A line of sight past the zone: Behind is 3.3 px across, the normal cut-off applies
+    api.character_teleport(4000.0, 0.0, 0.0)
+    totals, impostors = wait_stats(lambda i: drawn(i, behind), 60)
+    check(
+        "impostor Behind past the zone, 3.3 px",
+        drawn(impostors, behind),
+        impostors.get(behind.entity_id, "missing"),
+    )
+
+    # Hand-off: within the sync distance the real zone replicates, its impostor hides
+    api.character_teleport(zone.position[0], zone.position[1] + 2000, zone.position[2])
+    totals, impostors = wait_stats(
+        lambda i: i.get(zone.entity_id, {}).get("drawn") != "1", 60
+    )
+    i = impostors.get(zone.entity_id, {})
+    check("zone impostor hidden near", i.get("drawn") != "1", i or "removed")
+    print("screenshot", shot(api, "near-Zone", zone.position))
 
 
 def run_plugin(api):

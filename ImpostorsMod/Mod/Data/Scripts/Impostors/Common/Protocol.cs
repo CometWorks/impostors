@@ -10,7 +10,7 @@ namespace Impostors
     public static class Protocol
     {
         public const ushort Channel = 47213;
-        public const byte Version = 4;
+        public const byte Version = 5;
 
         // Client to server: byte version. Sent when the session is ready and then every
         // HelloInterval seconds, so a server that starts later or a cluster node the client
@@ -29,7 +29,7 @@ namespace Impostors
         public const byte Remove = 4;
 
         // Server to client: ushort count, then count times long id, int version and a shape
-        // (see Shape). Small shapes share a message.
+        // (see Shape, or ZoneShape for a safe zone). Small shapes share a message.
         public const byte ShapeData = 5;
 
         // Client to server: float vertical field of view with zoom (radians), ushort viewport
@@ -65,6 +65,7 @@ namespace Impostors
     {
         Grid = 1,
         Voxel = 2,
+        SafeZone = 3,
     }
 
     // Where an impostor is and how it moves. The shape is in the local frame given by
@@ -193,6 +194,42 @@ namespace Impostors
         public static Vector3 FromRgb565(ushort c)
         {
             return new Vector3(((c >> 11) & 31) / 31f, ((c >> 5) & 63) / 63f, (c & 31) / 31f);
+        }
+    }
+
+    // The shape of a SafeZone impostor: the zone's bubble in its own frame. Encoding:
+    //   byte 0 (the shape of a grid or asteroid starts with its level, 2 or more)
+    //   byte form: 0 sphere, 1 box
+    //   float half extents x, y, z, meters; a sphere's radius three times
+    //   byte red, green, blue: the zone's color
+    public struct ZoneShape
+    {
+        public const int Size = 1 + 1 + 12 + 3;
+
+        public bool Box;
+        public Vector3 HalfExtents;
+        public Color Color;
+
+        public void Write(ByteWriter w)
+        {
+            w.Byte(0);
+            w.Byte((byte)(Box ? 1 : 0));
+            w.Float(HalfExtents.X);
+            w.Float(HalfExtents.Y);
+            w.Float(HalfExtents.Z);
+            w.Byte(Color.R);
+            w.Byte(Color.G);
+            w.Byte(Color.B);
+        }
+
+        // Reads what follows the leading 0
+        public static ZoneShape Read(ByteReader r)
+        {
+            var zone = new ZoneShape();
+            zone.Box = r.Byte() != 0;
+            zone.HalfExtents = new Vector3(r.Float(), r.Float(), r.Float());
+            zone.Color = new Color(r.Byte(), r.Byte(), r.Byte());
+            return zone;
         }
     }
 

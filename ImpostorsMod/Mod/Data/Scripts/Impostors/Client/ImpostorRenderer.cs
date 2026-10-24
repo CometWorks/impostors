@@ -43,6 +43,13 @@ namespace Impostors
         // backgrounds), the coarser levels under 16 even less
         private const float SmallGridBrightness = 1.35f;
 
+        // Safe zones: the share of light behind a zone's surface it covers seen face on, and
+        // the share added where the line of sight grazes it, so the outline shows like the
+        // game's shield does
+        private const float ZoneAlpha = 0.08f;
+        private const float ZoneRimAlpha = 0.5f;
+        private const float ZoneBrightness = 1f;
+
         // Re-sort a shape's quads when the view direction turned by about 3 degrees
         private const float ResortCosine = 0.9986f;
 
@@ -51,6 +58,7 @@ namespace Impostors
         private readonly Dictionary<long, ClientImpostor> impostors =
             new Dictionary<long, ClientImpostor>();
         private readonly List<ClientImpostor> visible = new List<ClientImpostor>();
+        private readonly List<DrawPart> parts = new List<DrawPart>();
         private readonly ByteWriter writer = new ByteWriter(16);
         private readonly Vector3[] lefts = new Vector3[6];
         private readonly Vector3[] ups = new Vector3[6];
@@ -471,11 +479,94 @@ namespace Impostors
 
             var sun = MyVisualScriptLogicProvider.GetSunDirection();
 
-            // Billboards of this blend mode are drawn in submission order: far to near
+            // Billboards of this blend mode are drawn in submission order: far to near. A safe
+            // zone's far side goes before what is inside it, its near side after.
+            parts.Clear();
+            for (var i = 0; i < count; i++)
+            {
+                var impostor = visible[i];
+                var distance = Vector3D.Distance(eye, impostor.State.Position + shift);
+                if (impostor.Shape.IsZone)
+                {
+                    var radius = impostor.Shape.Zone.HalfExtents.Length();
+                    parts.Add(new DrawPart(impostor, distance + radius, false));
+                    parts.Add(new DrawPart(impostor, distance - radius, true));
+                }
+                else
+                {
+                    parts.Add(new DrawPart(impostor, distance, false));
+                }
+            }
+            parts.Sort((a, b) => b.Distance.CompareTo(a.Distance));
+
             drawnQuads = 0;
-            for (var i = count - 1; i >= 0; i--)
-                DrawImpostor(visible[i], eye, sun);
+            foreach (var part in parts)
+            {
+                if (part.Impostor.Shape.IsZone)
+                    DrawZone(part.Impostor, eye, part.Near);
+                else
+                    DrawImpostor(part.Impostor, eye, sun);
+            }
             visible.RemoveRange(count, visible.Count - count);
+        }
+
+        private struct DrawPart
+        {
+            public readonly ClientImpostor Impostor;
+            public readonly double Distance;
+
+            // The side of a safe zone facing the camera, the far side otherwise
+            public readonly bool Near;
+
+            public DrawPart(ClientImpostor impostor, double distance, bool near)
+            {
+                Impostor = impostor;
+                Distance = distance;
+                Near = near;
+            }
+        }
+
+        // A safe zone's bubble, translucent in its color and denser towards its outline, where
+        // the line of sight runs along the surface. One side of it: the quads facing the camera
+        // or the ones facing away.
+        private void DrawZone(ClientImpostor impostor, Vector3D eye, bool near)
+        {
+            var zone = impostor.Shape.Zone;
+            var position = impostor.State.Position + shift;
+            var rotation = MatrixD.CreateFromQuaternion(impostor.State.Orientation);
+            var color = zone.Color.ToVector3() * ZoneBrightness;
+            var quad = new MyQuadD();
+
+            foreach (var q in ZoneMesh.Quads(zone.Box))
+            {
+                var center =
+                    position + Vector3D.TransformNormal(q.Center * zone.HalfExtents, rotation);
+                var normal = Vector3D.TransformNormal(q.Normal, rotation);
+                var toEye = Vector3D.Normalize(eye - center);
+                var cosine = Vector3D.Dot(normal, toEye);
+                if ((cosine > 0) != near)
+                    continue;
+
+                var rim = 1 - Math.Abs(cosine);
+                var alpha = (float)Math.Min(1, ZoneAlpha + ZoneRimAlpha * rim * rim * rim);
+                quad.Point0 =
+                    position + Vector3D.TransformNormal(q.P0 * zone.HalfExtents, rotation);
+                quad.Point1 =
+                    position + Vector3D.TransformNormal(q.P1 * zone.HalfExtents, rotation);
+                quad.Point2 =
+                    position + Vector3D.TransformNormal(q.P2 * zone.HalfExtents, rotation);
+                quad.Point3 =
+                    position + Vector3D.TransformNormal(q.P3 * zone.HalfExtents, rotation);
+                MyTransparentGeometry.AddQuad(
+                    Material,
+                    ref quad,
+                    new Vector4(color * alpha, alpha),
+                    ref center,
+                    -1,
+                    MyBillboard.BlendTypeEnum.LDR
+                );
+                drawnQuads++;
+            }
         }
 
         private static float Brightness(ImpostorState state, double distance)
