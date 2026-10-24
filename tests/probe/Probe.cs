@@ -170,4 +170,23 @@ public sealed class ProbeCommands : CommandModule
         var p = grid.PositionComp.GetPosition();
         return $"Probe pos: {F(p.X)},{F(p.Y)},{F(p.Z)}";
     }
+
+    [Command("zones", "The safe zones on the server and their impostor entries.")]
+    [Permission(MyPromoteLevel.Admin)]
+    public string Zones()
+    {
+        var entries =
+            Service == null
+                ? new Dictionary<long, object>()
+                : ((IEnumerable)Get(Service, "Entries"))
+                    .Cast<object>()
+                    .ToDictionary(e => (long)Get(e, "Id"));
+        var zones = MySessionComponentSafeZones.SafeZones.Select(z =>
+        {
+            var size = z.PositionComp.WorldAABB.Size;
+            var version = entries.TryGetValue(z.EntityId, out var e) ? Get(e, "Version") : "-";
+            return $"{z.EntityId}:{z.Shape}:{(z.Enabled ? "on" : "off")}:{F(size.X)}x{F(size.Y)}x{F(size.Z)}:{version}";
+        });
+        return $"Probe zones: {string.Join(" ", zones)}";
+    }
 }

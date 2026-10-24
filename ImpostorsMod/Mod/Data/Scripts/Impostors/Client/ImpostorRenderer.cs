@@ -43,6 +43,23 @@ namespace Impostors
         // backgrounds), the coarser levels under 16 even less
         private const float SmallGridBrightness = 1.35f;
 
+        // Safe zones, fitted to comparison sheets of real ones: nearly clear seen face on, a
+        // thin pale rim where the line of sight grazes the surface. The share of light behind
+        // the surface it covers face on, the share added at the rim and how fast it falls off,
+        // and how much the rim pales towards white.
+        private const float ZoneAlpha = 0.02f;
+        private const float ZoneRimAlpha = 0.8f;
+        private const int ZoneRimPower = 6;
+        private const float ZoneRimWhite = 0.4f;
+
+        // An impostor inside a safe zone is seen through the zone's surface: its colors are
+        // blended ZoneTint towards the surface's color, the zone's color ZoneTintPale of the
+        // way to white. Fitted to the colors of a ship in a zone, real against impostor, in
+        // comparison sheets (least squares): the real ship is lighter and keeps its hue,
+        // blended towards the zone's own color it came out blue.
+        private const float ZoneTint = 0.35f;
+        private const float ZoneTintPale = 0.6f;
+
         // Re-sort a shape's quads when the view direction turned by about 3 degrees
         private const float ResortCosine = 0.9986f;
 
@@ -51,6 +68,7 @@ namespace Impostors
         private readonly Dictionary<long, ClientImpostor> impostors =
             new Dictionary<long, ClientImpostor>();
         private readonly List<ClientImpostor> visible = new List<ClientImpostor>();
+        private readonly List<DrawPart> parts = new List<DrawPart>();
         private readonly ByteWriter writer = new ByteWriter(16);
         private readonly Vector3[] lefts = new Vector3[6];
         private readonly Vector3[] ups = new Vector3[6];
@@ -240,6 +258,15 @@ namespace Impostors
                 + v.Z.ToString("0.000");
         }
 
+        // The quads a safe zone draws at the current camera
+        private string ZoneStats(ClientImpostor impostor)
+        {
+            var camera = MyAPIGateway.Session.Camera;
+            if (impostor.Shape == null || !impostor.Shape.IsZone || camera == null)
+                return "";
+            return " zonequads=" + ZoneQuads(impostor, camera.Position).Length;
+        }
+
         // Where an impostor is on screen, in pixels, and its radius there
         private string ScreenPosition(ImpostorState state)
         {
@@ -333,6 +360,12 @@ namespace Impostors
                         + state.Position.Y.ToString("0.0")
                         + ","
                         + state.Position.Z.ToString("0.0")
+                        + (
+                            state.Tint.A != 0
+                                ? " tint=" + state.Tint.PackedValue.ToString("x8")
+                                : ""
+                        )
+                        + ZoneStats(impostor)
                         + ScreenPosition(state)
                 );
             }
@@ -466,16 +499,128 @@ namespace Impostors
 
             var quads = 0;
             var count = 0;
-            while (count < visible.Count && quads + visible[count].Shape.Count / 2 <= maxQuads)
-                quads += visible[count++].Shape.Count / 2;
+            while (count < visible.Count && quads + Cost(visible[count], eye) <= maxQuads)
+                quads += Cost(visible[count++], eye);
 
             var sun = MyVisualScriptLogicProvider.GetSunDirection();
 
-            // Billboards of this blend mode are drawn in submission order: far to near
+            // Billboards of this blend mode are drawn in submission order: far to near. A safe
+            // zone's far side goes before what is inside it, its near side after.
+            parts.Clear();
+            for (var i = 0; i < count; i++)
+            {
+                var impostor = visible[i];
+                var distance = Vector3D.Distance(eye, impostor.State.Position + shift);
+                if (impostor.Shape.IsZone)
+                {
+                    var radius = impostor.Shape.Zone.HalfExtents.Length();
+                    parts.Add(new DrawPart(impostor, distance + radius, false));
+                    parts.Add(new DrawPart(impostor, distance - radius, true));
+                }
+                else
+                {
+                    parts.Add(new DrawPart(impostor, distance, false));
+                }
+            }
+            parts.Sort((a, b) => b.Distance.CompareTo(a.Distance));
+
             drawnQuads = 0;
-            for (var i = count - 1; i >= 0; i--)
-                DrawImpostor(visible[i], eye, sun);
+            foreach (var part in parts)
+            {
+                if (part.Impostor.Shape.IsZone)
+                    DrawZone(part.Impostor, eye, part.Near);
+                else
+                    DrawImpostor(part.Impostor, eye, sun);
+            }
             visible.RemoveRange(count, visible.Count - count);
+        }
+
+        private struct DrawPart
+        {
+            public readonly ClientImpostor Impostor;
+            public readonly double Distance;
+
+            // The side of a safe zone facing the camera, the far side otherwise
+            public readonly bool Near;
+
+            public DrawPart(ClientImpostor impostor, double distance, bool near)
+            {
+                Impostor = impostor;
+                Distance = distance;
+                Near = near;
+            }
+        }
+
+        // A safe zone's bubble, translucent in its color and denser towards its outline, where
+        // the line of sight runs along the surface. One side of it: the quads facing the camera
+        // or the ones facing away.
+        private void DrawZone(ClientImpostor impostor, Vector3D eye, bool near)
+        {
+            var zone = impostor.Shape.Zone;
+            var position = impostor.State.Position + shift;
+            var rotation = MatrixD.CreateFromQuaternion(impostor.State.Orientation);
+            var color = zone.Color.ToVector3();
+            var quad = new MyQuadD();
+
+            foreach (var q in ZoneQuads(impostor, eye))
+            {
+                var center =
+                    position + Vector3D.TransformNormal(q.Center * zone.HalfExtents, rotation);
+                var normal = Vector3D.TransformNormal(q.Normal, rotation);
+                var toEye = Vector3D.Normalize(eye - center);
+                var cosine = Vector3D.Dot(normal, toEye);
+                if ((cosine > 0) != near)
+                    continue;
+
+                var rim = 1 - Math.Abs(cosine);
+                var edge = (float)Math.Pow(rim, ZoneRimPower);
+                var alpha = Math.Min(1, ZoneAlpha + ZoneRimAlpha * edge);
+                var tint = Vector3.Lerp(color, Vector3.One, ZoneRimWhite * edge);
+                quad.Point0 =
+                    position + Vector3D.TransformNormal(q.P0 * zone.HalfExtents, rotation);
+                quad.Point1 =
+                    position + Vector3D.TransformNormal(q.P1 * zone.HalfExtents, rotation);
+                quad.Point2 =
+                    position + Vector3D.TransformNormal(q.P2 * zone.HalfExtents, rotation);
+                quad.Point3 =
+                    position + Vector3D.TransformNormal(q.P3 * zone.HalfExtents, rotation);
+                MyTransparentGeometry.AddQuad(
+                    Material,
+                    ref quad,
+                    new Vector4(tint * alpha, alpha),
+                    ref center,
+                    -1,
+                    MyBillboard.BlendTypeEnum.LDR
+                );
+                drawnQuads++;
+            }
+        }
+
+        // A safe zone's mesh for its size on screen, the finest one when the camera is inside
+        private ZoneQuad[] ZoneQuads(ClientImpostor impostor, Vector3D eye)
+        {
+            var zone = impostor.Shape.Zone;
+            var distance = Vector3D.Distance(eye, impostor.State.Position + shift);
+            var radius = zone.Box ? zone.HalfExtents.Length() : zone.HalfExtents.X;
+            var camera = MyAPIGateway.Session.Camera;
+            var pixels =
+                distance <= radius
+                    ? double.MaxValue
+                    : radius
+                        / distance
+                        / Math.Tan(camera.FovWithZoom / 2)
+                        * camera.ViewportSize.Y
+                        / 2;
+            return ZoneMesh.Quads(zone.Box, pixels);
+        }
+
+        // Quads an impostor draws: about half of a shape's face the camera, a safe zone draws
+        // both of its halves
+        private int Cost(ClientImpostor impostor, Vector3D eye)
+        {
+            return impostor.Shape.IsZone
+                ? ZoneQuads(impostor, eye).Length
+                : impostor.Shape.Count / 2;
         }
 
         private static float Brightness(ImpostorState state, double distance)
@@ -505,6 +650,8 @@ namespace Impostors
             );
             var sunLocal = Vector3.TransformNormal(sun, toLocal);
             var brightness = Brightness(state, Vector3D.Distance(eye, position));
+            var tinted = state.Tint.A != 0;
+            var tint = Vector3.Lerp(state.Tint.ToVector3(), Vector3.One, ZoneTintPale);
 
             for (var f = 0; f < 6; f++)
             {
@@ -530,7 +677,10 @@ namespace Impostors
                 var center = position + Vector3.TransformNormal(shape.Centers[i], rotation);
                 var light =
                     Ambient + Diffuse * Math.Max(0, Vector3.Dot(shape.Shading[i], sunLocal));
-                var color = new Vector4(shape.Colors[i] * light * brightness, 1f);
+                var lit = shape.Colors[i] * light * brightness;
+                if (tinted)
+                    lit = Vector3.Lerp(lit, tint, ZoneTint);
+                var color = new Vector4(lit, 1f);
                 var half = shape.HalfSizes[i];
                 MyTransparentGeometry.AddBillboardOriented(
                     Material,

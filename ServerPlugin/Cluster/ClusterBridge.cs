@@ -166,10 +166,21 @@ public sealed class ClusterBridge
         var current = new Dictionary<long, ImpostorEntry>();
         foreach (var entry in service.Entries)
         {
-            if (entry.Source.Remote || entry.Kind != ImpostorKind.Grid || entry.Version == 0)
+            if (entry.Source.Remote || entry.Version == 0)
                 continue;
+
+            // Grids, and the safe zones of blocks, which move between nodes with the block's
+            // grid. Asteroids and admin safe zones are on every node already.
+            var located = entry.Id;
+            if (entry.Kind == ImpostorKind.SafeZone)
+                located = SafeZoneSource.BlockGridId(entry);
+            else if (entry.Kind != ImpostorKind.Grid)
+                continue;
+            if (located == 0)
+                continue;
+
             current[entry.Id] = entry;
-            var partition = cluster.LocateEntity(entry.Id)?.Partition ?? 0;
+            var partition = cluster.LocateEntity(located)?.Partition ?? 0;
             if (partition != 0)
                 partitions[entry.Id] = partition;
         }

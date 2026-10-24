@@ -8,7 +8,8 @@ The server sends the impostor anyway (ReplicationMargin covers the whole sync di
 each distance the player looks at it from the same direction; one screenshot shows the real
 one, one the impostor:
 
-- A grid is hidden by the mod's debug compare mode, which draws the impostor in its place.
+- A grid or a safe zone is hidden by the mod's debug compare mode, which draws the
+  impostor in its place.
 - An asteroid can't be hidden on the client (voxel clipmaps ignore Visible), so the mod
   draws the impostor moved sideways by three radii, and the player moves along with it.
   The server picks the level of detail from the player's distance to the real asteroid.
@@ -22,8 +23,13 @@ suffix for the output names), IMP_OCCLUSION=1 (asteroid occlusion on), IMP_KEEP=
 game running), and the rig's IMP_RESOLUTION and IMP_DISPLAY (see rig.py).
 
     uv run --no-project --with httpx --with pillow python tests/compare.py \\
-        ["~/.config/SpaceEngineers/Blueprints/local/Visitor Ion" | asteroid:Asteroid512-008.vx2] \\
-        [distances...]
+        ["~/.config/SpaceEngineers/Blueprints/local/Visitor Ion" | asteroid:Asteroid512-008.vx2
+         | safezone:500 | safezone:600,300,400] [distances...]
+
+A safe zone target is an enabled admin zone: a sphere of that radius or a box of that size.
+IMP_ZONE=<radius> puts a grid inside a sphere zone of that radius around GRID_POSITION: the
+impostor shots show both, the grid's impostor one level lower and tinted with the zone's
+color.
 
 The image lands in ~/.se-test/<task>-shots/compare-<name>.png.
 
@@ -55,9 +61,12 @@ TARGET = (
     else str(Path.home() / ".config/SpaceEngineers/Blueprints/local/Visitor Ion")
 )
 ASTEROID = TARGET.removeprefix("asteroid:") if TARGET.startswith("asteroid:") else None
-NAME = (ASTEROID.removesuffix(".vx2") if ASTEROID else Path(TARGET).name).replace(
-    " ", "-"
-)
+ZONE = TARGET.removeprefix("safezone:") if TARGET.startswith("safezone:") else None
+NAME = (
+    "safezone-" + ZONE.replace(",", "x")
+    if ZONE
+    else (ASTEROID.removesuffix(".vx2") if ASTEROID else Path(TARGET).name)
+).replace(" ", "-")
 # Tells runs with other settings apart, for example another sun
 if os.environ.get("IMP_TAG"):
     NAME += "-" + os.environ["IMP_TAG"]
@@ -90,6 +99,11 @@ CLIENT = rig.Client(1, "Alpha", quality="medium", probe=bool(ZOOMS))
 SHOTS = rig.TEST_ROOT / f"{rig.TASK}-shots"
 
 GRID_POSITION = (2000.0, 0.0, 0.0)
+
+# IMP_ZONE: radius of a sphere safe zone around the grid, 0 for none
+ZONE_AROUND = float(os.environ.get("IMP_ZONE", "0"))
+if ZONE_AROUND:
+    NAME += f"-in-zone-{ZONE_AROUND:.0f}"
 
 # The directions the player looks at the target from, at every distance: the 8 cube corners
 # by default, which put the sun in front, behind and to the sides; "faces" for the 6 cube
@@ -175,7 +189,14 @@ def crop(path: Path, row: dict):
     sx, sy = image.size[0] / vw, image.size[1] / vh
     x, y = (float(v) for v in row["screen"].split(","))
     radius = float(row["radius"])
-    half = max(16, min(image.size[1] // 2, int(radius * 1.6 * sy)))
+    view = radius * 1.6
+    if ZONE_AROUND:
+        # The zone around the grid fits too: its radius in pixels at this distance, 70 degrees
+        zone = (
+            ZONE_AROUND / float(row["distance"]) / math.tan(math.radians(35)) * vh / 2
+        )
+        view = max(view, zone * 1.2)
+    half = max(16, min(image.size[1] // 2, int(view * sy)))
     # Kept inside the screenshot: a target near the edge is off center rather than cut
     cx = min(max(int(x * sx), half), image.size[0] - half)
     cy = min(max(int(y * sy), half), image.size[1] - half)
@@ -197,6 +218,25 @@ def main() -> None:
         world.prepare(
             SERVER.world, CLIENT.steam_id, CLIENT.name, grids=(), asteroids=(asteroid,)
         )
+    elif ZONE:
+        values = [float(v) for v in ZONE.split(",")]
+        zone = world.SafeZone(
+            "Compare",
+            140000000000000099,
+            GRID_POSITION,
+            radius=values[0],
+            size=tuple(values) if len(values) == 3 else None,
+        )
+        main_id = zone.entity_id
+        shift_length = 0
+        world.prepare(
+            SERVER.world,
+            CLIENT.steam_id,
+            CLIENT.name,
+            grids=(),
+            asteroids=(),
+            zones=(zone,),
+        )
     else:
         grids_xml, ids = blueprint_xml(Path(TARGET).expanduser(), GRID_POSITION)
         main_id = ids[0]
@@ -204,6 +244,12 @@ def main() -> None:
         world.prepare(
             SERVER.world, CLIENT.steam_id, CLIENT.name, grids=(), asteroids=()
         )
+        if ZONE_AROUND:
+            grids_xml += world.zone_xml(
+                world.SafeZone(
+                    "Around", 140000000000000098, GRID_POSITION, radius=ZONE_AROUND
+                )
+            )
         sector = SERVER.world / "SANDBOX_0_0_0_.sbs"
         sector.write_text(
             sector.read_text(encoding="utf-8").replace(
@@ -317,6 +363,7 @@ def main() -> None:
             SERVER.stop()
 
     compose(shots, sun, SHOTS / f"compare-{NAME}.png")
+    rig.write_build_times(SERVER, SHOTS / f"compare-{NAME}-build-times.md")
     # The stats of every shot, for measuring them later
     (SHOTS / f"compare-{NAME}.json").write_text(
         json.dumps(
@@ -392,6 +439,24 @@ def settle(entity_id: int, timeout: float = 20) -> dict:
     return stats_row(entity_id)
 
 
+def framing(shot: Path, distance: float, nearer) -> dict:
+    """A stats row for a shot whose target the client had no stats of, as when the server cut
+    its impostor off: the screen center, where the camera aims, and the radius of a nearer
+    shot (radius, distance) scaled to this distance"""
+    from PIL import Image
+
+    try:
+        w, h = Image.open(shot).size
+    except OSError:
+        return {}
+    return {
+        "viewport": f"{w}x{h}",
+        "screen": f"{w / 2},{h / 2}",
+        "radius": str(nearer[0] * nearer[1] / distance if nearer else 0),
+        "distance": str(distance),
+    }
+
+
 def compose(shots, sun, target: Path) -> None:
     """A row per distance; per direction a real and an impostor cell"""
     from PIL import Image, ImageDraw, ImageFont
@@ -421,15 +486,24 @@ def compose(shots, sun, target: Path) -> None:
         draw.text(
             (left + CELL + gap + 8, round(44 * k)), "impostor", fill="black", font=font
         )
+    # The last framed real shot per direction, for the rows of targets the client has no stats of
+    nearer = {}
     for row_index, (distance, far, zoom) in enumerate(ROWS):
         top = header + row_index * (CELL + gap)
         radius, viewport = 0.0, 720
         for index in range(len(DIRECTIONS)):
             left = label + index * (pair + pair_gap)
             real, real_shot, impostor, impostor_shot = shots[index, row_index]
+            if "screen" in real:
+                nearer[index] = (float(real["radius"]), distance)
+            else:
+                real = framing(real_shot, distance, nearer.get(index))
             for column, (row, shot) in enumerate(
                 ((real, real_shot), (impostor, impostor_shot))
             ):
+                # An impostor the server cut off has no row: framed like the real one
+                if column == 1 and "screen" not in row:
+                    row = real
                 try:
                     cell, r = crop(shot, row)
                 except (KeyError, ValueError):
@@ -440,7 +514,9 @@ def compose(shots, sun, target: Path) -> None:
                     radius = max(radius, r)
                 else:
                     # The level of each impostor: one that kept a coarse level shows here
-                    text = f"level {impostor.get('lod', '?')}"
+                    text = (
+                        f"level {impostor['lod']}" if "lod" in impostor else "cut off"
+                    )
                     box = draw.textbbox((x + 6, top + 6), text, font=font)
                     draw.rectangle(
                         (box[0] - 4, box[1] - 3, box[2] + 4, box[3] + 3), fill="black"

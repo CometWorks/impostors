@@ -83,6 +83,46 @@ class Asteroid:
         return tuple(c + 256 for c in self.position)
 
 
+# Safe zone checks (SE-660): grids 26.9 m in radius, 3 to 8 pixels across from HOME.
+# Shielded sits inside Zone, Behind is seen through it, Open is as far as Shielded with nothing
+# in between.
+SHIELDED = Grid(
+    "Shielded", 120000000000000011, (0.0, -9000.0, 0.0), (12, 8, 16), True, YELLOW
+)
+BEHIND = Grid(
+    "Behind", 120000000000000012, (0.0, -12000.0, 0.0), (12, 8, 16), True, YELLOW
+)
+OPEN = Grid(
+    "Open", 120000000000000013, (6000.0, -6000.0, 3000.0), (12, 8, 16), True, YELLOW
+)
+ZONE_GRIDS = (SHIELDED, BEHIND, OPEN)
+
+
+@dataclass
+class SafeZone:
+    name: str
+    entity_id: int
+    position: tuple[float, float, float]
+    # The radius of a sphere, or the size of a box
+    radius: float = 0.0
+    size: tuple[float, float, float] | None = None
+    color: tuple[float, float, float] = (0.53, 0.81, 0.92)
+    enabled: bool = True
+
+
+ZONE = SafeZone("Zone", 140000000000000001, (0.0, -9000.0, 0.0), radius=500)
+BOX_ZONE = SafeZone(
+    "BoxZone",
+    140000000000000002,
+    (-6000.0, 6000.0, 0.0),
+    size=(600, 300, 400),
+    color=(0.3, 0.9, 0.3),
+)
+OFF_ZONE = SafeZone(
+    "OffZone", 140000000000000003, (6000.0, 6000.0, 0.0), radius=400, enabled=False
+)
+ZONES = (ZONE, BOX_ZONE, OFF_ZONE)
+
 # Saved asteroids replicate to about ViewDistance/sqrt(3) = 8.66 km per axis
 ROCK_FAR = Asteroid(
     "RockFar", 130000000000000001, (-11256.0, -256.0, -256.0), "Asteroid512-001.vx2"
@@ -150,6 +190,38 @@ def _asteroid_xml(a: Asteroid) -> str:
     )
 
 
+def zone_xml(z: SafeZone) -> str:
+    """An admin safe zone, as the admin menu makes them"""
+    shape = (
+        # Size is a Vector3, its parts are elements
+        "<Size>"
+        + "".join(f"<{a}>{v}</{a}>" for a, v in zip("XYZ", z.size))
+        + "</Size><Shape>Box</Shape>"
+        if z.size
+        else f"<Radius>{z.radius}</Radius><Shape>Sphere</Shape>"
+    )
+    return (
+        '<MyObjectBuilder_EntityBase xsi:type="MyObjectBuilder_SafeZone">'
+        "<SubtypeName /><PositionAndOrientation>"
+        + _vec("Position", z.position)
+        + _vec("Forward", (0, 0, -1))
+        + _vec("Up", (0, 1, 0))
+        + "</PositionAndOrientation>"
+        f"<EntityId>{z.entity_id}</EntityId>"
+        "<PersistentFlags>InScene</PersistentFlags>"
+        f"<DisplayName>{z.name}</DisplayName>"
+        f"<Enabled>{'true' if z.enabled else 'false'}</Enabled>"
+        "<AccessTypePlayers>Blacklist</AccessTypePlayers>"
+        "<AccessTypeFactions>Blacklist</AccessTypeFactions>"
+        "<AccessTypeGrids>Blacklist</AccessTypeGrids>"
+        "<AccessTypeFloatingObjects>Blacklist</AccessTypeFloatingObjects>"
+        f"{shape}<IsVisible>true</IsVisible>"
+        + _vec("ModelColor", z.color)
+        + "<Texture>SafeZone_Texture_Default</Texture>"
+        "</MyObjectBuilder_EntityBase>"
+    )
+
+
 def _insert(text: str, tag: str, content: str) -> str:
     """Puts content at the start of the first <tag> element, opening an empty
     <tag /> if need be"""
@@ -185,9 +257,10 @@ def prepare(
     grids=GRIDS,
     asteroids=ASTEROIDS,
     mod: bool = True,
+    zones=(),
 ) -> None:
-    """A fresh copy of the Empty World with the player, the grids, the asteroids
-    and the mod unless mod is False"""
+    """A fresh copy of the Empty World with the player, the grids, the asteroids,
+    the safe zones and the mod unless mod is False"""
     if world.exists():
         shutil.rmtree(world)
     shutil.copytree(rig.EMPTY_WORLD, world)
@@ -196,8 +269,10 @@ def prepare(
 
     sector = world / "SANDBOX_0_0_0_.sbs"
     text = sector.read_text(encoding="utf-8")
-    objects = "".join(_grid_xml(g) for g in grids) + "".join(
-        _asteroid_xml(a) for a in asteroids
+    objects = (
+        "".join(_grid_xml(g) for g in grids)
+        + "".join(_asteroid_xml(a) for a in asteroids)
+        + "".join(zone_xml(z) for z in zones)
     )
     text = _insert(text, "SectorObjects", objects)
     sector.write_text(text, encoding="utf-8")

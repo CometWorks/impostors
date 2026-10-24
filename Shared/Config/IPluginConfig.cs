@@ -17,6 +17,9 @@ public interface IPluginConfig : INotifyPropertyChanged
     // building takes about twice as long
     bool AsteroidOcclusion { get; set; }
 
+    // Sends impostors of enabled safe zones
+    bool SafeZones { get; set; }
+
     // Grid groups with fewer blocks are not shown
     int MinBlocks { get; set; }
 

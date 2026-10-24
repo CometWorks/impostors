@@ -10,6 +10,7 @@ The file is read only when the server starts, so changes take effect after a res
 | `Grids` | true | Impostors of grids, see [Grids](Grids.md) |
 | `Asteroids` | true | Impostors of asteroids, see [Asteroids](Asteroids.md) |
 | `AsteroidOcclusion` | true | Darkens pits and crevices of asteroid impostors, doubles their build time |
+| `SafeZones` | true | Impostors of enabled safe zones, see [Safe zones](SafeZones.md) |
 | `MinBlocks` | 8 | Grid groups with fewer blocks are not shown |
 | `MaxDistance` | 0 | Farthest impostor in meters, 0 is the world's view distance |
 | `MinPixels` | 3 | Impostors less than this many pixels across on a 1080p screen are not sent |

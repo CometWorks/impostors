@@ -5,8 +5,8 @@ using Shared.Impostors;
 
 namespace ServerPlugin.Cluster;
 
-// The grids of the other cluster nodes, and of offline partitions, from the cluster index.
-// Their shapes come from the World Authority's cache.
+// The grids and block safe zones of the other cluster nodes, and of offline partitions, from
+// the cluster index. Their shapes come from the World Authority's cache.
 public sealed class RemoteSource : ImpostorSource
 {
     private readonly ClusterBridge bridge;

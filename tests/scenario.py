@@ -5,6 +5,7 @@ the number of failures. Screenshots land in ~/.se-test/<task>-shots.
 
     uv run --no-project --with httpx --with pillow python tests/scenario.py
     IMP_KEEP=1 ...                             # leave the game running
+    IMP_ONLY=zones ...                         # only the safe zone checks
     IMP_PLUGIN=1 ...                           # the client runs the client plugin
                                                  and the world has no mod
 """
@@ -104,7 +105,14 @@ def drawn(impostors: dict, grid: world.Grid) -> bool:
 
 
 def start():
-    world.prepare(SERVER.world, CLIENT.steam_id, CLIENT.name, mod=not PLUGIN)
+    world.prepare(
+        SERVER.world,
+        CLIENT.steam_id,
+        CLIENT.name,
+        grids=world.GRIDS + world.ZONE_GRIDS,
+        zones=world.ZONES,
+        mod=not PLUGIN,
+    )
     SERVER.prepare([CLIENT.steam_id])
     SERVER.write_plugin_config(
         rig.plugin_config(RebuildSeconds=10, RefreshSeconds=20, MaxQuadsPerFrame=20000)
@@ -241,6 +249,97 @@ def run(api):
     )
     print("screenshot", shot(api, "home-Station-repainted", station.position))
 
+    run_zones(api)
+
+
+def run_zones(api):
+    """Safe zones (SE-660): enabled ones show from afar; an impostor inside one gets one
+    level lower than outside, tinted with the zone's color"""
+    zone, box, off = world.ZONE, world.BOX_ZONE, world.OFF_ZONE
+    shielded, behind, open_ = world.SHIELDED, world.BEHIND, world.OPEN
+
+    api.character_teleport(*world.HOME)
+    totals, impostors = wait_stats(
+        lambda i: all(drawn(i, x) for x in (zone, box, open_, shielded, behind)), 90
+    )
+    for z in (zone, box):
+        i = impostors.get(z.entity_id, {})
+        check(
+            f"impostor {z.name}",
+            drawn(impostors, z) and i.get("kind") == "SafeZone",
+            i or "missing",
+        )
+    check(
+        "no impostor of the disabled zone",
+        off.entity_id not in impostors,
+        impostors.get(off.entity_id, ""),
+    )
+    check(
+        "impostor Open, 4.6 px",
+        drawn(impostors, open_),
+        impostors.get(open_.entity_id, "missing"),
+    )
+    # Shielded and Open are alike and as far, Shielded is inside the zone
+    inside, outside = impostors.get(shielded.entity_id, {}), impostors.get(
+        open_.entity_id, {}
+    )
+    lods = [2, 4, 8, 16, 32, 64]
+    check(
+        "impostor Shielded inside the zone, lower level, tinted",
+        drawn(impostors, shielded) and "tint" in inside and "tint" not in outside
+        # Lower, not exactly one level: the levels keep some hysteresis from where the
+        # player was before
+        and lods.index(int(inside.get("lod", 0)))
+        < lods.index(int(outside.get("lod", 0))),
+        f"inside {inside or 'missing'} outside {outside}",
+    )
+    # Behind is seen through the zone but not inside it: as usual
+    i = impostors.get(behind.entity_id, {})
+    check(
+        "impostor Behind the zone, not tinted",
+        drawn(impostors, behind) and "tint" not in i,
+        i or "missing",
+    )
+    # The sphere's mesh follows its size on screen: 29 px in radius at 9 km on a 720p screen
+    i = impostors.get(zone.entity_id, {})
+    check("Zone 512 quads at 9 km", i.get("zonequads") == "512", i)
+    check(
+        "BoxZone 6 quads",
+        impostors.get(box.entity_id, {}).get("zonequads") == "6",
+        impostors.get(box.entity_id),
+    )
+    print("server:", command(api, "!iprobe zones"))
+    for z in (zone, box):
+        print("screenshot", shot(api, f"home-{z.name}", z.position))
+
+    # Closer, the zone and the grid inside it larger on screen
+    eye = (zone.position[0], zone.position[1] + 4000, zone.position[2])
+    api.character_teleport(*eye)
+    totals, impostors = wait_stats(lambda i: drawn(i, shielded) and drawn(i, zone), 60)
+    check(
+        "impostors Zone and Shielded at 4 km",
+        drawn(impostors, zone) and drawn(impostors, shielded),
+        f"{impostors.get(zone.entity_id)} {impostors.get(shielded.entity_id)}",
+    )
+    print("screenshot", shot(api, "4km-Zone", zone.position))
+
+    # 12 km from the zone it is 21 px in radius: the coarser sphere
+    api.character_teleport(zone.position[0], zone.position[1] + 12000, zone.position[2])
+    totals, impostors = wait_stats(
+        lambda i: i.get(zone.entity_id, {}).get("zonequads") == "128", 30
+    )
+    i = impostors.get(zone.entity_id, {})
+    check("Zone 128 quads at 12 km", i.get("zonequads") == "128", i)
+
+    # Hand-off: within the sync distance the real zone replicates, its impostor hides
+    api.character_teleport(zone.position[0], zone.position[1] + 2000, zone.position[2])
+    totals, impostors = wait_stats(
+        lambda i: i.get(zone.entity_id, {}).get("drawn") != "1", 60
+    )
+    i = impostors.get(zone.entity_id, {})
+    check("zone impostor hidden near", i.get("drawn") != "1", i or "removed")
+    print("screenshot", shot(api, "near-Zone", zone.position))
+
 
 def run_plugin(api):
     """The client plugin's copy of the renderer, on a world without the mod. The copy
@@ -264,11 +363,15 @@ def run_plugin(api):
 def main():
     try:
         api = start()
-        (run_plugin if PLUGIN else run)(api)
+        if os.environ.get("IMP_ONLY") == "zones":
+            run_zones(api)
+        else:
+            (run_plugin if PLUGIN else run)(api)
     finally:
         if os.environ.get("IMP_KEEP") != "1":
             CLIENT.stop()
             SERVER.stop()
+        print("build times", rig.write_build_times(SERVER, SHOTS / "build-times.md"))
     print(f"{'PASSED' if failures == 0 else 'FAILED'}: {failures} failure(s)")
     sys.exit(failures)
 
