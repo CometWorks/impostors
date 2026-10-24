@@ -131,18 +131,19 @@ def run(api):
     for g in far + (world.NEAR,):
         print("screenshot", shot(api, f"home-{g.name}", g.position))
 
-    # Closer, still beyond the sync distance: the impostor is larger on screen
+    # Closer, still beyond the sync distance: the impostor is larger on screen. Grids start
+    # at level 16, which the station has at 8 km.
     station = world.STATION
-    api.character_teleport(station.position[0] - 4000, 0, 0)
+    api.character_teleport(station.position[0] - 3000, 0, 0)
     totals, impostors = wait_stats(
-        lambda i: drawn(i, station) and int(i[station.entity_id]["lod"]) > 8, 30
+        lambda i: drawn(i, station) and int(i[station.entity_id]["lod"]) > 16, 30
     )
     check(
-        "station finer level at 4 km",
-        int(impostors.get(station.entity_id, {}).get("lod", 0)) > 8,
+        "station finer level at 3 km",
+        int(impostors.get(station.entity_id, {}).get("lod", 0)) > 16,
         impostors.get(station.entity_id, "missing"),
     )
-    print("screenshot", shot(api, "4km-Station", station.position))
+    print("screenshot", shot(api, "3km-Station", station.position))
 
     # Hand-off: next to the station its real grid replicates. The server stops sending the
     # impostor; while the client still has it, it must not draw it.

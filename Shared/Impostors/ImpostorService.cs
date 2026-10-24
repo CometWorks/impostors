@@ -235,12 +235,13 @@ public sealed class ImpostorService : IDisposable
                 continue;
 
             viewer.Sent.TryGetValue(entry.Id, out var sent);
-            var lod = PickLod(pixels, sent?.Lod ?? 0);
+            // The level of the shape at hand: a grid has no level 8, its 16 stands in
+            var shape = entry.Shapes[entry.ShapeIndex(PickLod(pixels, sent?.Lod ?? 0))];
+            var lod = shape[0];
             var state = entry.State(lod);
 
             if (sent == null || sent.Version != entry.Version || sent.Lod != lod)
             {
-                var shape = entry.Shapes[entry.ShapeIndex(lod)];
                 // New impostors don't wait, the rest wait while the player is in debt. A shape
                 // larger than a second's worth still goes out, or it would never be sent.
                 if (viewer.ShapeCredit <= 0 && sent != null)

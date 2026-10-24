@@ -31,6 +31,7 @@ public sealed class GridSource : ImpostorSource
         public Vector3 Center;
         public float Size;
         public Vector3I Color;
+        public bool Angled;
     }
 
     public override void Scan(ImpostorRegistry registry)
@@ -105,6 +106,7 @@ public sealed class GridSource : ImpostorSource
             foreach (var block in grid.GetBlocks())
             {
                 var color = BlockColor(block);
+                var angled = IsAngled(block);
                 for (var x = block.Min.X; x <= block.Max.X; x++)
                 for (var y = block.Min.Y; y <= block.Max.Y; y++)
                 for (var z = block.Min.Z; z <= block.Max.Z; z++)
@@ -116,6 +118,7 @@ public sealed class GridSource : ImpostorSource
                                 Vector3D.Transform(new Vector3D(x, y, z) * size, toFrame),
                             Size = size,
                             Color = color,
+                            Angled = angled,
                         }
                     );
                 }
@@ -142,8 +145,10 @@ public sealed class GridSource : ImpostorSource
         // The main grid's block faces are at (n + 0.5) * lattice in its frame
         var start = (new Vector3(Vector3I.Floor(min / lattice - 0.5f)) + 0.5f) * lattice;
 
+        // Level 8 of a grid saves little against 16 (Rhea, 18k blocks: 104 instead of 246
+        // quads, 1.4 KB less) and loses most of the detail, so grids start at 16
         var shapes = new byte[ImpostorEntry.Lods.Length][];
-        for (var i = 0; i < shapes.Length; i++)
+        for (var i = 1; i < shapes.Length; i++)
         {
             var lod = ImpostorEntry.Lods[i];
             var blocks = Math.Max(1, (int)Math.Ceiling(box.AbsMax() / lod / lattice - 0.01f));
@@ -163,6 +168,7 @@ public sealed class GridSource : ImpostorSource
             if (blocks == 1)
                 break;
         }
+        shapes[0] = shapes[1];
         return shapes;
     }
 
@@ -176,14 +182,27 @@ public sealed class GridSource : ImpostorSource
         var last = Vector3I.Floor(hi);
         if (first.X > last.X || first.Y > last.Y || first.Z > last.Z)
         {
-            volume.Add(s.Center, s.Color);
+            volume.Add(s.Center, s.Color, 1, s.Angled);
             return;
         }
 
         for (var x = first.X; x <= last.X; x++)
         for (var y = first.Y; y <= last.Y; y++)
         for (var z = first.Z; z <= last.Z; z++)
-            volume.Add(volume.Origin + (new Vector3(x, y, z) + 0.5f) * volume.CellSize, s.Color);
+            volume.Add(
+                volume.Origin + (new Vector3(x, y, z) + 0.5f) * volume.CellSize,
+                s.Color,
+                1,
+                s.Angled
+            );
+    }
+
+    // Sloped armor: shaded as a cube, its stair steps alternate between lit and dark faces,
+    // which makes the whole grid brighter or darker than the real one depending on the angle
+    private static bool IsAngled(MySlimBlock block)
+    {
+        var subtype = block.BlockDefinition.Id.SubtypeName;
+        return subtype.Contains("Slope") || subtype.Contains("Corner") || subtype.Contains("Round");
     }
 
     // The painted color: block models are painted over most of their surface, functional

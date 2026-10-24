@@ -19,6 +19,9 @@ public sealed class CellVolume
     private readonly int[] blue;
     private readonly int[] weight;
 
+    // Weight of the samples from angled surfaces (sloped armor) per cell, null when none
+    private int[] angled;
+
     public CellVolume(Vector3I size, float cellSize, Vector3 origin, byte lod)
     {
         Size = Vector3I.Clamp(size, Vector3I.One, new Vector3I(255));
@@ -45,8 +48,9 @@ public sealed class CellVolume
             && cell.Z < Size.Z;
     }
 
-    // Adds color to the cell holding this local position, color components 0..255
-    public void Add(Vector3 local, Vector3I color, int w = 1)
+    // Adds color to the cell holding this local position, color components 0..255. Faces of
+    // cells filled mostly by angled samples are shaded with the smoothed surface normal.
+    public void Add(Vector3 local, Vector3I color, int w = 1, bool isAngled = false)
     {
         if (!TryGetCell(local, out var cell))
             return;
@@ -56,7 +60,14 @@ public sealed class CellVolume
         green[i] += color.Y * w;
         blue[i] += color.Z * w;
         weight[i] += w;
+        if (isAngled)
+        {
+            angled ??= new int[weight.Length];
+            angled[i] += w;
+        }
     }
+
+    private bool Angled(int index) => angled != null && angled[index] * 2 > weight[index];
 
     private int Index(int x, int y, int z) => (z * Size.Y + y) * Size.X + x;
 
@@ -317,7 +328,7 @@ public sealed class CellVolume
     // surfaces like asteroids, flat ones suit grids. Occlusion darkens pits and crevices.
     public byte[] ToShape(bool smooth = false, bool occluded = false)
     {
-        if (smooth || occluded)
+        if (smooth || occluded || angled != null)
             BlurOccupancy();
         if (occluded)
         {
@@ -371,9 +382,10 @@ public sealed class CellVolume
                             continue;
 
                         cell[n] = s;
-                        var normal = smooth
-                            ? SmoothNormal(cell[0], cell[1], cell[2], face)
-                            : FaceNormals[face];
+                        var normal =
+                            smooth || Angled(index)
+                                ? SmoothNormal(cell[0], cell[1], cell[2], face)
+                                : FaceNormals[face];
                         var color = occluded
                             ? OccludedColor(cell[0], cell[1], cell[2])
                             : Color(index);

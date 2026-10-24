@@ -47,7 +47,12 @@ filled or empty and has an average color. The surface faces of the filled cells 
 greedily into rectangles of one color, so a flat painted side is a single quad.
 
 - Levels of detail: 8, 16, 32 and 64 cells along the longest axis, fewer for grids where
-  that would split blocks. A level stops being built
+  that would split blocks. Grids start at 16: their level 8 saved little (a 18k block
+  ship: 104 instead of 246 quads) and lost most of the detail.
+- Faces of sloped armor (Slope, Corner and Round blocks) are shaded with the smoothed
+  surface normal, like asteroids: as cube faces their stair steps alternate between lit
+  and dark, and the whole grid came out brighter or darker than the real one depending on
+  the angle. A level stops being built
   once its cells are as small as the content's own resolution (a block for grids).
 - A grid's cells are a whole number of its main grid's blocks and sit on that grid's block
   lattice, so its finest level is block for block, and the cells sticking out are shared by
