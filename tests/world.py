@@ -83,9 +83,9 @@ class Asteroid:
         return tuple(c + 256 for c in self.position)
 
 
-# Safe zone checks (SE-660): grids 26.9 m in radius are 3 to 8 pixels across at 9 to 12 km,
-# between MinPixels (3) and SafeZoneMinPixels (8). Shielded sits inside Zone, Behind is seen
-# through it from HOME, Open is as far as Shielded with nothing in between.
+# Safe zone checks (SE-660): grids 26.9 m in radius, 3 to 8 pixels across from HOME.
+# Shielded sits inside Zone, Behind is seen through it, Open is as far as Shielded with nothing
+# in between.
 SHIELDED = Grid(
     "Shielded", 120000000000000011, (0.0, -9000.0, 0.0), (12, 8, 16), True, YELLOW
 )

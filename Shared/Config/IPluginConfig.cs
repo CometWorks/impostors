@@ -30,10 +30,6 @@ public interface IPluginConfig : INotifyPropertyChanged
     // view are not shown, 3 cuts off those under 3x3 pixels
     float MinPixels { get; set; }
 
-    // Stricter MinPixels for impostors inside a safe zone or seen through one, whose surface
-    // distorts what is behind it. Safe zones themselves keep MinPixels.
-    float SafeZoneMinPixels { get; set; }
-
     // Most impostors one player gets, the largest on screen win
     int MaxImpostorsPerPlayer { get; set; }
 

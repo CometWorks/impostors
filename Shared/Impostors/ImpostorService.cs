@@ -68,6 +68,10 @@ public sealed class ImpostorService : IDisposable
     {
         public int Version;
         public byte Lod;
+
+        // The level picked before a safe zone lowered it, for the hysteresis
+        public byte Picked;
+        public Color Tint;
         public Vector3D Position;
         public Quaternion Orientation;
         public Vector3 Velocity;
@@ -318,15 +322,6 @@ public sealed class ImpostorService : IDisposable
             if (2 * pixels * zoom < config.MinPixels)
                 continue;
 
-            // A safe zone's surface distorts what is inside or behind it: small impostors there
-            // show as noise
-            if (
-                entry.Kind != ImpostorKind.SafeZone
-                && 2 * pixels * zoom < config.SafeZoneMinPixels
-                && zones.Any(z => z.Value.Hits(eye, entry.WorldAabb.Center))
-            )
-                continue;
-
             candidates.Add((entry, pixels, zoom, distance));
         }
 
@@ -362,7 +357,8 @@ public sealed class ImpostorService : IDisposable
                 continue;
 
             viewer.Sent.TryGetValue(entry.Id, out var sent);
-            var index = entry.ShapeIndex(PickLod(pixels * zoom, sent?.Lod ?? 0, entry.Kind));
+            var picked = PickLod(pixels * zoom, sent?.Picked ?? 0, entry.Kind);
+            var index = entry.ShapeIndex(picked);
 
             // A zoomed level only up to half the client's quad budget, about half of a
             // shape's quads face the camera. The level kept from a zoom stays a while.
@@ -370,6 +366,12 @@ public sealed class ImpostorService : IDisposable
             while (index > normal && QuadCount(entry.Shapes[index]) > config.MaxQuadsPerFrame)
                 index--;
             var keep = index > normal;
+
+            // Inside a safe zone: one level lower and tinted with the zone's color, the zone's
+            // distorting surface shows less of it than of one outside
+            var tint = entry.Kind == ImpostorKind.SafeZone ? default : ZoneTint(zones, entry);
+            if (tint.A != 0 && index > 0)
+                index--;
             if (sent != null && now < sent.KeepUntil && sent.Version == entry.Version)
                 index = Math.Max(index, entry.ShapeIndex(sent.Lod));
 
@@ -377,6 +379,7 @@ public sealed class ImpostorService : IDisposable
             var shape = entry.Shapes[index];
             var lod = shape[0];
             var state = entry.State(lod);
+            state.Tint = tint;
 
             if (sent == null || sent.Version != entry.Version || sent.Lod != lod)
             {
@@ -391,7 +394,7 @@ public sealed class ImpostorService : IDisposable
                 shapes.Add((entry, shape));
                 viewer.Sent[entry.Id] = sent = new Sent();
             }
-            else if (!Moved(sent, state, distance))
+            else if (!Moved(sent, state, distance) && sent.Tint == tint)
             {
                 if (keep)
                     sent.KeepUntil = now + ZoomKeepSeconds;
@@ -404,6 +407,8 @@ public sealed class ImpostorService : IDisposable
 
             sent.Version = entry.Version;
             sent.Lod = lod;
+            sent.Picked = picked;
+            sent.Tint = tint;
             sent.Position = state.Position;
             sent.Orientation = state.Orientation;
             sent.Velocity = state.Velocity;
@@ -413,6 +418,21 @@ public sealed class ImpostorService : IDisposable
 
         SendStates(viewer.SteamId, states);
         SendShapes(viewer.SteamId, shapes);
+    }
+
+    // The color of the first enabled safe zone holding the entry's center, none if outside
+    private static Color ZoneTint(List<ZoneVolume?> zones, ImpostorEntry entry)
+    {
+        foreach (var zone in zones)
+        {
+            if (zone.Value.Contains(entry.WorldAabb.Center))
+            {
+                var color = zone.Value.Color;
+                color.A = 255;
+                return color;
+            }
+        }
+        return default;
     }
 
     // Inside the zoomed view: the angle off its direction, less the impostor's own angular

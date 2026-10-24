@@ -253,14 +253,14 @@ def run(api):
 
 
 def run_zones(api):
-    """Safe zones (SE-660): enabled ones show from afar, small impostors inside or behind
-    one need SafeZoneMinPixels (8) instead of MinPixels (3)"""
+    """Safe zones (SE-660): enabled ones show from afar; an impostor inside one gets one
+    level lower than outside, tinted with the zone's color"""
     zone, box, off = world.ZONE, world.BOX_ZONE, world.OFF_ZONE
     shielded, behind, open_ = world.SHIELDED, world.BEHIND, world.OPEN
 
     api.character_teleport(*world.HOME)
     totals, impostors = wait_stats(
-        lambda i: drawn(i, zone) and drawn(i, box) and drawn(i, open_), 90
+        lambda i: all(drawn(i, x) for x in (zone, box, open_, shielded, behind)), 90
     )
     for z in (zone, box):
         i = impostors.get(z.entity_id, {})
@@ -279,12 +279,27 @@ def run_zones(api):
         drawn(impostors, open_),
         impostors.get(open_.entity_id, "missing"),
     )
-    for g, where in ((shielded, "inside"), (behind, "behind")):
-        check(
-            f"no impostor {g.name}, 3 to 8 px {where} the zone",
-            g.entity_id not in impostors,
-            impostors.get(g.entity_id, ""),
-        )
+    # Shielded and Open are alike and as far, Shielded is inside the zone
+    inside, outside = impostors.get(shielded.entity_id, {}), impostors.get(
+        open_.entity_id, {}
+    )
+    lods = [2, 4, 8, 16, 32, 64]
+    check(
+        "impostor Shielded inside the zone, one level lower, tinted",
+        drawn(impostors, shielded)
+        and "tint" in inside
+        and "tint" not in outside
+        and lods.index(int(inside.get("lod", 0)))
+        == lods.index(int(outside.get("lod", 0))) - 1,
+        f"inside {inside or 'missing'} outside {outside}",
+    )
+    # Behind is seen through the zone but not inside it: as usual
+    i = impostors.get(behind.entity_id, {})
+    check(
+        "impostor Behind the zone, not tinted",
+        drawn(impostors, behind) and "tint" not in i,
+        i or "missing",
+    )
     # The sphere's mesh follows its size on screen: 29 px in radius at 9 km on a 720p screen
     i = impostors.get(zone.entity_id, {})
     check("Zone 512 quads at 9 km", i.get("zonequads") == "512", i)
@@ -297,17 +312,14 @@ def run_zones(api):
     for z in (zone, box):
         print("screenshot", shot(api, f"home-{z.name}", z.position))
 
-    # Closer: Shielded is 10 px across, more than the stricter cut-off
+    # Closer, the zone and the grid inside it larger on screen
     eye = (zone.position[0], zone.position[1] + 4000, zone.position[2])
     api.character_teleport(*eye)
-    totals, impostors = wait_stats(lambda i: drawn(i, shielded), 60)
+    totals, impostors = wait_stats(lambda i: drawn(i, shielded) and drawn(i, zone), 60)
     check(
-        "impostor Shielded at 4 km, 10 px",
-        drawn(impostors, shielded),
-        impostors.get(shielded.entity_id, "missing"),
-    )
-    check(
-        "impostor Zone at 4 km", drawn(impostors, zone), impostors.get(zone.entity_id)
+        "impostors Zone and Shielded at 4 km",
+        drawn(impostors, zone) and drawn(impostors, shielded),
+        f"{impostors.get(zone.entity_id)} {impostors.get(shielded.entity_id)}",
     )
     print("screenshot", shot(api, "4km-Zone", zone.position))
 
@@ -318,15 +330,6 @@ def run_zones(api):
     )
     i = impostors.get(zone.entity_id, {})
     check("Zone 128 quads at 12 km", i.get("zonequads") == "128", i)
-
-    # A line of sight past the zone: Behind is 3.3 px across, the normal cut-off applies
-    api.character_teleport(4000.0, 0.0, 0.0)
-    totals, impostors = wait_stats(lambda i: drawn(i, behind), 60)
-    check(
-        "impostor Behind past the zone, 3.3 px",
-        drawn(impostors, behind),
-        impostors.get(behind.entity_id, "missing"),
-    )
 
     # Hand-off: within the sync distance the real zone replicates, its impostor hides
     api.character_teleport(zone.position[0], zone.position[1] + 2000, zone.position[2])

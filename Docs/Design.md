@@ -169,7 +169,7 @@ Mod networking on channel 47213, reliable messages up to 16 KB:
 |---|---|---|
 | Hello | client to server | protocol version; at load and every 30 s |
 | Welcome | server to client | protocol version, server instance id, `MaxQuadsPerFrame` |
-| States | server to client | impostor states: id, kind (grid, voxel or safe zone), version, level, radius, position, orientation, velocity (70 bytes each) |
+| States | server to client | impostor states: id, kind (grid, voxel or safe zone), version, level, radius, position, orientation, velocity, safe zone tint (74 bytes each) |
 | Remove | server to client | impostor ids |
 | ShapeData | server to client | count, then id, version and shape per impostor |
 | View | client to server | field of view with zoom, viewport width and height, view direction; while zoomed |
@@ -267,23 +267,22 @@ game never reads it and draws those zones anyway.
   far half is drawn before the impostors inside the zone, the near half after them. Both
   halves are drawn, so a zone counts with all its quads against `MaxQuadsPerFrame`, where
   grids and asteroids count with half of theirs.
-- Zones go first among a player's `MaxImpostorsPerPlayer`, and they keep `MinPixels`. They
-  are always built, even when nobody is shown them, because the cut-off below needs them.
+- Zones go first among a player's `MaxImpostorsPerPlayer`. They are always built, even when
+  nobody is shown them, because the impostors inside them need them.
 
-The game draws a zone's surface with a distorting shield effect. Impostors are billboards
-drawn after tone mapping, so they show undistorted on top of it, and the small ones look
-like noise there. The server therefore applies `SafeZoneMinPixels` (8 by default) instead of
-`MinPixels` (3) to every impostor whose line of sight from the player passes through an
-enabled zone or ends inside one. That is the segment from the player's controlled entity to
-the center of the impostor's AABB, tested against the zone's sphere or box. A player inside a
-zone sees everything through its surface, so the stricter cut-off then applies to all of it.
-Larger impostors stay: their shape still reads through the distortion.
+The game draws a zone's surface with a distorting shield effect, which blurs and tints what
+is inside. Impostors are billboards drawn after tone mapping, so they show undistorted on top
+of it. A grid or asteroid impostor whose AABB center is inside an enabled zone therefore gets
+one level of detail lower than it would outside, and its state carries the zone's color
+(`Tint`, 4 bytes, alpha 0 outside of zones). The mod blends its quad colors that much towards
+the zone's color (`ZoneTint` in the renderer), fitted to comparison sheets. The level picked
+before the drop is kept for the hysteresis, so the drop doesn't repeat every second.
 
 On a cluster, admin zones are on every node (the cluster plugin's `AdminSafeZones`), so each
 node shows them itself, like asteroids. The zone of a safe zone block travels with the
 block's grid, so nodes report it to the World Authority like a grid entry, located by the
 partition of the block's grid. Other nodes show it through `RemoteSource` and use it for the
-cut-off.
+impostors inside it.
 
 ## Cluster
 
@@ -324,7 +323,7 @@ one message under the SDK's 64 KiB payload limit.
 |---|---|
 | Server game thread | one scan per second; a build's snapshot copies every cube of the group |
 | Server background | 2 builds at a time |
-| Network per player | `ShapeBytesPerSecond` (32 KB/s) for shapes, about 70 bytes per moving impostor per second |
+| Network per player | `ShapeBytesPerSecond` (32 KB/s) for shapes, about 74 bytes per moving impostor per second |
 | Client | `MaxQuadsPerFrame` quads per frame (16000) |
 
 Typical shapes, measured on the test grids: see the test results in the ticket.

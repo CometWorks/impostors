@@ -110,6 +110,18 @@ public readonly struct ZoneVolume
         return new ZoneVolume(entry.WorldMatrix, ZoneShape.Read(new ByteReader(bytes, 1)));
     }
 
+    // The zone's color, which tints the impostors inside it
+    public Color Color => shape.Color;
+
+    public bool Contains(Vector3D point)
+    {
+        var p = Vector3D.Transform(point, toLocal);
+        var half = (Vector3D)shape.HalfExtents;
+        if (!shape.Box)
+            return p.LengthSquared() <= half.X * half.X;
+        return Math.Abs(p.X) <= half.X && Math.Abs(p.Y) <= half.Y && Math.Abs(p.Z) <= half.Z;
+    }
+
     // The segment from a to b passes through the zone or ends inside it
     public bool Hits(Vector3D a, Vector3D b)
     {

@@ -72,7 +72,7 @@ namespace Impostors
     // Position and Orientation.
     public struct ImpostorState
     {
-        public const int Size = 8 + 1 + 4 + 1 + 4 + 24 + 16 + 12;
+        public const int Size = 8 + 1 + 4 + 1 + 4 + 24 + 16 + 12 + 4;
 
         public long Id;
         public ImpostorKind Kind;
@@ -89,6 +89,9 @@ namespace Impostors
         public Vector3D Position;
         public Quaternion Orientation;
         public Vector3 Velocity;
+
+        // The color of the safe zone the impostor is inside, alpha 0 when outside of zones
+        public Color Tint;
 
         public void Write(ByteWriter w)
         {
@@ -107,6 +110,10 @@ namespace Impostors
             w.Float(Velocity.X);
             w.Float(Velocity.Y);
             w.Float(Velocity.Z);
+            w.Byte(Tint.R);
+            w.Byte(Tint.G);
+            w.Byte(Tint.B);
+            w.Byte(Tint.A);
         }
 
         public static ImpostorState Read(ByteReader r)
@@ -120,6 +127,7 @@ namespace Impostors
             s.Position = new Vector3D(r.Double(), r.Double(), r.Double());
             s.Orientation = new Quaternion(r.Float(), r.Float(), r.Float(), r.Float());
             s.Velocity = new Vector3(r.Float(), r.Float(), r.Float());
+            s.Tint = new Color(r.Byte(), r.Byte(), r.Byte(), r.Byte());
             return s;
         }
     }

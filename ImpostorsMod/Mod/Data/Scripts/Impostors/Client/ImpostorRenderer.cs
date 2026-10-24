@@ -52,6 +52,10 @@ namespace Impostors
         private const int ZoneRimPower = 6;
         private const float ZoneRimWhite = 0.4f;
 
+        // An impostor inside a safe zone is seen through the zone's surface: its colors are
+        // blended this much towards the zone's color
+        private const float ZoneTint = 0.3f;
+
         // Re-sort a shape's quads when the view direction turned by about 3 degrees
         private const float ResortCosine = 0.9986f;
 
@@ -352,6 +356,11 @@ namespace Impostors
                         + state.Position.Y.ToString("0.0")
                         + ","
                         + state.Position.Z.ToString("0.0")
+                        + (
+                            state.Tint.A != 0
+                                ? " tint=" + state.Tint.PackedValue.ToString("x8")
+                                : ""
+                        )
                         + ZoneStats(impostor)
                         + ScreenPosition(state)
                 );
@@ -637,6 +646,8 @@ namespace Impostors
             );
             var sunLocal = Vector3.TransformNormal(sun, toLocal);
             var brightness = Brightness(state, Vector3D.Distance(eye, position));
+            var tinted = state.Tint.A != 0;
+            var tint = state.Tint.ToVector3();
 
             for (var f = 0; f < 6; f++)
             {
@@ -662,7 +673,10 @@ namespace Impostors
                 var center = position + Vector3.TransformNormal(shape.Centers[i], rotation);
                 var light =
                     Ambient + Diffuse * Math.Max(0, Vector3.Dot(shape.Shading[i], sunLocal));
-                var color = new Vector4(shape.Colors[i] * light * brightness, 1f);
+                var lit = shape.Colors[i] * light * brightness;
+                if (tinted)
+                    lit = Vector3.Lerp(lit, tint, ZoneTint);
+                var color = new Vector4(lit, 1f);
                 var half = shape.HalfSizes[i];
                 MyTransparentGeometry.AddBillboardOriented(
                     Material,

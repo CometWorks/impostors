@@ -21,14 +21,13 @@ is that of the zone's bounding box, about 1.7 times a sphere's own. Rendered at 
 
 ![600 x 300 x 400 m safe zone box, real and impostor from 2 directions, 1.5 to 48 km](images/safezone-box.jpg)
 
-**IMDC Rhea v2.3 inside a 250 m sphere** (`IMP_ZONE=250`), 400 m to 48 km, from the 8 cube
-corners. The impostor cells show both the ship's impostor and the zone's. Up to 12.8 km the
-real ship is seen through the game's distorting shield, while its impostor is drawn on top of
-it. From 25.6 km on the ship is under `SafeZoneMinPixels` (8 pixels across at 1080p) and its
-impostor is cut off ("cut off" in the cell), while the zone stays. Those cells are framed on
-the screen center, where the camera aims. The row label's radius is the ship's.
+**IMDC Rhea v2.3 inside a 250 m sphere** (`IMP_ZONE=250`), 400 m to 83 km, from the 8 cube
+corners. The impostor cells show both the ship's impostor and the zone's. The real ship is
+seen through the game's distorting shield; its impostor is one level lower than outside a
+zone and tinted with the zone's color. Past the game's own range the real cell is empty.
+The row label's radius is the ship's.
 
-![IMDC Rhea v2.3 in a 250 m safe zone, real and impostor from 8 directions, 400 m to 48 km](images/safezone-rhea.jpg)
+![IMDC Rhea v2.3 in a 250 m safe zone, real and impostor from 8 directions, 400 m to 83 km](images/safezone-rhea.jpg)
 
 ## What gets one
 
@@ -57,19 +56,17 @@ Each size keeps the outline within about half a pixel of a circle. On a 1080p sc
 sphere is over 25 px in radius out to about 15 km, under 6 px past about 64 km. All the quads
 count against `MaxQuadsPerFrame`, since both halves of the shell are drawn.
 
-## Small impostors in or behind a zone
+## Grids and asteroids inside a zone
 
-The game draws a zone's surface with a distorting shield effect. Impostors are drawn on top
-of it, undistorted, and the small ones there look like noise. So an impostor whose line of
-sight from the player passes through an enabled zone, or ends inside one, needs
-`SafeZoneMinPixels` (8 by default) instead of `MinPixels` (3). Zones themselves keep
-`MinPixels`. A player inside a zone sees everything through its surface, so then the stricter
-cut-off applies to all impostors.
+The game draws a zone's surface with a distorting shield effect, which blurs and tints what
+is inside. Impostors are drawn on top of it, undistorted. To make up for that, a grid or
+asteroid whose center is inside an enabled zone gets an impostor one level of detail lower
+than outside, and the mod blends its colors 30% towards the zone's color. The same
+`MinPixels` applies as everywhere else.
 
-`tests/scenario.py` checks it with three grids 27 m in radius, 3 to 8 pixels across from
-where the player waits: one inside a 500 m zone and one behind it are cut off, one as far
-away with nothing in between is shown. Closer to the zone, at 10 pixels, the one inside shows
-again.
+`tests/scenario.py` checks it with two grids alike, as far from the player: the one inside a
+500 m zone is one level lower and tinted, the one outside isn't. A third one, seen through
+the zone but behind it, isn't tinted either.
 
 ## Clusters
 

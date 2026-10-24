@@ -28,7 +28,8 @@ game running), and the rig's IMP_RESOLUTION and IMP_DISPLAY (see rig.py).
 
 A safe zone target is an enabled admin zone: a sphere of that radius or a box of that size.
 IMP_ZONE=<radius> puts a grid inside a sphere zone of that radius around GRID_POSITION: the
-impostor shots show both, and the grid needs SafeZoneMinPixels (8) instead of MinPixels.
+impostor shots show both, the grid's impostor one level lower and tinted with the zone's
+color.
 
 The image lands in ~/.se-test/<task>-shots/compare-<name>.png.
 
@@ -524,9 +525,7 @@ def compose(shots, sun, target: Path) -> None:
             viewport = int(real.get("viewport", "1280x720").split("x")[1])
         # The server's default MinPixels drops impostors under 3 pixels across at 1080p,
         # this sheet shows them anyway
-        # In a safe zone the grid needs SafeZoneMinPixels (8) instead
-        least = 8 if ZONE_AROUND else 3
-        cut = "\ncut off by default" if 2 * radius * 1080 / viewport < least else ""
+        cut = "\ncut off by default" if 2 * radius * 1080 / viewport < 3 else ""
         text = f"{distance:.0f} m\nradius {radius:.1f} px{cut}"
         if ZOOMS:
             fov = 2 * math.degrees(math.atan(math.tan(math.radians(35)) / zoom))

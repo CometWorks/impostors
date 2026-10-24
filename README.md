@@ -28,8 +28,8 @@ Safe zones show from afar too, as translucent bubbles in their color.
   occlusion.
 - [Zoomed views](Docs/Zoom.md): finer levels through a zoomed camera, with comparison
   screenshots.
-- [Safe zones](Docs/SafeZones.md): safe zone impostors, and the stricter cut-off for small
-  impostors seen through a zone.
+- [Safe zones](Docs/SafeZones.md): safe zone impostors, and the impostors of grids and
+  asteroids inside them.
 - [Configuration](Docs/Configuration.md): the options of `Impostors.cfg`.
 - [Design](Docs/Design.md): how it works inside, the protocol, clusters and the limits.
 - [Development](Docs/Development.md): building, deployment, debugging and tests.
