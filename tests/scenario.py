@@ -5,6 +5,7 @@ the number of failures. Screenshots land in ~/.se-test/<task>-shots.
 
     uv run --no-project --with httpx --with pillow python tests/scenario.py
     IMP_KEEP=1 ...                             # leave the game running
+    IMP_ONLY=zones ...                         # only the safe zone checks
     IMP_PLUGIN=1 ...                           # the client runs the client plugin
                                                  and the world has no mod
 """
@@ -284,7 +285,7 @@ def run_zones(api):
             g.entity_id not in impostors,
             impostors.get(g.entity_id, ""),
         )
-    print("server:", command(api, "!iprobe stats"))
+    print("server:", command(api, "!iprobe zones"))
     for z in (zone, box):
         print("screenshot", shot(api, f"home-{z.name}", z.position))
 
@@ -343,7 +344,10 @@ def run_plugin(api):
 def main():
     try:
         api = start()
-        (run_plugin if PLUGIN else run)(api)
+        if os.environ.get("IMP_ONLY") == "zones":
+            run_zones(api)
+        else:
+            (run_plugin if PLUGIN else run)(api)
     finally:
         if os.environ.get("IMP_KEEP") != "1":
             CLIENT.stop()

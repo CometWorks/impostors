@@ -193,7 +193,10 @@ def _asteroid_xml(a: Asteroid) -> str:
 def zone_xml(z: SafeZone) -> str:
     """An admin safe zone, as the admin menu makes them"""
     shape = (
-        f"<Shape>Box</Shape>{_vec('Size', z.size)}"
+        # Size is a Vector3, its parts are elements
+        "<Size>"
+        + "".join(f"<{a}>{v}</{a}>" for a, v in zip("XYZ", z.size))
+        + "</Size><Shape>Box</Shape>"
         if z.size
         else f"<Radius>{z.radius}</Radius><Shape>Sphere</Shape>"
     )
