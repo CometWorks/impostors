@@ -258,10 +258,11 @@ game never reads it and draws those zones anyway.
 - The shape is not a cell grid but the zone itself (`ZoneShape` in `Protocol.cs`, 17 bytes):
   a leading 0 where other shapes have their level, sphere or box, the half extents and the
   zone's color. The frame is the zone's world matrix.
-- The mod draws it as a translucent shell of flat quads, 24 by 12 around a sphere or one per
-  side of a box, in the zone's color. Each quad covers 8% of the light behind it face on,
-  up to 58% where the line of sight grazes it, so the outline shows like the game's shield.
-  The far half is drawn before the impostors inside the zone, the near half after them.
+- The mod draws it as a translucent shell of flat quads, 32 by 16 around a sphere or one per
+  side of a box, in the zone's color. Seen face on a quad covers 2% of the light behind it;
+  where the line of sight grazes it, up to 82% and paler, so the zone shows as a thin rim
+  like the game's shield (fitted to comparison sheets, see [Safe zones](SafeZones.md)). The
+  far half is drawn before the impostors inside the zone, the near half after them.
 - Zones go first among a player's `MaxImpostorsPerPlayer`, and they keep `MinPixels`. They
   are always built, even when nobody is shown them, because the cut-off below needs them.
 
