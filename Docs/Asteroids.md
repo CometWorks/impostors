@@ -4,13 +4,21 @@ Saved and edited asteroids beyond the range the game replicates them to. That ra
 `ViewDistance/√3` per axis around the player (8.7 km at the default 15 km view distance), so
 past it players see no rock where a mined or saved asteroid is.
 
+The two sheets below compare real asteroids with their impostors, ambient occlusion off (the
+default). Each row is a distance, from close up to where the default `MinPixels` drops the
+impostor. Each column pair is a view from one of the 8 cube corners, with the angle to the
+sun on top: the real asteroid on the left, its impostor on the right. The impostor is shot
+three radii to the side of the real one, since the game can't hide a real asteroid. Every
+impostor cell names its level of detail. Where the real cell is empty, the game no longer
+draws that asteroid. Rendered at 2560x1440 with `tests/compare.py`.
+
+**512 m asteroid** (`Asteroid512-008`), 800 m to 227 km. The game stops drawing it past
+about 50 km.
+
 ![512 m asteroid, real and impostor from 8 directions, 800 m to 227 km](images/asteroid-512.jpg)
 
-*A 512 m asteroid. Each row is a distance; each column pair is a view from one cube corner,
-the real asteroid on the left and its impostor on the right, moved sideways by three radii
-(the game can't hide a real asteroid). Every impostor cell names its level of detail. Past
-about 50 km the game draws no real asteroid. The last row is where the default `MinPixels`
-drops the impostor. Rendered at 2560x1440 with `tests/compare.py`.*
+**256 m asteroid** (`Asteroid256-011`), 400 m to 113 km. The game stops drawing it past about
+30 km.
 
 ![256 m asteroid, real and impostor from 8 directions, 400 m to 113 km](images/asteroid-256.jpg)
 
@@ -37,9 +45,14 @@ the rest).
   crevices. It is off by default: against the real asteroids it helped at some distances and
   hurt at others, and it doubles the build time.
 
+The same asteroids with three columns per direction: the real asteroid, the impostor without
+ambient occlusion and the impostor with it.
+
+**512 m asteroid**, 800 m to 227 km:
+
 ![512 m asteroid: real, impostor without and with ambient occlusion](images/asteroid-512-occlusion.jpg)
 
-*Real asteroid, impostor without and impostor with ambient occlusion, from 8 directions.*
+**256 m asteroid**, 400 m to 113 km:
 
 ![256 m asteroid: real, impostor without and with ambient occlusion](images/asteroid-256-occlusion.jpg)
 
