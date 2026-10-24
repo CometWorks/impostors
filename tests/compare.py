@@ -438,6 +438,24 @@ def settle(entity_id: int, timeout: float = 20) -> dict:
     return stats_row(entity_id)
 
 
+def framing(shot: Path, distance: float, nearer) -> dict:
+    """A stats row for a shot whose target the client had no stats of, as when the server cut
+    its impostor off: the screen center, where the camera aims, and the radius of a nearer
+    shot (radius, distance) scaled to this distance"""
+    from PIL import Image
+
+    try:
+        w, h = Image.open(shot).size
+    except OSError:
+        return {}
+    return {
+        "viewport": f"{w}x{h}",
+        "screen": f"{w / 2},{h / 2}",
+        "radius": str(nearer[0] * nearer[1] / distance if nearer else 0),
+        "distance": str(distance),
+    }
+
+
 def compose(shots, sun, target: Path) -> None:
     """A row per distance; per direction a real and an impostor cell"""
     from PIL import Image, ImageDraw, ImageFont
@@ -467,12 +485,18 @@ def compose(shots, sun, target: Path) -> None:
         draw.text(
             (left + CELL + gap + 8, round(44 * k)), "impostor", fill="black", font=font
         )
+    # The last framed real shot per direction, for the rows of targets the client has no stats of
+    nearer = {}
     for row_index, (distance, far, zoom) in enumerate(ROWS):
         top = header + row_index * (CELL + gap)
         radius, viewport = 0.0, 720
         for index in range(len(DIRECTIONS)):
             left = label + index * (pair + pair_gap)
             real, real_shot, impostor, impostor_shot = shots[index, row_index]
+            if "screen" in real:
+                nearer[index] = (float(real["radius"]), distance)
+            else:
+                real = framing(real_shot, distance, nearer.get(index))
             for column, (row, shot) in enumerate(
                 ((real, real_shot), (impostor, impostor_shot))
             ):

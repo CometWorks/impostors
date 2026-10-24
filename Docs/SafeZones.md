@@ -21,6 +21,15 @@ is that of the zone's bounding box, about 1.7 times a sphere's own. Rendered at 
 
 ![600 x 300 x 400 m safe zone box, real and impostor from 2 directions, 1.5 to 48 km](images/safezone-box.jpg)
 
+**IMDC Rhea v2.3 inside a 250 m sphere** (`IMP_ZONE=250`), 400 m to 48 km, from the 8 cube
+corners. The impostor cells show both the ship's impostor and the zone's. Up to 12.8 km the
+real ship is seen through the game's distorting shield, while its impostor is drawn on top of
+it. From 25.6 km on the ship is under `SafeZoneMinPixels` (8 pixels across at 1080p) and its
+impostor is cut off ("cut off" in the cell), while the zone stays. Those cells are framed on
+the screen center, where the camera aims. The row label's radius is the ship's.
+
+![IMDC Rhea v2.3 in a 250 m safe zone, real and impostor from 8 directions, 400 m to 48 km](images/safezone-rhea.jpg)
+
 ## What gets one
 
 - Every enabled safe zone: admin zones and the zones of safe zone blocks. A disabled zone
