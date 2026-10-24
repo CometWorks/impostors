@@ -84,6 +84,26 @@ after the zoom. See [Design](Design.md), "Zoomed views".
   any of them if the rock would vanish. They are for the far ones that cover a few pixels:
   an asteroid ring shows hundreds at once, and level 16 costs 15 times the quads of level 8.
 
+## Build time
+
+One build of each asteroid on sirius (AMD Ryzen 7 9800X3D), from the `Impostor build:` log
+lines (`tests/build_times.py`). Milliseconds of wall clock and CPU time on the background
+thread that builds it; they are the same, a build doesn't wait on anything.
+
+| Level | 512 m | 512 m, occlusion | 256 m | 256 m, occlusion |
+|---|---:|---:|---:|---:|
+| 64 | 35.1 | 70.4 | 35.0 | 71.5 |
+| 32 | 3.7 | 9.2 | 3.0 | 7.3 |
+| 16 | 0.5 | 0.9 | 0.9 | 1.2 |
+| 8 | 5.8 | 3.1 | 5.2 | 1.9 |
+| 4 | 0.3 | 0.2 | 0.3 | 0.3 |
+| 2 | 0.0 | 0.0 | 0.0 | 0.0 |
+| All | 45.8 | 84.2 | 44.9 | 82.5 |
+
+Level 64 reads the storage voxel by voxel and makes most of the quads, so it takes most of
+the time; ambient occlusion doubles it. Level 8 reads voxels two levels finer and pools
+them. The snapshot on the game thread (the material colors) took 1.2 to 1.5 ms.
+
 ## Rebuilds
 
 Mining, a blast or any other storage edit rebuilds the impostor, at most every
