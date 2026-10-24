@@ -31,6 +31,13 @@ namespace Impostors
         private const float Ambient = 0.08f;
         private const float Diffuse = 1.6f;
 
+        // Small asteroids: under about 27 pixels in radius on a 1080p screen the real ones look
+        // darker than lit impostors, down to 0.82 times as bright under 13 pixels. Fitted to
+        // screenshots of real asteroids from 8 directions; near ones already match.
+        private const float SmallBrightness = 0.82f;
+        private const float SmallFromPixels = 13f;
+        private const float SmallToPixels = 27f;
+
         // Re-sort a shape's quads when the view direction turned by about 3 degrees
         private const float ResortCosine = 0.9986f;
 
@@ -284,6 +291,18 @@ namespace Impostors
             visible.RemoveRange(count, visible.Count - count);
         }
 
+        private static float Brightness(ImpostorState state, double distance)
+        {
+            if (state.Kind != ImpostorKind.Voxel)
+                return 1f;
+
+            var camera = MyAPIGateway.Session.Camera;
+            var pixels =
+                state.Radius / Math.Max(distance, 1) / Math.Tan(camera.FovWithZoom / 2) * 540;
+            var t = (float)((pixels - SmallFromPixels) / (SmallToPixels - SmallFromPixels));
+            return MathHelper.Lerp(SmallBrightness, 1f, MathHelper.Clamp(t, 0f, 1f));
+        }
+
         private void DrawImpostor(ClientImpostor impostor, Vector3D eye, Vector3 sun)
         {
             var state = impostor.State;
@@ -299,6 +318,7 @@ namespace Impostors
                 Vector3.TransformNormal((Vector3)(position - eye), toLocal)
             );
             var sunLocal = Vector3.TransformNormal(sun, toLocal);
+            var brightness = Brightness(state, Vector3D.Distance(eye, position));
 
             for (var f = 0; f < 6; f++)
             {
@@ -324,7 +344,7 @@ namespace Impostors
                 var center = position + Vector3.TransformNormal(shape.Centers[i], rotation);
                 var light =
                     Ambient + Diffuse * Math.Max(0, Vector3.Dot(shape.Shading[i], sunLocal));
-                var color = new Vector4(shape.Colors[i] * light, 1f);
+                var color = new Vector4(shape.Colors[i] * light * brightness, 1f);
                 var half = shape.HalfSizes[i];
                 MyTransparentGeometry.AddBillboardOriented(
                     Material,

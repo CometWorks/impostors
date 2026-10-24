@@ -195,6 +195,14 @@ from afar anyway.
   small table (stone, iron, ice and the rest), on a background thread.
 - Quads are shaded with smoothed normals: an asteroid seen along an axis would otherwise be
   one flat color.
+- The coarsest level is pooled from voxels two levels finer: a cell is filled when at least
+  half of its voxels are. The game's own coarse voxels erode thin parts, and level 8 looked
+  half as large as level 16. That level also gets at least 6 cells across a rock that is
+  small for its voxel storage. Asteroids keep level 8: their 16 costs about 15 times the
+  quads (513 instead of 34 for a 512 m one).
+- The mod dims asteroid impostors that are small on screen: from 27 pixels in radius on a
+  1080p screen down to 0.82 times as bright under 13 pixels, where the real asteroids look
+  darker than their lit impostors.
 - With `AsteroidOcclusion` on, their colors get ambient occlusion baked in, so pits and
   crevices darken like the real ones. It's off by default: in 8-direction comparisons it made
   the impostors closer to the real asteroids at some distances and farther at others, for twice

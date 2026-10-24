@@ -35,6 +35,9 @@ public sealed class VoxelSource : ImpostorSource
 
     private static readonly Vector3I Stone = OreColors["Stone"];
 
+    // Cells across the content at the coarsest level, at least
+    private const int CoarsestCells = 6;
+
     private readonly IPluginConfig config;
 
     // Storage edits seen per voxel map, the signature of its entry
@@ -119,42 +122,77 @@ public sealed class VoxelSource : ImpostorSource
         bool occluded
     )
     {
+        // The levels to build: up to the first that reads single voxels
         var shapes = new byte[ImpostorEntry.Lods.Length][];
-        var data = new MyStorageData();
+        var levels = new List<(int index, int voxelLod)>();
         for (var i = 0; i < shapes.Length; i++)
         {
             // The coarsest voxel level of detail with at least this many voxels along the longest axis
-            var lod = ImpostorEntry.Lods[i];
-            var voxelLod = Math.Max(0, (int)Math.Floor(Math.Log(size.AbsMax() / (double)lod, 2)));
-            var cells = Vector3I.Max(Vector3I.One, size >> voxelLod);
-            var cellSize = (float)(1 << voxelLod);
+            var voxelLod = Math.Max(
+                0,
+                (int)Math.Floor(Math.Log(size.AbsMax() / (double)ImpostorEntry.Lods[i], 2))
+            );
+            levels.Add((i, voxelLod));
+            if (voxelLod == 0)
+                break;
+        }
 
-            data.Resize(cells);
+        // Finest first, for the extent of the content. The coarsest level is pooled from voxels
+        // two levels finer, a cell filled when at least half of them are: the game's own
+        // coarse voxels were eroded there, and level 8 looked half as large as level 16. It
+        // also gets at least CoarsestCells cells across a rock that is small for its storage.
+        var extent = 0f;
+        var data = new MyStorageData();
+        for (var k = levels.Count - 1; k >= 0; k--)
+        {
+            var (i, voxelLod) = levels[k];
+            var cellSize = (float)(1 << voxelLod);
+            var pooled = k == 0 && k < levels.Count - 1 && voxelLod > 0;
+            if (pooled)
+            {
+                if (extent > 0)
+                    cellSize = Math.Min(cellSize, extent / CoarsestCells);
+                voxelLod = Math.Max(0, voxelLod - 2);
+            }
+
+            var voxels = Vector3I.Max(Vector3I.One, size >> voxelLod);
+            var voxelSize = (float)(1 << voxelLod);
+            data.Resize(voxels);
             storage.ReadRange(
                 data,
                 MyStorageDataTypeFlags.ContentAndMaterial,
                 voxelLod,
                 Vector3I.Zero,
-                cells - 1
+                voxels - 1
             );
 
-            var volume = new CellVolume(cells, cellSize, corner, lod);
+            var cells = Vector3I.Ceiling(new Vector3(size) / cellSize);
+            var volume = new CellVolume(cells, cellSize, corner, ImpostorEntry.Lods[i]);
+            var min = new Vector3I(int.MaxValue);
+            var max = new Vector3I(int.MinValue);
             var p = Vector3I.Zero;
-            for (p.Z = 0; p.Z < cells.Z; p.Z++)
-            for (p.Y = 0; p.Y < cells.Y; p.Y++)
-            for (p.X = 0; p.X < cells.X; p.X++)
+            for (p.Z = 0; p.Z < voxels.Z; p.Z++)
+            for (p.Y = 0; p.Y < voxels.Y; p.Y++)
+            for (p.X = 0; p.X < voxels.X; p.X++)
             {
                 if (data.Content(ref p) <= MyVoxelConstants.VOXEL_ISO_LEVEL)
                     continue;
                 volume.Add(
-                    corner + (new Vector3(p) + 0.5f) * cellSize,
+                    corner + (new Vector3(p) + 0.5f) * voxelSize,
                     colors[data.Material(ref p)]
                 );
+                min = Vector3I.Min(min, p);
+                max = Vector3I.Max(max, p);
             }
-            shapes[i] = volume.ToShape(smooth: true, occluded);
 
-            if (voxelLod == 0)
-                break;
+            // A pooled cell is filled when at least half of its voxels are
+            if (pooled)
+                volume.DropBelow(
+                    Math.Max(1, (int)Math.Round(Math.Pow(cellSize / voxelSize, 3) / 2))
+                );
+            if (extent == 0 && max.X >= min.X)
+                extent = (max - min + 1).AbsMax() * voxelSize;
+            shapes[i] = volume.ToShape(smooth: true, occluded);
         }
         return shapes;
     }

@@ -104,6 +104,19 @@ public sealed class CellVolume
         return coarse;
     }
 
+    // Empties the cells with less weight than this, for cells pooled from finer samples
+    public void DropBelow(int minWeight)
+    {
+        for (var i = 0; i < weight.Length; i++)
+        {
+            if (weight[i] >= minWeight)
+                continue;
+            red[i] = green[i] = blue[i] = weight[i] = 0;
+            if (angled != null)
+                angled[i] = 0;
+        }
+    }
+
     private bool Angled(int index) => angled != null && angled[index] * 2 > weight[index];
 
     private int Index(int x, int y, int z) => (z * Size.Y + y) * Size.X + x;
