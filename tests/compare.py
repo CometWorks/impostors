@@ -94,7 +94,7 @@ SUN = (
     else None
 )
 
-CELL = 180  # Side of one image cell, pixels
+CELL = 360  # Side of one image cell, pixels
 
 
 def blueprint_xml(path: Path, position) -> tuple[str, list[int]]:
@@ -318,9 +318,10 @@ def look(api, entity_id, eye, target, distance, drawn=False) -> dict:
 
 def compose(shots, sun, target: Path) -> None:
     """A row per distance; per direction a real and an impostor cell"""
-    from PIL import Image, ImageDraw
+    from PIL import Image, ImageDraw, ImageFont
 
-    label, gap, pair_gap, header = 150, 4, 16, 44
+    font = ImageFont.load_default(size=22)
+    label, gap, pair_gap, header = 230, 6, 28, 80
     pair = 2 * CELL + gap
     width = label + len(DIRECTIONS) * (pair + pair_gap)
     height = header + len(DISTANCES) * (CELL + gap)
@@ -333,9 +334,14 @@ def compose(shots, sun, target: Path) -> None:
             math.acos(max(-1, min(1, sum(a * b for a, b in zip(normalize(view), sun)))))
         )
         name = "".join(f"{'+' if v > 0 else '-'}{a}" for v, a in zip(view, "XYZ") if v)
-        draw.text((left, 4), f"from {name}, {angle:.0f} deg from the sun", fill="black")
-        draw.text((left + CELL // 2 - 12, 24), "real", fill="black")
-        draw.text((left + CELL + gap + CELL // 2 - 24, 24), "impostor", fill="black")
+        draw.text(
+            (left, 8),
+            f"from {name}, {angle:.0f} deg from the sun",
+            fill="black",
+            font=font,
+        )
+        draw.text((left + 8, 44), "real", fill="black", font=font)
+        draw.text((left + CELL + gap + 8, 44), "impostor", fill="black", font=font)
     for row_index, distance in enumerate(DISTANCES):
         top = header + row_index * (CELL + gap)
         radius, level, viewport = 0.0, "?", 720
@@ -358,10 +364,11 @@ def compose(shots, sun, target: Path) -> None:
         # this sheet shows them anyway
         cut = "\ncut off by default" if 2 * radius * 1080 / viewport < 3 else ""
         draw.multiline_text(
-            (8, top + 8),
+            (12, top + 12),
             f"{distance:.0f} m\nradius {radius:.1f} px\nlevel {level}{cut}",
             fill="black",
-            spacing=6,
+            spacing=8,
+            font=font,
         )
     sheet.save(target)
     print("comparison", target)
