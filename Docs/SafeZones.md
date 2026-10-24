@@ -61,8 +61,11 @@ count against `MaxQuadsPerFrame`, since both halves of the shell are drawn.
 The game draws a zone's surface with a distorting shield effect, which blurs and tints what
 is inside. Impostors are drawn on top of it, undistorted. To make up for that, a grid or
 asteroid whose center is inside an enabled zone gets an impostor one level of detail lower
-than outside, and the mod blends its colors 35% towards the zone's color. The same
-`MinPixels` applies as everywhere else.
+than outside, and the mod blends its colors 35% towards the color of the zone's surface: the
+zone's color 60% of the way to white. Both are fitted to the Rhea sheet above, the mean color
+of the ship's pixels real against impostor: the real ship comes out lighter and keeps its hue,
+blended towards the zone's own color it came out blue. The same `MinPixels` applies as
+everywhere else.
 
 `tests/scenario.py` checks it with two grids alike, as far from the player: the one inside a
 500 m zone is one level lower and tinted, the one outside isn't. A third one, seen through

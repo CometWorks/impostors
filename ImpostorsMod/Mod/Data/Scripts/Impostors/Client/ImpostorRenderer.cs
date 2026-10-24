@@ -53,9 +53,12 @@ namespace Impostors
         private const float ZoneRimWhite = 0.4f;
 
         // An impostor inside a safe zone is seen through the zone's surface: its colors are
-        // blended this much towards the zone's color. Fitted to the colors of a ship in a zone,
-        // real against impostor, in comparison sheets (least squares, 0.37).
+        // blended ZoneTint towards the surface's color, the zone's color ZoneTintPale of the
+        // way to white. Fitted to the colors of a ship in a zone, real against impostor, in
+        // comparison sheets (least squares): the real ship is lighter and keeps its hue,
+        // blended towards the zone's own color it came out blue.
         private const float ZoneTint = 0.35f;
+        private const float ZoneTintPale = 0.6f;
 
         // Re-sort a shape's quads when the view direction turned by about 3 degrees
         private const float ResortCosine = 0.9986f;
@@ -648,7 +651,7 @@ namespace Impostors
             var sunLocal = Vector3.TransformNormal(sun, toLocal);
             var brightness = Brightness(state, Vector3D.Distance(eye, position));
             var tinted = state.Tint.A != 0;
-            var tint = state.Tint.ToVector3();
+            var tint = Vector3.Lerp(state.Tint.ToVector3(), Vector3.One, ZoneTintPale);
 
             for (var f = 0; f < 6; f++)
             {
