@@ -344,7 +344,7 @@ def compose(shots, sun, target: Path) -> None:
         draw.text((left + CELL + gap + 8, 44), "impostor", fill="black", font=font)
     for row_index, distance in enumerate(DISTANCES):
         top = header + row_index * (CELL + gap)
-        radius, level, viewport = 0.0, "?", 720
+        radius, viewport = 0.0, 720
         for index in range(len(DIRECTIONS)):
             left = label + index * (pair + pair_gap)
             real, real_shot, impostor, impostor_shot = shots[index, distance]
@@ -355,17 +355,25 @@ def compose(shots, sun, target: Path) -> None:
                     cell, r = crop(shot, row)
                 except (KeyError, ValueError):
                     cell, r = Image.new("RGB", (CELL, CELL), "gray"), 0.0
-                sheet.paste(cell, (left + column * (CELL + gap), top))
+                x = left + column * (CELL + gap)
+                sheet.paste(cell, (x, top))
                 if column == 0:
                     radius = max(radius, r)
-            level = impostor.get("lod", level)
+                else:
+                    # The level of each impostor: one that kept a coarse level shows here
+                    text = f"level {impostor.get('lod', '?')}"
+                    box = draw.textbbox((x + 6, top + 6), text, font=font)
+                    draw.rectangle(
+                        (box[0] - 4, box[1] - 3, box[2] + 4, box[3] + 3), fill="black"
+                    )
+                    draw.text((x + 6, top + 6), text, fill="white", font=font)
             viewport = int(real.get("viewport", "1280x720").split("x")[1])
         # The server's default MinPixels drops impostors under 3 pixels across at 1080p,
         # this sheet shows them anyway
         cut = "\ncut off by default" if 2 * radius * 1080 / viewport < 3 else ""
         draw.multiline_text(
             (12, top + 12),
-            f"{distance:.0f} m\nradius {radius:.1f} px\nlevel {level}{cut}",
+            f"{distance:.0f} m\nradius {radius:.1f} px{cut}",
             fill="black",
             spacing=8,
             font=font,
