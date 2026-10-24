@@ -23,7 +23,7 @@ public interface IPluginConfig : INotifyPropertyChanged
     // Most impostors one player gets, the largest on screen win
     int MaxImpostorsPerPlayer { get; set; }
 
-    // Shape data sent to one player per second, bytes
+    // Shape data sent to one player per second on average, bytes
     int ShapeBytesPerSecond { get; set; }
 
     // Shortest time between two rebuilds of the same impostor, seconds

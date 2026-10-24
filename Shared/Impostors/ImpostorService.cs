@@ -38,6 +38,10 @@ public sealed class ImpostorService : IDisposable
         public readonly ulong SteamId;
         public readonly Dictionary<long, Sent> Sent = new();
 
+        // Shape bytes this player may still get, negative after a shape larger than what was
+        // left: the next seconds pay that off
+        public int ShapeCredit;
+
         public Viewer(ulong steamId)
         {
             SteamId = steamId;
@@ -220,7 +224,10 @@ public sealed class ImpostorService : IDisposable
         SendRemove(viewer.SteamId, removed);
 
         var states = new List<ImpostorState>();
-        var shapeBudget = config.ShapeBytesPerSecond;
+        viewer.ShapeCredit = Math.Min(
+            viewer.ShapeCredit + config.ShapeBytesPerSecond,
+            config.ShapeBytesPerSecond
+        );
         foreach (var (entry, pixels, distance) in shown)
         {
             entry.Wanted = true;
@@ -234,9 +241,11 @@ public sealed class ImpostorService : IDisposable
             if (sent == null || sent.Version != entry.Version || sent.Lod != lod)
             {
                 var shape = entry.Shapes[entry.ShapeIndex(lod)];
-                if (shape.Length > shapeBudget && sent != null)
+                // New impostors don't wait, the rest wait while the player is in debt. A shape
+                // larger than a second's worth still goes out, or it would never be sent.
+                if (viewer.ShapeCredit <= 0 && sent != null)
                     continue;
-                shapeBudget -= shape.Length;
+                viewer.ShapeCredit -= shape.Length;
 
                 // The state goes first, so the client knows the version the shape belongs to
                 SendStates(viewer.SteamId, [state]);

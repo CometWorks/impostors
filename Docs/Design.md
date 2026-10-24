@@ -94,8 +94,10 @@ Every second it:
    by default, so nothing under 3x3 pixels; the size is that of the AABB's bounding
    sphere). The largest `MaxImpostorsPerPlayer` win.
 3. Sends what changed for that player: removals, a state and a shape for new impostors or
-   ones with a new version or level, and a state for moved ones. Shapes stay within
-   `ShapeBytesPerSecond` per player; the rest wait for the next second.
+   ones with a new version or level, and a state for moved ones. Shapes average
+   `ShapeBytesPerSecond` per player: one goes out while the player has credit left, even
+   if it is larger than that (an asteroid's finest level is about 150 KB), and the next
+   ones wait until the following seconds have paid off the debt. New impostors don't wait.
 4. Starts background builds for the wanted entries that have no shapes yet, or whose content
    changed, at most two at a time.
 
