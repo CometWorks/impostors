@@ -154,12 +154,10 @@ def crop(path: Path, row: dict):
     x, y = (float(v) for v in row["screen"].split(","))
     radius = float(row["radius"])
     half = max(16, min(image.size[1] // 2, int(radius * 1.6 * sy)))
-    box = (
-        int(x * sx) - half,
-        int(y * sy) - half,
-        int(x * sx) + half,
-        int(y * sy) + half,
-    )
+    # Kept inside the screenshot: a target near the edge is off center rather than cut
+    cx = min(max(int(x * sx), half), image.size[0] - half)
+    cy = min(max(int(y * sy), half), image.size[1] - half)
+    box = (cx - half, cy - half, cx + half, cy + half)
     return image.crop(box).resize((CELL, CELL), Image.NEAREST), radius
 
 
