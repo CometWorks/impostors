@@ -434,6 +434,8 @@ namespace Impostors
                         + (MyAPIGateway.Entities.EntityExists(state.Id) ? 1 : 0)
                         + " drawn="
                         + (visible.Contains(impostor) ? 1 : 0)
+                        + " r="
+                        + state.Radius.ToString("0.0")
                         + " pos="
                         + state.Position.X.ToString("0.0")
                         + ","

@@ -108,34 +108,52 @@ def vec(text: str):
     return tuple(float(v) for v in text.split(","))
 
 
+def known(impostors: dict) -> None:
+    """With IMP_KNOWN=1 the rocks are the impostors the client has listed so far, at their
+    state's position and radius: for worlds like Octahedron, whose rotated voxel maps are
+    hard to size from the save"""
+    for id, i in impostors.items():
+        if id not in KNOWN and "r" in i:
+            KNOWN[id] = (vec(i["pos"]), float(i["r"]))
+
+
+KNOWN: dict[int, tuple] = {}
+USE_KNOWN = os.environ.get("IMP_KNOWN") == "1"
+WIDTH, HEIGHT = (int(v) for v in rig.RESOLUTION.split("x"))
+# Saved and edited asteroids replicate within this half side around the replication center
+REPLICATED = float(os.environ.get("IMP_REPLICATED", world.VIEW_M / math.sqrt(3)))
+
+
+def candidates():
+    if USE_KNOWN:
+        return [(id, c, r) for id, (c, r) in KNOWN.items()]
+    return [(r.asteroid.entity_id, r.center, r.radius) for r in ROCKS]
+
+
 def expected(totals: dict) -> set[int]:
     """The asteroids the camera of these stats should show: in the view cone around the
     diagonal, beyond the replication of saved voxels, at least MIN_PIXELS across"""
     camera, forward = vec(totals["camera"]), vec(totals["forward"])
     fov = math.radians(float(totals["fov"]))
-    width, height = 1280, 720
-    half = math.atan(math.tan(fov / 2) * math.hypot(1, width / height))
-    pixels_per_radian = height / 2 / math.tan(fov / 2)
-    replicated = world.VIEW_M / math.sqrt(3)
+    half = math.atan(math.tan(fov / 2) * math.hypot(1, WIDTH / HEIGHT))
+    pixels_per_radian = HEIGHT / 2 / math.tan(fov / 2)
     ids = set()
-    for rock in ROCKS:
-        d = [c - e for c, e in zip(rock.center, camera)]
+    for id, center, radius in candidates():
+        d = [c - e for c, e in zip(center, camera)]
         distance = math.sqrt(sum(v * v for v in d))
-        if all(abs(v) < replicated + rock.size / 2 for v in d):
+        if all(abs(v) < REPLICATED + radius for v in d):
             continue
-        if distance - rock.radius > MAX_DISTANCE:
+        if distance - radius > MAX_DISTANCE:
             continue
         cos = sum(a * b for a, b in zip(d, forward)) / distance
-        angle = math.acos(max(-1, min(1, cos))) - math.asin(
-            min(1, rock.radius / distance)
-        )
+        angle = math.acos(max(-1, min(1, cos))) - math.asin(min(1, radius / distance))
         # A margin inside the edge: the stats' camera is up to a frame off the drawn one
         if angle > half * 0.9:
             continue
         # Clearly above the cut-off, in case the estimates differ a little
-        if 2 * rock.radius / distance * pixels_per_radian < 2 * MIN_PIXELS:
+        if 2 * radius / distance * pixels_per_radian < 2 * MIN_PIXELS:
             continue
-        ids.add(rock.asteroid.entity_id)
+        ids.add(id)
     return ids
 
 
@@ -160,6 +178,8 @@ def sample(seconds: float, label: str) -> dict:
         if not totals or totals.get("tick") == last_tick or "camera" not in totals:
             continue
         last_tick = totals["tick"]
+        if USE_KNOWN:
+            known(impostors)
         want = expected(totals)
         if not want:
             continue
