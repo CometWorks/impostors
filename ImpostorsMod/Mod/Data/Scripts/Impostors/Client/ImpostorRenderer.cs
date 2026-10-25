@@ -63,7 +63,18 @@ namespace Impostors
         // Re-sort a shape's quads when the view direction turned by about 3 degrees
         private const float ResortCosine = 0.9986f;
 
-        private static readonly MyStringId Material = MyStringId.GetOrCompute("Square");
+        // A copy of the game's Square material under a name of our own (Data/
+        // TransparentMaterials.sbc), so the client plugin can tell impostor quads from other
+        // billboards when a frame has more of them than the game draws
+        public const string MaterialName = "ImpostorSquare";
+        private static readonly MyStringId Material = MyStringId.GetOrCompute(MaterialName);
+
+        // The client plugin sends an int here every tick through the mod messages: how many
+        // quads the next frame has room for after every other billboard of the last one
+        public const long BudgetMessage = 4721300001;
+        private const int BudgetTicks = 10;
+        private int frameBudget;
+        private int frameBudgetTick = -BudgetTicks - 1;
 
         private readonly Dictionary<long, ClientImpostor> impostors =
             new Dictionary<long, ClientImpostor>();
@@ -96,6 +107,7 @@ namespace Impostors
         private readonly HashSet<long> hidden = new HashSet<long>();
         private int tick;
         private int drawnQuads;
+        private int budget;
 
         public override void LoadData()
         {
@@ -107,6 +119,7 @@ namespace Impostors
                 return;
 
             MyAPIGateway.Multiplayer.RegisterSecureMessageHandler(Protocol.Channel, OnMessage);
+            MyAPIGateway.Utilities.RegisterMessageHandler(BudgetMessage, OnBudget);
             active = true;
 
             // Tests put this file into the mod's local storage to get stats.txt every second
@@ -124,6 +137,7 @@ namespace Impostors
                 return;
 
             MyAPIGateway.Multiplayer.UnregisterSecureMessageHandler(Protocol.Channel, OnMessage);
+            MyAPIGateway.Utilities.UnregisterMessageHandler(BudgetMessage, OnBudget);
             active = false;
             impostors.Clear();
         }
@@ -314,6 +328,8 @@ namespace Impostors
                     + drawnQuads
                     + " maxquads="
                     + maxQuads
+                    + " budget="
+                    + budget
                     + " sun="
                     + Vec(MyVisualScriptLogicProvider.GetSunDirection())
                     + " tick="
@@ -376,6 +392,14 @@ namespace Impostors
                 )
             )
                 file.Write(text.ToString());
+        }
+
+        private void OnBudget(object message)
+        {
+            if (!(message is int))
+                return;
+            frameBudget = (int)message;
+            frameBudgetTick = tick;
         }
 
         private void OnMessage(ushort channel, byte[] message, ulong sender, bool fromServer)
@@ -497,10 +521,21 @@ namespace Impostors
                         .CompareTo(Vector3D.DistanceSquared(eye, b.State.Position))
             );
 
+            // The client plugin's budget while it keeps sending it, the server's otherwise
+            budget = maxQuads;
+            if (tick - frameBudgetTick <= BudgetTicks)
+                budget = MathHelper.Clamp(frameBudget, 0, maxQuads);
+
             var quads = 0;
             var count = 0;
-            while (count < visible.Count && quads + Cost(visible[count], eye) <= maxQuads)
-                quads += Cost(visible[count++], eye);
+            while (count < visible.Count)
+            {
+                var cost = Cost(visible[count], eye);
+                if (quads + cost > budget)
+                    break;
+                quads += cost;
+                count++;
+            }
 
             var sun = MyVisualScriptLogicProvider.GetSunDirection();
 
@@ -564,6 +599,8 @@ namespace Impostors
 
             foreach (var q in ZoneQuads(impostor, eye))
             {
+                if (drawnQuads >= budget)
+                    return;
                 var center =
                     position + Vector3D.TransformNormal(q.Center * zone.HalfExtents, rotation);
                 var normal = Vector3D.TransformNormal(q.Normal, rotation);
@@ -614,13 +651,45 @@ namespace Impostors
             return ZoneMesh.Quads(zone.Box, pixels);
         }
 
-        // Quads an impostor draws: about half of a shape's face the camera, a safe zone draws
-        // both of its halves
+        // Quads an impostor draws: a shape the ones on the faces towards the camera, a safe
+        // zone both of its halves
         private int Cost(ClientImpostor impostor, Vector3D eye)
         {
-            return impostor.Shape.IsZone
-                ? ZoneQuads(impostor, eye).Length
-                : impostor.Shape.Count / 2;
+            var shape = impostor.Shape;
+            if (shape.IsZone)
+                return ZoneQuads(impostor, eye).Length;
+
+            Vector3D position;
+            Matrix rotation;
+            var view = LocalView(impostor, eye, out position, out rotation);
+            var cost = 0;
+            for (var f = 0; f < 6; f++)
+            {
+                if (Vector3.Dot(ClientShape.Normals[f], view) < 0)
+                    cost += shape.FaceCounts[f];
+            }
+            return cost;
+        }
+
+        // The direction from the camera to the impostor in its local frame, where it is and
+        // how it is turned
+        private Vector3 LocalView(
+            ClientImpostor impostor,
+            Vector3D eye,
+            out Vector3D position,
+            out Matrix rotation
+        )
+        {
+            var state = impostor.State;
+
+            // Extrapolate motion between state updates, a few seconds at most
+            var age = Math.Min(tick - impostor.ReceivedTick, 600) / 60f;
+            position = state.Position + state.Velocity * age + shift;
+
+            rotation = Matrix.CreateFromQuaternion(state.Orientation);
+            return Vector3.Normalize(
+                Vector3.TransformNormal((Vector3)(position - eye), Matrix.Transpose(rotation))
+            );
         }
 
         private static float Brightness(ImpostorState state, double distance)
@@ -639,16 +708,10 @@ namespace Impostors
             var state = impostor.State;
             var shape = impostor.Shape;
 
-            // Extrapolate motion between state updates, a few seconds at most
-            var age = Math.Min(tick - impostor.ReceivedTick, 600) / 60f;
-            var position = state.Position + state.Velocity * age + shift;
-
-            var rotation = Matrix.CreateFromQuaternion(state.Orientation);
-            var toLocal = Matrix.Transpose(rotation);
-            var view = Vector3.Normalize(
-                Vector3.TransformNormal((Vector3)(position - eye), toLocal)
-            );
-            var sunLocal = Vector3.TransformNormal(sun, toLocal);
+            Vector3D position;
+            Matrix rotation;
+            var view = LocalView(impostor, eye, out position, out rotation);
+            var sunLocal = Vector3.TransformNormal(sun, Matrix.Transpose(rotation));
             var brightness = Brightness(state, Vector3D.Distance(eye, position));
             var tinted = state.Tint.A != 0;
             var tint = Vector3.Lerp(state.Tint.ToVector3(), Vector3.One, ZoneTintPale);
@@ -673,6 +736,8 @@ namespace Impostors
                 var face = shape.Faces[i];
                 if (!facing[face])
                     continue;
+                if (drawnQuads >= budget)
+                    return;
 
                 var center = position + Vector3.TransformNormal(shape.Centers[i], rotation);
                 var light =
