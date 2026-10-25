@@ -337,9 +337,9 @@ pack is a mod with the impostors of all of a world's asteroids, at every level, 
   reads and hashes the voxels again. After a reset they hash as they did before anybody
   mined, which is the pack entry's hash, so the pack's shapes come back. A finished build
   records the hash of what it read, unless the asteroid was edited during the build.
-- An asteroid the game never counted as edited (`ContentChanged` false) starts with its pack
-  entry's hash, when the pack marks the entry as built from an unedited asteroid too. So an
-  untouched world needs no voxel reads at all.
+- So each asteroid is read once, at its first build, and again only after it changed. The
+  game's own `ContentChanged` can't stand in for that: an asteroid saved mined comes back
+  with it false after a restart.
 - The known hashes are saved with the world, as `Storage/Impostors.asteroids` in the save's
   folder (a save deletes the other files at the top of that folder). They are written while
   the world saves, so they describe the voxels saved with them, and not for the checkpoint a
@@ -347,8 +347,7 @@ pack is a mod with the impostors of all of a world's asteroids, at every level, 
   `Sandbox.sbc`): an older backup of the world, or a world that crashed before its next
   save, may hold other voxels. They also carry a hash of what the shapes depend on besides
   the voxels (`VoxelSource.Settings`: the occlusion setting and the material colors); with
-  other settings they and the pack's unedited hashes are not used, and every asteroid is
-  read as before.
+  other settings they are not used, and every asteroid is read again.
 - Client: the mod adds the pack's asteroids (id, version, level mask) to its Inventory (see
   "Disk cache"), so the server sends the 14 byte reference instead of a shape, and the client
   reads the shape from the pack. A client without the pack gets the shapes as before. A

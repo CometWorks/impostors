@@ -236,7 +236,7 @@ def pack_versions() -> dict[int, int]:
     data = (PACK / "ImpostorsAsteroidPack.bin").open("rb")
     magic, fmt = struct.unpack("<iB", data.read(5))
     data.read(data.read(1)[0])  # the world name, shorter than 128 bytes
-    _settings, count = struct.unpack("<qi", data.read(12))
+    (count,) = struct.unpack("<i", data.read(4))
     versions = {}
     for _ in range(count):
         asteroid, _input, version, _flags, levels = struct.unpack(
@@ -344,6 +344,8 @@ def reset() -> int:
             and v,
             120,
         )
+        # The build's log line may come a moment after the new version
+        wait_for(lambda: builds(asteroid, log_text()), 30)
         ok &= check(
             bool(mined) and mined[1] and len(builds(asteroid, log_text())) == 1,
             f"cut {asteroid}: version {mined and mined[0]}, built {len(builds(asteroid, log_text()))} times",

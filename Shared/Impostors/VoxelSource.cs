@@ -25,9 +25,8 @@ namespace Shared.Impostors;
 // hash alone: the pack or the shape cache has their shapes. Any change to the storage (mining,
 // a voxel hand, a voxel reset) drops the asteroid's hash, so its next build reads the voxels
 // again; after a reset they hash the same as before the edits and the pack's shapes are used
-// again. An asteroid that was never edited (ContentChanged false) starts with the hash of its
-// pack entry, if the pack was built before anybody edited it either. The known hashes are
-// saved with the world, see Save.
+// again. The known hashes are saved with the world, see Save. The game's ContentChanged is no
+// help: it comes back false after a restart for an asteroid saved mined.
 public sealed class VoxelSource : ImpostorSource, IDisposable
 {
     private const string KnownFile = "Impostors.asteroids";
@@ -55,7 +54,6 @@ public sealed class VoxelSource : ImpostorSource, IDisposable
     private const int CoarsestCells = 6;
 
     private readonly IPluginConfig config;
-    private readonly AsteroidPack pack;
     private readonly IPluginLogger log;
 
     // Storage edits seen per voxel map, the signature of its entry
@@ -70,24 +68,19 @@ public sealed class VoxelSource : ImpostorSource, IDisposable
     private readonly Dictionary<long, long> loaded;
 
     // Hash of what the shapes depend on besides the voxels: the material colors and the
-    // occlusion setting. Known hashes, and the pack's hashes of unedited asteroids, are used
-    // only with the same settings, else the cache would give shapes of the old ones.
+    // occlusion setting. Known hashes are used only with the same settings, else the cache
+    // would give shapes of the old ones.
     public readonly long Settings;
 
-    public VoxelSource(IPluginConfig config, AsteroidPack pack, IPluginLogger log)
+    public VoxelSource(IPluginConfig config, IPluginLogger log)
     {
         this.config = config;
-        this.pack = pack;
         this.log = log;
         var settings = InputHash.Start((byte)ImpostorKind.Voxel);
         settings.Add(config.AsteroidOcclusion);
         foreach (var color in MaterialColors())
             settings.Add(color);
         Settings = settings.Value;
-        if (pack != null && pack.Settings != Settings)
-            log.Info(
-                "The asteroid pack was built with other asteroid settings (occlusion, material colors), every asteroid is read to find its entry"
-            );
         loaded = Load();
         MySession.Static.OnSavingCheckpoint += Save;
     }
@@ -222,13 +215,6 @@ public sealed class VoxelSource : ImpostorSource, IDisposable
                 {
                     edits[map.EntityId] = 0;
                     if (loaded.TryGetValue(map.EntityId, out var hash))
-                        known[map.EntityId] = hash;
-                    else if (
-                        !map.ContentChanged
-                        && pack != null
-                        && pack.Settings == Settings
-                        && pack.TryGetOriginal(map.EntityId, out hash)
-                    )
                         known[map.EntityId] = hash;
                     map.RangeChanged += OnRangeChanged;
                 }
