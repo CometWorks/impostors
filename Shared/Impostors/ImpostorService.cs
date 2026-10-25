@@ -26,12 +26,12 @@ public sealed class ImpostorService : IDisposable
     // Zoomed views beyond this are treated as this much, finer levels give nothing more
     private const double MaxZoom = 32;
 
-    // A finer level sent for a zoomed view stays this long after the zoom ended, seconds
-    private const double ZoomKeepSeconds = 30;
-
     // The share of the client's quad budget the impostors inside a zoomed view may take with
     // their finer levels, the rest is for everything else on screen
     private const double ZoomQuadShare = 0.75;
+
+    // A turning zoomed view gets a margin of what it turns in this many seconds
+    private const double TurnLeadSeconds = 0.5;
 
     // A new impostor that comes while the player is out of shape credit gets a level of at most
     // this many bytes first, the finer one follows once the credit is paid off. Turning a zoomed
@@ -88,6 +88,11 @@ public sealed class ImpostorService : IDisposable
         public double Zoom = 1;
         public Vector3D Forward;
         public double HalfAngle;
+        public int ViewTick;
+
+        // Added to HalfAngle while the view keeps turning: the client sends a View at least
+        // every 10 ticks then
+        public double TurnMargin;
 
         // Impostors whose new level waits for shape credit at the last pick
         public int Waiting;
@@ -116,9 +121,6 @@ public sealed class ImpostorService : IDisposable
         public Vector3D Position;
         public Quaternion Orientation;
         public Vector3 Velocity;
-
-        // A finer level sent for a zoomed view is not replaced by a coarser one before this
-        public double KeepUntil;
     }
 
     // Extra sources registered by the plugin, for example the cluster bridge
@@ -358,13 +360,25 @@ public sealed class ImpostorService : IDisposable
             return;
         }
 
+        // How fast the view turns, from the last View message: a fast pan brings things in
+        // before the next View and pick could
+        forward = Vector3D.Normalize(forward);
+        var turn = 0.0;
+        if (viewer.Zoom > 1 && tick > viewer.ViewTick)
+        {
+            var angle = Math.Acos(Math.Max(-1, Math.Min(1, Vector3D.Dot(forward, viewer.Forward))));
+            turn = angle * 60 / (tick - viewer.ViewTick);
+        }
+        viewer.ViewTick = tick;
         viewer.Zoom = Math.Min(zoom, MaxZoom);
-        viewer.Forward = Vector3D.Normalize(forward);
+        viewer.Forward = forward;
+
         // The client reports a turn of an eighth of its field of view, the margin covers that
-        // and what a turning view brings in before the next pick
+        // and what a turning view brings in within TurnLeadSeconds, a field of view at most
         viewer.HalfAngle =
             Math.Atan(Math.Tan(fov / 2) * Math.Sqrt(1 + (double)width * width / height / height))
             + fov / 4;
+        viewer.TurnMargin = Math.Min(turn * TurnLeadSeconds, fov);
     }
 
     private void UpdateViewer(Viewer viewer)
@@ -449,7 +463,6 @@ public sealed class ImpostorService : IDisposable
             viewer.ShapeCredit + config.ShapeBytesPerSecond * elapsed / 60,
             config.ShapeBytesPerSecond
         );
-        var now = MySession.Static.ElapsedPlayTime.TotalSeconds;
         var zoomQuads = 0;
         foreach (var (entry, pixels, zoom, distance) in shown)
         {
@@ -463,19 +476,17 @@ public sealed class ImpostorService : IDisposable
             var index = entry.ShapeIndex(picked);
 
             // A zoomed level only up to half the client's quad budget, about half of a
-            // shape's quads face the camera. The level kept from a zoom stays a while.
+            // shape's quads face the camera. After the zoom the client still has it in its
+            // shape store, so zooming in again costs a state only.
             var normal = zoom > 1 ? entry.ShapeIndex(PickLod(pixels, 0, entry.Kind)) : index;
             while (index > normal && QuadCount(entry.Shapes[index]) > config.MaxQuadsPerFrame)
                 index--;
-            var keep = index > normal;
 
             // Inside a safe zone: one level lower and tinted with the zone's color, the zone's
             // distorting surface shows less of it than of one outside
             var tint = entry.Kind == ImpostorKind.SafeZone ? default : ZoneTint(zones, entry);
             if (tint.A != 0 && index > 0)
                 index--;
-            if (sent != null && now < sent.KeepUntil && sent.Version == entry.Version)
-                index = Math.Max(index, entry.ShapeIndex(sent.Lod));
 
             // The zoomed ones share ZoomQuadShare of the client's quad budget, largest on
             // screen first, about half of each shape's quads facing the camera. Over a ring
@@ -490,7 +501,6 @@ public sealed class ImpostorService : IDisposable
                 )
                     index--;
                 zoomQuads += QuadCount(entry.Shapes[index]) / 2;
-                keep = index > normal;
             }
 
             // A new impostor gets a level the client has, or a small one while the player is
@@ -552,8 +562,6 @@ public sealed class ImpostorService : IDisposable
             }
             else if (!Moved(sent, state, distance) && sent.Tint == tint)
             {
-                if (keep)
-                    sent.KeepUntil = now + ZoomKeepSeconds;
                 continue;
             }
             else
@@ -569,8 +577,6 @@ public sealed class ImpostorService : IDisposable
             sent.Position = state.Position;
             sent.Orientation = state.Orientation;
             sent.Velocity = state.Velocity;
-            if (keep)
-                sent.KeepUntil = now + ZoomKeepSeconds;
         }
 
         // After the lookups above and in the order of the ShapeData messages, as the client
@@ -621,13 +627,13 @@ public sealed class ImpostorService : IDisposable
 
     // Inside the zoomed view: the angle off its direction, less the impostor's own angular
     // radius, is within the view's half diagonal
-    private static bool InView(Viewer viewer, Vector3D toCenter, double distance, double radius)
+    private bool InView(Viewer viewer, Vector3D toCenter, double distance, double radius)
     {
         if (radius >= distance)
             return true;
         var cos = Vector3D.Dot(toCenter, viewer.Forward) / distance;
         var angle = Math.Acos(Math.Max(-1, Math.Min(1, cos))) - Math.Asin(radius / distance);
-        return angle <= viewer.HalfAngle;
+        return angle <= viewer.HalfAngle + (tick - viewer.ViewTick <= 30 ? viewer.TurnMargin : 0);
     }
 
     private static int QuadCount(byte[] shape)

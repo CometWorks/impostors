@@ -155,8 +155,8 @@ second at most. For that player the server then:
   half of them facing the camera, so one zoomed impostor can't take the client's whole
   budget, and while all of the zoomed ones fit into three quarters of it (see "Moving
   views").
-- keeps a level sent for the zoom for 30 seconds after it was last wanted, so looking
-  through the zoom again soon costs nothing.
+- puts the normal level back when the zoom ends. The client keeps the zoomed one in its
+  shape store, so looking through the zoom again costs a state only.
 
 ## Moving views (SE-671)
 
@@ -170,7 +170,9 @@ What the server and the client do about it:
   of the ShapeData messages and drop the earliest ones first when over the limit, so they
   agree on what the client has without telling each other. A level the client has costs a
   state only: an impostor removed when it left a zoomed view and shown again, or the finer
-  level of a zoom after the keep time had put the coarser one back.
+  level of a zoom when the view zooms in again. That replaced keeping a zoomed level for 30 s
+  after the zoom, which over a ring left the near rocks with so many quads that a wide view
+  after a zoom dropped most of the others.
 - Debt: a turning zoom brings dozens of new impostors at once. Sent at their finest levels,
   that was megabytes of debt and no finer level for any other impostor for minutes; now new
   ones start small while the player is in debt, and the finer level follows like any other.
@@ -182,11 +184,13 @@ What the server and the client do about it:
   took the whole budget and the client left out the rest of the view.
 - Culling: the client draws only the impostors whose bounding sphere is inside the view cone
   (around its diagonal), before it counts the quad budget. Off-screen quads took billboards
-  from the ones in view, and a zoomed view keeps fine levels around it for 30 s. An impostor
+  from the ones in view. An impostor
   that doesn't fit into the budget is drawn at the finest coarser level the client has that
   fits, or left out without stopping the ones behind it.
 - The zoomed cone the server uses is a quarter of the field of view wider than the view,
-  which covers the eighth of a turn before the client reports the view again.
+  which covers the eighth of a turn before the client reports the view again, plus what a
+  turning view turns in half a second (up to a field of view), estimated from the last two
+  `View` messages.
 - Eye: the server picks from where the game replicates to the player (`MyClientState`): the
   controlled entity, or the spectator camera of a player with creative rights. A spectator
   camera also goes into the `View` message, with its position, every 100 m it moves, and

@@ -39,9 +39,10 @@ Level 64 is the finest there is, so zooms beyond about 4 times show no more deta
 - A zoomed level is used only while its shape has at most `MaxQuadsPerFrame` quads, so one
   impostor can't take the client's whole quad budget, and the zoomed impostors together get
   three quarters of the budget at most, the largest first.
-- A level sent for the zoom stays for 30 seconds after the zoom ends, so looking through it
-  again soon costs nothing. After that the client still has its shape in its shape store, so
-  the server switches back to it with a state only.
+- When the zoom ends the server puts the normal level back. The client keeps every shape it
+  got in its shape store, so looking through the zoom again costs a state only. (Until
+  SE-671 the zoomed level stayed for 30 seconds instead, and over an asteroid ring the near
+  rocks kept so many quads that a wide view after a zoom dropped most of the others.)
 - The server's cone is a quarter of the field of view wider than the view, so what a turn
   brings in is mostly there already. The client draws only what is inside its own view.
 
