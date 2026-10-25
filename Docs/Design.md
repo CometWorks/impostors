@@ -173,8 +173,11 @@ a number to bump whenever a change to the building gives other shapes for the sa
 - Content with the same hash as the entry's last build keeps its shapes: a refresh of an
   unpainted grid costs the snapshot only.
 - Otherwise the build looks in the disk cache, one file per entity id with its newest build,
-  in `ImpostorsCache` of the server's data folder (the game's user data folder for the client
-  plugin). The same hash gives the cached shapes; a restart builds only what changed. The
+  in a subfolder named after the first 2 hex digits of the id (`01/012baf749a4ba168.shapes`),
+  in `Storage/Impostors/Cache` of the server's data folder (the game's user data folder for
+  the client plugin). Versions before SE-700 used `ImpostorsCache`, which the first start moves
+  there, or leaves with a log hint to delete it when the new folder already exists. Files of the
+  older flat layout move into their subfolders on start. The same hash gives the cached shapes; a restart builds only what changed. The
   version is the hash of the shapes as before, so an unchanged impostor keeps its version
   across a restart, and the clients' disk caches (see "Disk cache") keep working.
 - Every new build replaces the file of its entity. An entity gone from the scan for a minute
@@ -513,7 +516,7 @@ Magnetar Plugin SDK (`PluginSdk.Clustering`); the client side is unchanged.
   other nodes may need them.
 - The reply to a report carries the WA's instance id. A new one (a WA restart) makes the nodes
   report everything again.
-- The WA saves its index (`ImpostorsCache/index.bin` in its data folder, at most once a minute
+- The WA saves its index (`Storage/Impostors/Cache/index.bin` in its data folder, at most once a minute
   after a change) and loads it when its world is loaded, if the file is of the same world.
   The loaded records are offline until a node reports them, which keeps the grids of offline
   partitions visible across a WA restart. Reports carry each record's partition. A node whose

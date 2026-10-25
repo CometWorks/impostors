@@ -22,7 +22,7 @@ public interface IShapeCache
     void Forget(long id);
 }
 
-// One file per entity id in a folder, the newest build only. Entries not used for MaxAge go,
+// One file per entity id in a subfolder of the first 2 hex digits, the newest build only. Entries not used for MaxAge go,
 // and the oldest used ones while the folder is over its size cap. Safe from any thread.
 public sealed class DiskShapeCache : IShapeCache
 {
@@ -71,16 +71,44 @@ public sealed class DiskShapeCache : IShapeCache
         this.folder = folder;
         this.log = log;
         Directory.CreateDirectory(folder);
-        foreach (var path in Directory.EnumerateFiles(folder, "*.tmp"))
+        foreach (var path in Directory.GetFiles(folder, "*.tmp", SearchOption.AllDirectories))
             File.Delete(path); // An interrupted write
-        foreach (var path in Directory.EnumerateFiles(folder, "*" + Extension))
+        var moved = 0;
+        foreach (
+            var path in Directory.GetFiles(folder, "*" + Extension, SearchOption.AllDirectories)
+        )
         {
             if (!TryParseId(path, out var id))
                 continue;
             var info = new FileInfo(path);
-            files[id] = (info.Length, info.LastWriteTimeUtc);
-            total += info.Length;
+            var bytes = info.Length; // Read before a move, FileInfo loads it lazily
+            var used = info.LastWriteTimeUtc;
+            var expected = PathOf(id);
+            if (path != expected)
+            {
+                // Flat layout of SE-700 or earlier, or a misplaced file
+                try
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(expected));
+                    if (File.Exists(expected))
+                    {
+                        File.Delete(path);
+                        continue;
+                    }
+                    File.Move(path, expected);
+                    moved++;
+                }
+                catch (Exception e)
+                {
+                    log.Warning(e, $"Impostor cache: could not move {path} to {expected}");
+                    continue;
+                }
+            }
+            files[id] = (bytes, used);
+            total += bytes;
         }
+        if (moved > 0)
+            log.Info($"Impostor cache: moved {moved} files into their subfolders");
     }
 
     // The cache of this folder, one instance per folder in the process
@@ -155,6 +183,7 @@ public sealed class DiskShapeCache : IShapeCache
             var temporary = path + ".tmp";
             try
             {
+                Directory.CreateDirectory(Path.GetDirectoryName(path));
                 using (var writer = new BinaryWriter(File.Create(temporary)))
                 {
                     writer.Write(Magic);
@@ -238,7 +267,12 @@ public sealed class DiskShapeCache : IShapeCache
         }
     }
 
-    private string PathOf(long id) => Path.Combine(folder, id.ToString("x16") + Extension);
+    // A subfolder per first 2 hex digits keeps the folders small: 01/012baf749a4ba168.shapes
+    private string PathOf(long id)
+    {
+        var name = id.ToString("x16");
+        return Path.Combine(folder, name.Substring(0, 2), name + Extension);
+    }
 
     private static bool TryParseId(string path, out long id) =>
         long.TryParse(

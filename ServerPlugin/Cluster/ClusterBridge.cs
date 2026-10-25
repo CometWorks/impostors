@@ -797,8 +797,7 @@ public sealed class ClusterBridge : IShapeCache
         });
     }
 
-    private static string IndexPath =>
-        Path.Combine(VRage.FileSystem.MyFileSystem.UserDataPath, "ImpostorsCache", "index.bin");
+    private static string IndexPath => Path.Combine(ImpostorService.CacheFolder, "index.bin");
 
     // Sends the changes since the last publication to every node, as consecutive revisions
     private void Publish()

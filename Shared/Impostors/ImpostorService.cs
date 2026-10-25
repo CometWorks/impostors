@@ -182,15 +182,20 @@ public sealed class ImpostorService : IDisposable
         log.Info($"Impostors service started, instance {instanceId:x16}");
     }
 
+    // The cache folder in this server's or game's user data folder, also holds the WA's index
+    public static string CacheFolder =>
+        Path.Combine(MyFileSystem.UserDataPath, "Storage", "Impostors", "Cache");
+
     // The disk cache of this server's or game's user data folder, null when disabled
     public static DiskShapeCache OpenDiskCache(IPluginConfig config, IPluginLogger log)
     {
+        MoveOldCacheFolder(log);
         if (config.CacheMegabytes <= 0)
             return null;
         try
         {
             var cache = DiskShapeCache.Get(
-                Path.Combine(MyFileSystem.UserDataPath, "ImpostorsCache"),
+                CacheFolder,
                 config.CacheMegabytes * 1024L * 1024,
                 config.CacheDays,
                 log
@@ -204,6 +209,36 @@ public sealed class ImpostorService : IDisposable
         {
             log.Error(e, "Impostor cache not available");
             return null;
+        }
+    }
+
+    // Versions before SE-700 kept the cache in <user data>/ImpostorsCache: moved once, or
+    // left with a hint when the new folder already exists or the move fails
+    private static void MoveOldCacheFolder(IPluginLogger log)
+    {
+        var oldFolder = Path.Combine(MyFileSystem.UserDataPath, "ImpostorsCache");
+        if (!Directory.Exists(oldFolder))
+            return;
+        var folder = CacheFolder;
+        if (Directory.Exists(folder))
+        {
+            log.Warning(
+                $"Impostor cache: {oldFolder} is no longer used, delete it to free the space"
+            );
+            return;
+        }
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(folder));
+            Directory.Move(oldFolder, folder);
+            log.Info($"Impostor cache: moved {oldFolder} to {folder}");
+        }
+        catch (Exception e)
+        {
+            log.Warning(
+                e,
+                $"Impostor cache: could not move {oldFolder} to {folder}, delete it to free the space"
+            );
         }
     }
 
