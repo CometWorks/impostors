@@ -114,6 +114,9 @@ def session(name: str) -> dict:
             for k in ("shapes", "shapekb", "cached", "cachekb", "stored", "restored")
         },
     )
+    # Remote quits without unloading the session, as a crash would: the cache must have
+    # saved itself 30 s after the last new shape
+    time.sleep(45)
     try:
         api.exit_game()
     except Exception:  # noqa: BLE001 -- the connection drops while exiting
