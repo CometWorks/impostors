@@ -99,9 +99,22 @@ def shade_spread(path: Path) -> int:
     return pixels[len(pixels) * 9 // 10] - pixels[len(pixels) // 10]
 
 
+def on_screen(i: dict) -> bool:
+    """Whether the mod's stats put the impostor inside the viewport, its radius included"""
+    screen = i.get("screen", "behind")
+    if "," not in screen:
+        return False
+    x, y = (float(v) for v in screen.split(","))
+    w, h = (float(v) for v in i["viewport"].split("x"))
+    r = float(i.get("radius", 0))
+    return -r <= x <= w + r and -r <= y <= h + r
+
+
 def drawn(impostors: dict, grid: world.Grid) -> bool:
+    """The client has the impostor's shape and draws it, unless it is off screen: the mod
+    draws only what is in the camera's view"""
     i = impostors.get(grid.entity_id)
-    return bool(i) and i["drawn"] == "1" and i["shape"] != "none"
+    return bool(i) and i["shape"] != "none" and (i["drawn"] == "1" or not on_screen(i))
 
 
 def start():

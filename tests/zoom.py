@@ -181,6 +181,7 @@ def run(api):
     # Zooming in again switches back to the finer level with a state only: the client has
     # the shape, no new one arrives
     shape_tick = impostors.get(rock.entity_id, {}).get("shapetick")
+    sight_shot(api, "zoom-RockFar-wide-after", rock.entity_id, rock.center)
     zoomed(api, True)
     _, impostors = wait_stats(lambda i: lod(i, rock.entity_id) > rock_lod, 5)
     i = impostors.get(rock.entity_id, {})
