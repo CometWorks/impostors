@@ -639,8 +639,7 @@ namespace Impostors
                 )
                     continue;
 
-                // Off screen it would only take billboards from the ones in view, and a zoomed
-                // view keeps fine levels around it
+                // Off screen it would only take billboards from the ones in view
                 if (!InView(impostor, eye, forward, halfAngle))
                 {
                     culled++;
