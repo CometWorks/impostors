@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import rig  # noqa: E402
 import world  # noqa: E402
-from scenario import CLIENT, PLUGIN, SERVER, check, drawn, wait_stats  # noqa: E402
+from scenario import CLIENT, PLUGIN, SERVER, check, wait_stats  # noqa: E402
 
 # ShapeCache.cs
 MAX_BYTES = 64 * 1024 * 1024
@@ -31,6 +31,12 @@ MAGIC = 0x43504D49
 ENTRY_HEADER = 8 + 4 + 1 + 4 + 4
 
 FAR = (world.SHIP, world.STATION, world.FAR, world.ROCK_FAR)
+
+
+def shaped(impostors: dict, entity) -> bool:
+    """The client has a shape for the impostor; drawn or not depends on the view"""
+    i = impostors.get(entity.entity_id)
+    return bool(i) and i["shape"] != "none"
 
 
 def storage() -> Path:
@@ -83,7 +89,7 @@ def today() -> int:
 
 
 def session(name: str) -> dict:
-    """Joins, waits until the far grids and the asteroid are drawn and the shapes
+    """Joins, waits until the far grids and the asteroid have their shapes and the shapes
     settled, leaves through the menu so the cache gets saved. The client's totals."""
     CLIENT.launch(SERVER.port)
     api = CLIENT.wait_api()
@@ -91,8 +97,8 @@ def session(name: str) -> dict:
     rig.ensure_character(api)
     rig.focus_gameplay(api)
     api.character_teleport(*world.HOME)
-    totals, impostors = wait_stats(lambda i: all(drawn(i, g) for g in FAR), 180)
-    check(f"{name}: far impostors drawn", all(drawn(impostors, g) for g in FAR))
+    totals, impostors = wait_stats(lambda i: all(shaped(i, g) for g in FAR), 180)
+    check(f"{name}: far impostors have shapes", all(shaped(impostors, g) for g in FAR))
     # Finer levels follow the first ones; the totals once nothing arrived for 20 s
     last, still = None, 0
     while still < 20:
