@@ -94,7 +94,7 @@ public sealed class VoxelSource : ImpostorSource
             ? $"voxels={map.Storage.Size.X}x{map.Storage.Size.Y}x{map.Storage.Size.Z} occlusion={config.AsteroidOcclusion}"
             : "";
 
-    public override Func<byte[][]> PrepareBuild(ImpostorEntry entry)
+    public override Func<ShapeBuild, byte[][]> PrepareBuild(ImpostorEntry entry)
     {
         if (entry.Tag is not MyVoxelMap map || map.Closed || map.Storage == null)
             return null;
@@ -116,10 +116,11 @@ public sealed class VoxelSource : ImpostorSource
         }
 
         var occluded = config.AsteroidOcclusion;
-        return () => Build(storage, size, corner, colors, occluded);
+        return build => Build(build, storage, size, corner, colors, occluded);
     }
 
     private static byte[][] Build(
+        ShapeBuild build,
         IMyStorage storage,
         Vector3I size,
         Vector3 corner,
@@ -144,12 +145,44 @@ public sealed class VoxelSource : ImpostorSource
                 break;
         }
 
+        // The voxels of every level first: they are what the shapes are built from, and the
+        // same voxels reuse the shapes built before. The coarsest level is pooled from voxels
+        // two levels finer, see below.
+        var reads = new MyStorageData[levels.Count];
+        var input = InputHash.Start((byte)ImpostorKind.Voxel);
+        input.Add(size);
+        input.Add(Vector3I.Round(corner * 16)); // Float noise of the matrix
+        input.Add(occluded);
+        foreach (var color in colors)
+            input.Add(color);
+        for (var k = levels.Count - 1; k >= 0; k--)
+        {
+            var voxelLod = levels[k].voxelLod;
+            if (k == 0 && k < levels.Count - 1 && voxelLod > 0)
+                voxelLod = Math.Max(0, voxelLod - 2);
+            var voxels = Vector3I.Max(Vector3I.One, size >> voxelLod);
+            var read = new MyStorageData();
+            read.Resize(voxels);
+            storage.ReadRange(
+                read,
+                MyStorageDataTypeFlags.ContentAndMaterial,
+                voxelLod,
+                Vector3I.Zero,
+                voxels - 1
+            );
+            reads[k] = read;
+            input.Add(read[MyStorageDataTypeEnum.Content], read.SizeLinear);
+            input.Add(read[MyStorageDataTypeEnum.Material], read.SizeLinear);
+        }
+        var reused = build.Reuse(input);
+        if (reused != null)
+            return reused;
+
         // Finest first, for the extent of the content. The coarsest level is pooled from voxels
         // two levels finer, a cell filled when at least half of them are: the game's own
         // coarse voxels were eroded there, and level 8 looked half as large as level 16. It
         // also gets at least CoarsestCells cells across a rock that is small for its storage.
         var extent = 0f;
-        var data = new MyStorageData();
         CellVolume level8 = null;
         for (var k = levels.Count - 1; k >= 0; k--)
         {
@@ -165,14 +198,8 @@ public sealed class VoxelSource : ImpostorSource
 
             var voxels = Vector3I.Max(Vector3I.One, size >> voxelLod);
             var voxelSize = (float)(1 << voxelLod);
-            data.Resize(voxels);
-            storage.ReadRange(
-                data,
-                MyStorageDataTypeFlags.ContentAndMaterial,
-                voxelLod,
-                Vector3I.Zero,
-                voxels - 1
-            );
+            var data = reads[k];
+            reads[k] = null;
 
             var cells = Vector3I.Ceiling(new Vector3(size) / cellSize);
             var volume = new CellVolume(cells, cellSize, corner, ImpostorEntry.Lods[i]);

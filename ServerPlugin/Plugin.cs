@@ -64,7 +64,7 @@ public class Plugin : IPlugin, ICommonPlugin
             return;
         }
 
-        ClusterBridge.Start(Log);
+        ClusterBridge.Start(Config, Log);
 
         Log.Debug("Successfully loaded");
     }

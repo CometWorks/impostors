@@ -30,6 +30,9 @@ public sealed class ImpostorEntry
     // Content hash of the shapes, 0 before the first build
     public int Version;
 
+    // Hash of the content the shapes were built from (ShapeBuild.Input), 0 if not known
+    public long Input;
+
     // Some player gets this impostor, or the cluster may need it
     public bool Wanted;
 
@@ -114,8 +117,9 @@ public abstract class ImpostorSource
     public abstract void Scan(ImpostorRegistry registry);
 
     // Game thread: snapshots the entry's content and returns the work that builds its shapes
-    // (one per level of detail) on a background thread, or null if it is gone
-    public abstract Func<byte[][]> PrepareBuild(ImpostorEntry entry);
+    // (one per level of detail) on a background thread, or null if it is gone. The work may
+    // reuse earlier shapes of the same content through the build's Reuse.
+    public abstract Func<ShapeBuild, byte[][]> PrepareBuild(ImpostorEntry entry);
 
     // The entry's size for the build log, like "blocks=120"
     public virtual string Describe(ImpostorEntry entry) => "";

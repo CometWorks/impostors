@@ -8,6 +8,11 @@ spawn, which the world split puts on different nodes. The player's node has one 
 them, the other comes through the WA's index. Then the far stations' partitions go
 offline (no player within 8 km for 3 minutes), and the WA keeps showing them.
 
+Then the WA restarts (SIGKILL, retained data root). It must load its saved index, so the
+offline stations stay drawn, and its shape cache from disk: the player is teleported
+next to a station, whose node loads its partition and takes the station's shapes from
+the WA instead of building them (SE-648). IMP_RESTART=0 skips this part.
+
 Run it from the cluster repository's Test folder, with its host.env or the
 environment naming the package, ports and roots, and CLUSTER_EXTRA_PLUGINS naming
 the built server plugin (a folder Impostors/ with Impostors.dll and Impostors.xml):
@@ -21,6 +26,7 @@ mod's stats are what the checks read.
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import sys
@@ -143,8 +149,79 @@ def wait(predicate, timeout: float, interval: float = 3.0):
 
 
 def drawn(rows: dict[int, dict], entity_id: int) -> bool:
+    """The client has the impostor with a shape; whether this frame draws it depends on
+    the view, the renderer culls those outside the frustum"""
     row = rows.get(entity_id)
-    return bool(row) and row["drawn"] == "1" and row["shape"] != "none"
+    return bool(row) and row["real"] == "0" and row["shape"] != "none"
+
+
+def game_logs(bench: Bench) -> dict[Path, int]:
+    """The nodes' game logs and their line counts"""
+    return {
+        log: len(log.read_text(errors="replace").splitlines())
+        for p in PROCESSES
+        if p != "wa-1"
+        for log in (bench.run_root / f"{p}-data").glob("SpaceEngineersDedicated_*.log")
+    }
+
+
+def new_lines(bench: Bench, before: dict[Path, int], pattern: str) -> list[str]:
+    """Lines of the nodes' game logs past the counts in before that match"""
+    lines = []
+    for log in game_logs(bench):
+        rest = log.read_text(errors="replace").splitlines()[before.get(log, 0) :]
+        lines += [l for l in rest if re.search(pattern, l)]
+    return lines
+
+
+def restart_checks(bench: Bench, stats_file: Path, player_node: str, ids: dict) -> None:
+    """The WA's saved index and shape cache across a WA restart"""
+    time.sleep(70)  # The WA saves its index at most once a minute
+    before = game_logs(bench)
+    bench.cluster.restart_node("wa-1")
+    loaded = bench.cluster.wait_node_log(
+        "wa-1", r"cluster index: loaded \d+ saved records", 600
+    )
+    count = int(re.search(r"loaded (\d+)", loaded).group(1))
+    bench.check("WA restart: saved index loaded", count >= len(ids), loaded.strip())
+
+    time.sleep(60)  # Nodes reload the index, a client update
+    rows = stats(stats_file)
+    for name, entity_id in ids.items():
+        bench.check(
+            f"WA restart: impostor {name} still drawn",
+            drawn(rows, entity_id),
+            str(rows.get(entity_id, "missing")),
+        )
+
+    # Next to a station: its partition comes back on a node, which takes the shapes from the WA
+    name, (entity_id, (x, y, z), _) = next(iter(STATIONS.items()))
+    teleport = bench.cluster.node(
+        player_node,
+        f"/teleport?client={CLIENT_ID}&x={x}&y={y}&z={z + 300}",
+        method="POST",
+    )
+    bench.record("teleport", teleport)
+
+    def online():
+        return bench.entity_owner(bench.diag("entities"), entity_id)
+
+    owner = wait(online, 300, 5)
+    bench.check(f"{name} back online after the teleport", bool(owner), str(owner))
+    time.sleep(60)  # A scan, a build, and the minute's shape counts
+    built = new_lines(bench, before, rf"Impostor build: id={entity_id} ")
+    counts = new_lines(bench, before, r"Impostor shapes in the last minute")
+    bench.record("restart-builds", {"built": built, "counts": counts})
+    bench.check(
+        f"{name} not built again, its shapes came from the WA",
+        not built,
+        " | ".join(built[:3]),
+    )
+    bench.check(
+        "nodes took shapes from the cache",
+        any(int(re.search(r"(\d+) from the cache", l).group(1)) > 0 for l in counts),
+        " | ".join(counts[-3:]),
+    )
 
 
 def run(bench: Bench, stats_file: Path) -> None:
@@ -205,6 +282,9 @@ def run(bench: Bench, stats_file: Path) -> None:
         api.character_look_at(*position, tolerance=1)
         time.sleep(2)
         bench.screenshot(CLIENT_ID, f"offline-{name}")
+
+    if os.environ.get("IMP_RESTART", "1") != "0":
+        restart_checks(bench, stats_file, player_node, ids)
 
 
 def main() -> None:

@@ -1,0 +1,197 @@
+"""In-game check of the server's disk cache of built shapes: the server starts
+with an empty cache and the client joins, then the server restarts and the
+client joins again. The restart must build nothing, take every shape from the
+cache, and keep the versions, so the client's own disk cache sends no shapes
+either. Before the restart the cache folder gets files retention has to drop
+(40 days unused, and enough to go over the cap). A third start turns asteroid
+occlusion off: the asteroids are built again, the grids still come from the
+cache. Prints one PASS or FAIL line per check and exits with the number of
+failures.
+
+    uv run --no-project --with httpx --with pillow python tests/server_cache.py
+"""
+
+from __future__ import annotations
+
+import os
+import re
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import rig  # noqa: E402
+import world  # noqa: E402
+from cache import session  # noqa: E402
+from scenario import CLIENT, SERVER, check  # noqa: E402
+
+CAP_MB = 8
+CACHE = SERVER.data / "ImpostorsCache"
+JUNK = 0x7E00000000000000
+SUMMARY = re.compile(
+    r"Impostor shapes in the last minute: (\d+) built, (\d+) from the cache, (\d+) unchanged"
+)
+
+
+def config(**options) -> str:
+    return rig.plugin_config(
+        RebuildSeconds=10,
+        RefreshSeconds=20,
+        MaxQuadsPerFrame=20000,
+        CacheMegabytes=CAP_MB,
+        **options,
+    )
+
+
+def shape_files() -> dict[str, int]:
+    return {f.name: f.stat().st_size for f in CACHE.glob("*.shapes")}
+
+
+def server_log() -> str:
+    log = SERVER.game_log()
+    return log.read_text(errors="replace") if log else ""
+
+
+def builds() -> dict[str, int]:
+    """Impostor build lines of the current server log, per kind"""
+    counts: dict[str, int] = {}
+    for kind in re.findall(r"Impostor build: id=\d+ kind=(\w+)", server_log()):
+        counts[kind] = counts.get(kind, 0) + 1
+    return counts
+
+
+def summary(timeout: float = 120) -> tuple[int, int, int]:
+    """The totals of the per-minute shape lines, once one counts the client's builds"""
+    deadline = time.monotonic() + timeout
+    while True:
+        lines = [tuple(map(int, m)) for m in SUMMARY.findall(server_log())]
+        total = tuple(sum(x) for x in zip(*lines)) if lines else (0, 0, 0)
+        if sum(total[:2]) > 0 or time.monotonic() > deadline:
+            return total
+        time.sleep(5)
+
+
+def seed() -> tuple[list[Path], list[Path]]:
+    """Files retention must drop: unused for 40 days, and 12 MB used yesterday that
+    put the folder over the cap while the real entries are newer"""
+    now = time.time()
+    old, filler = [], []
+    for i in range(5):
+        path = CACHE / f"{JUNK + i:016x}.shapes"
+        path.write_bytes(os.urandom(100 * 1024))
+        os.utime(path, (now - 40 * 86400, now - 40 * 86400))
+        old.append(path)
+    for i in range(12):
+        path = CACHE / f"{JUNK + 100 + i:016x}.shapes"
+        path.write_bytes(os.urandom(1024 * 1024))
+        os.utime(path, (now - 86400, now - 86400))
+        filler.append(path)
+    return old, filler
+
+
+def restart(**options) -> None:
+    SERVER.stop()
+    SERVER.write_plugin_config(config(**options))
+    SERVER.start()
+
+
+def main():
+    world.prepare(
+        SERVER.world,
+        CLIENT.steam_id,
+        CLIENT.name,
+        grids=world.GRIDS + world.ZONE_GRIDS,
+        zones=world.ZONES,
+        mod=True,
+    )
+    SERVER.prepare([CLIENT.steam_id])
+    SERVER.write_plugin_config(config())
+    CACHE.mkdir(parents=True, exist_ok=True)
+    for f in CACHE.iterdir():
+        f.unlink()
+    for f in CLIENT.mod_storage.glob("cache-*"):
+        f.unlink()
+
+    try:
+        SERVER.start()
+        session("first join")
+        first = builds()
+        built, cached, _ = summary()
+        real = shape_files()
+        check("first start: shapes built", sum(first.values()) > 0, first)
+        check(
+            "first start: none from the cache",
+            cached == 0,
+            f"{built} built, {cached} cached",
+        )
+        check(
+            "first start: shapes on disk",
+            len(real) > 0,
+            f"{len(real)} files, {sum(real.values()) // 1024} KB",
+        )
+
+        old, filler = seed()
+        restart()
+        rejoin = session("rejoin after restart")
+        again = builds()
+        built, cached, _ = summary()
+        check("restart: nothing built", sum(again.values()) == 0, again)
+        check(
+            "restart: shapes from the cache",
+            built == 0 and cached >= len(real),
+            f"{built} built, {cached} cached, {len(real)} files",
+        )
+        check(
+            "restart: versions kept, the client's cache sends nothing",
+            int(rejoin.get("shapes", -1)) == 0,
+            f"{rejoin.get('shapes')} shapes, {rejoin.get('shapekb')} KB",
+        )
+        files = shape_files()
+        check(
+            "cache under its cap",
+            sum(files.values()) <= CAP_MB * 1024 * 1024,
+            f"{sum(files.values()) // 1024} KB",
+        )
+        check("unused entries dropped", not any(p.exists() for p in old))
+        check(
+            "real entries kept",
+            all(name in files for name in real),
+            f"{sum(name in files for name in real)} of {len(real)}",
+        )
+        check(
+            "filler dropped oldest first",
+            0 < sum(not p.exists() for p in filler) < len(filler) + 1,
+            f"{sum(not p.exists() for p in filler)} of {len(filler)} dropped",
+        )
+
+        restart(AsteroidOcclusion=False)
+        session("occlusion off")
+        third = builds()
+        check(
+            "occlusion off: asteroids built again, grids from the cache",
+            third.get("Voxel", 0) > 0 and third.get("Grid", 0) == 0,
+            third,
+        )
+    finally:
+        CLIENT.stop()
+        SERVER.stop()
+        lines = [
+            l
+            for l in server_log().splitlines()
+            if "Impostor cache" in l or "Impostor shapes" in l
+        ]
+        print("server:", *lines[-6:], sep="\n  ")
+    failures = rig_failures()
+    print(f"{'PASSED' if failures == 0 else 'FAILED'}: {failures} failure(s)")
+    sys.exit(failures)
+
+
+def rig_failures() -> int:
+    import scenario
+
+    return scenario.failures
+
+
+if __name__ == "__main__":
+    main()

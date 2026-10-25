@@ -163,6 +163,29 @@ Rebuilds: an entry whose signature changed is rebuilt at most every `RebuildSeco
 Changes the signature misses, like paint, are caught by rebuilding entries in view every
 `RefreshSeconds` (600). Only entries some player is looking at are ever built.
 
+Shape cache (SE-648): a build first hashes what it builds from, after the snapshot and before
+the rasterizing: every cube's position (to a sixteenth of a block, summed over the cubes, as
+the blocks come in no fixed order), size, color and slope flag for a grid; the voxel content
+and materials of every level read, the material colors and the occlusion setting for an
+asteroid; the shape itself for a safe zone. The hash also covers `DiskShapeCache.Algorithm`,
+a number to bump whenever a change to the building gives other shapes for the same content.
+
+- Content with the same hash as the entry's last build keeps its shapes: a refresh of an
+  unpainted grid costs the snapshot only.
+- Otherwise the build looks in the disk cache, one file per entity id with its newest build,
+  in `ImpostorsCache` of the server's data folder (the game's user data folder for the client
+  plugin). The same hash gives the cached shapes; a restart builds only what changed. The
+  version is the hash of the shapes as before, so an unchanged impostor keeps its version
+  across a restart, and the clients' disk caches (see "Disk cache") keep working.
+- Every new build replaces the file of its entity. An entity gone from the scan for a minute
+  that no longer exists in the world loses its file (not at once: grids leave the scan while
+  a world unloads, before they are closed). Files unused for `CacheDays` (30) go, and the
+  least recently used ones while the folder is over `CacheMegabytes` (256).
+- While builds come from the cache the service starts the next ones every 10 ticks instead of
+  every second.
+- Once a minute the log counts the shapes built, taken from the cache and found unchanged
+  (`Impostor shapes in the last minute: ...`). Only real builds write `Impostor build:` lines.
+
 The replication margin makes the hand-off seamless: the client has the impostor while the
 real grid is still replicated (and hides it), so there is no gap when the grid leaves the
 replication range.
@@ -489,10 +512,22 @@ Magnetar Plugin SDK (`PluginSdk.Clustering`); the client side is unchanged.
 - Nodes build every local grid entry, not only the ones their own players see, since players on
   other nodes may need them.
 - The reply to a report carries the WA's instance id. A new one (a WA restart) makes the nodes
-  report everything again; the WA's index lives in memory only, so the records of grids that
-  went offline before such a restart are lost until they come back online.
+  report everything again.
+- The WA saves its index (`ImpostorsCache/index.bin` in its data folder, at most once a minute
+  after a change) and loads it when its world is loaded, if the file is of the same world.
+  The loaded records are offline until a node reports them, which keeps the grids of offline
+  partitions visible across a WA restart. Reports carry each record's partition. A node whose
+  entries are all built and which knows the WA's instance adds the partitions it has owned for
+  30 s to its report, and the WA drops the loaded records of those partitions it didn't
+  report: grids deleted while the WA was down.
 - Asteroids are not reported: saved voxel maps are replicas on every node already, each node
   builds them itself.
+- The WA's shape cache is the cluster's only one (SE-648). It keeps the shapes on disk like a
+  single server's cache, and a node's build asks it (`cache-get`, by id and content hash)
+  before building. Grid shapes reach it with the reports, which carry the content hash now;
+  nodes send the shapes of asteroids and admin safe zones they built too, so the next node to
+  build one finds it. A deleted grid leaves the cache, a released one stays. After a WA
+  restart, `shape-get` reads shapes the WA no longer has in memory from the disk.
 - Safe zones of blocks are reported like grids, admin safe zones are not (see "Safe zones").
 
 The same shape as the cluster's `AntennaGraphService`, which learned that full resends don't

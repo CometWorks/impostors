@@ -48,6 +48,10 @@ the whitelist, loading the mod in the game does.
   and the rejoin must get no shapes for the unchanged impostors. Before it, the cache file
   gets entries retention must drop, so it checks the size cap too. `IMP_PLUGIN=1` runs it
   with the client plugin.
+- `tests/server_cache.py` checks the server's shape cache: the server restarts between two
+  joins and must build nothing the second time, with the versions kept (the client's cache
+  then sends no shapes either). It also checks retention and the size cap, and that turning
+  asteroid occlusion off rebuilds the asteroids only.
 - `tests/cluster_scenario.py` checks far view across a cluster on the cluster's scenario
   bench.
 - `tests/build_times.py` makes a table of the build times from the `Impostor build:` lines of

@@ -20,6 +20,8 @@ The file is read only when the server starts, so changes take effect after a res
 | `RebuildSeconds` | 60 | Shortest time between two rebuilds of an impostor |
 | `RefreshSeconds` | 600 | Impostors in view are rebuilt this often to catch paint changes |
 | `ReplicationMargin` | 500 | Impostors arrive this far inside the sync distance already |
+| `CacheMegabytes` | 256 | Disk space for built shapes, so a restart builds only what changed; 0 turns the cache off |
+| `CacheDays` | 30 | Cached shapes unused this long are dropped |
 
 Notes:
 
@@ -44,6 +46,9 @@ Notes:
     billboard. A client with only the mod can't: there the other billboards are safe only up
     to 32768 minus `MaxQuadsPerFrame`. See
     [Billboard limit](Design.md#billboard-limit-se-664).
+- The cache is the `ImpostorsCache` folder in the server's data folder, see
+  [Design](Design.md#server). On a cluster only the World Authority's counts, the nodes use
+  it. The WA also saves its index of the cluster's grids there.
 - A larger shape than `ShapeBytesPerSecond` still goes out; the following ones wait until the
   player's next seconds have paid it off. New impostors never wait, but while the player is in
   debt they start with a small level. Levels the client got earlier in the session cost no

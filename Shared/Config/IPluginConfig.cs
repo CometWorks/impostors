@@ -49,6 +49,13 @@ public interface IPluginConfig : INotifyPropertyChanged
     // catches changes that don't alter the block count or bounds, like painting
     int RefreshSeconds { get; set; }
 
+    // Disk space for built shapes, megabytes; a restart builds only what changed. 0 turns the
+    // cache off.
+    int CacheMegabytes { get; set; }
+
+    // Cached shapes not used for this many days are dropped
+    int CacheDays { get; set; }
+
     // Impostors are sent this much inside the sync distance already, meters, so the client has
     // them before the real entity leaves its replication range
     float ReplicationMargin { get; set; }

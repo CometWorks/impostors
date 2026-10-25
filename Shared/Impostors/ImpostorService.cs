@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using Impostors;
 using Sandbox.Engine.Multiplayer;
@@ -9,6 +10,7 @@ using Sandbox.Game.World;
 using Sandbox.ModAPI;
 using Shared.Config;
 using Shared.Logging;
+using VRage.FileSystem;
 using VRage.Network;
 using VRageMath;
 
@@ -150,6 +152,10 @@ public sealed class ImpostorService : IDisposable
     // Builds every entry, not only the ones this server's players see
     public static bool BuildAll;
 
+    // Where built shapes are kept for later; null for the disk cache in the user data folder.
+    // Cluster nodes set it to the World Authority's cache.
+    public static IShapeCache Cache;
+
     // The client plugin's renderer in this process, which gets the local player's messages
     // without mod networking. Null on a dedicated server.
     public static Action<byte[]> LocalClient;
@@ -162,7 +168,7 @@ public sealed class ImpostorService : IDisposable
     {
         this.config = config;
         this.log = log;
-        registry = new ImpostorRegistry(log);
+        registry = new ImpostorRegistry(log, Cache ?? OpenDiskCache(config, log));
         if (config.Grids)
             sources.Add(new GridSource(config));
         if (config.Asteroids)
@@ -174,6 +180,31 @@ public sealed class ImpostorService : IDisposable
 
         MyAPIGateway.Multiplayer.RegisterSecureMessageHandler(Protocol.Channel, OnMessage);
         log.Info($"Impostors service started, instance {instanceId:x16}");
+    }
+
+    // The disk cache of this server's or game's user data folder, null when disabled
+    public static DiskShapeCache OpenDiskCache(IPluginConfig config, IPluginLogger log)
+    {
+        if (config.CacheMegabytes <= 0)
+            return null;
+        try
+        {
+            var cache = DiskShapeCache.Get(
+                Path.Combine(MyFileSystem.UserDataPath, "ImpostorsCache"),
+                config.CacheMegabytes * 1024L * 1024,
+                config.CacheDays,
+                log
+            );
+            log.Info(
+                $"Impostor cache: {cache.Count} entries, {cache.Bytes / 1024} KB in {cache.Folder}"
+            );
+            return cache;
+        }
+        catch (Exception e)
+        {
+            log.Error(e, "Impostor cache not available");
+            return null;
+        }
     }
 
     public void Dispose()
@@ -228,6 +259,15 @@ public sealed class ImpostorService : IDisposable
     {
         if (++tick % 60 != 0)
         {
+            // Builds that reuse cached shapes finish within a few ticks, the next ones start
+            // without waiting for the next full second
+            if (tick % 10 == 0)
+                registry.Update(
+                    MySession.Static.ElapsedPlayTime.TotalSeconds,
+                    config.RebuildSeconds,
+                    config.RefreshSeconds
+                );
+
             // A zoom gets its finer levels within a few ticks, not at the next full second.
             // Six picks per second at most, however many View messages a client sends.
             foreach (var viewer in viewers.Values)
@@ -275,6 +315,12 @@ public sealed class ImpostorService : IDisposable
         {
             foreach (var viewer in viewers.Values)
                 LogViewer(viewer);
+
+            var (built, cached, unchanged) = registry.TakeCounts();
+            if (built + cached + unchanged > 0)
+                log.Info(
+                    $"Impostor shapes in the last minute: {built} built, {cached} from the cache, {unchanged} unchanged"
+                );
         }
     }
 
