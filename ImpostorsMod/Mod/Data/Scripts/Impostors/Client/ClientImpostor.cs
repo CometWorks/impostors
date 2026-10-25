@@ -116,5 +116,9 @@ namespace Impostors
         public int ReceivedTick;
         public ClientShape Shape;
         public int ShapeTick;
+
+        // The shape drawn this frame: Shape, or a coarser one from the store when Shape didn't
+        // fit into the quad budget
+        public ClientShape Drawn;
     }
 }
