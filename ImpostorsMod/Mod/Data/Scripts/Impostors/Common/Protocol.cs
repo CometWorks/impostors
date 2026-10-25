@@ -10,7 +10,7 @@ namespace Impostors
     public static class Protocol
     {
         public const ushort Channel = 47213;
-        public const byte Version = 6;
+        public const byte Version = 7;
 
         // Client to server: byte version, byte 1 while the client has no impostors and no
         // shapes from the server yet (no Welcome), 0 after. Sent when the session is ready and
@@ -46,6 +46,12 @@ namespace Impostors
         // that ended. The server sends finer levels for the impostors inside a zoomed view, and
         // picks for the spectator camera's position when the player may spectate.
         public const byte View = 6;
+
+        // Client to server: ushort count, then count long ids of impostors whose real entity
+        // now draws on the client; then the same for the ones whose real entity stopped
+        // drawing. Inside the replication cube the server keeps sending an impostor until the
+        // client reports its entity ready, so nothing is missing while a grid streams in.
+        public const byte Ready = 7;
 
         // A spectator camera that moved this far gets a new View message, meters
         public const double ViewMoveMeters = 100;

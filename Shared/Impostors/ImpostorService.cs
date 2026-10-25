@@ -38,6 +38,10 @@ public sealed class ImpostorService : IDisposable
     // in the meantime.
     private const int DebtShapeBytes = 2048;
 
+    // An impostor inside the replication cube is kept this long at most while the client
+    // hasn't reported its real entity ready, seconds
+    private const double HoldSeconds = 60;
+
     private static ImpostorService instance;
     private static MySession session;
 
@@ -57,6 +61,9 @@ public sealed class ImpostorService : IDisposable
         // The player of this game, served through LocalClient
         public readonly bool Local;
         public readonly Dictionary<long, Sent> Sent = new();
+
+        // Impostors whose real entity draws on the client, from its Ready messages
+        public readonly HashSet<long> Ready = new();
 
         // The shapes this player's client has, by id, level and version
         public readonly ShapeStore<bool> Store = new();
@@ -123,6 +130,10 @@ public sealed class ImpostorService : IDisposable
         public Vector3D Position;
         public Quaternion Orientation;
         public Vector3 Velocity;
+
+        // Inside the replication cube since then, waiting for the client's real entity
+        public bool Held;
+        public double HeldSince;
     }
 
     // Extra sources registered by the plugin, for example the cluster bridge
@@ -320,6 +331,12 @@ public sealed class ImpostorService : IDisposable
             return;
         }
 
+        if (message[0] == Protocol.Ready)
+        {
+            OnReady(new ByteReader(message, 1), sender);
+            return;
+        }
+
         if (message[0] != Protocol.Hello)
             return;
 
@@ -405,6 +422,22 @@ public sealed class ImpostorService : IDisposable
         viewer.TurnMargin = Math.Min(turn * TurnLeadSeconds, fov);
     }
 
+    private void OnReady(ByteReader r, ulong sender)
+    {
+        if (!viewers.TryGetValue(sender, out var viewer))
+            return;
+
+        // Only impostors the client still has, a stale id would drop one sent again later
+        for (var i = r.UShort(); i > 0; i--)
+        {
+            var id = r.Long();
+            if (viewer.Sent.ContainsKey(id))
+                viewer.Ready.Add(id);
+        }
+        for (var i = r.UShort(); i > 0; i--)
+            viewer.Ready.Remove(r.Long());
+    }
+
     private void UpdateViewer(Viewer viewer)
     {
         viewer.Dirty = false;
@@ -447,13 +480,19 @@ public sealed class ImpostorService : IDisposable
         var zones = registry.Entries.Select(ZoneVolume.Of).Where(z => z.HasValue).ToList();
 
         // Pixels on a default screen, and how many times larger the player's view shows them
+        var now = MySession.Static.ElapsedPlayTime.TotalSeconds;
         var candidates =
             new List<(ImpostorEntry entry, double pixels, double zoom, double distance)>();
+        var held = new HashSet<long>();
         foreach (var entry in registry.Entries)
         {
+            var radius = entry.WorldAabb.HalfExtents.Length();
+            var distance = Vector3D.Distance(viewer.Eye, entry.WorldAabb.Center);
+
             // The client has the real entity, or will have it soon. Another node's entities are
-            // never replicated to this node's players. The local player has every entity, the
-            // game draws the ones within the far plane.
+            // never replicated to this node's players. One the client already has stays until
+            // the client says its real entity draws: a grid arriving fast is still streaming.
+            // The local player has every entity, the game draws the ones within the far plane.
             if (viewer.Local)
             {
                 var aabb = entry.WorldAabb;
@@ -472,10 +511,24 @@ public sealed class ImpostorService : IDisposable
                     entry.Kind == ImpostorKind.Voxel ? voxelReplicated : replicated
                 )
             )
+            {
+                if (
+                    !viewer.Sent.TryGetValue(entry.Id, out var kept)
+                    || viewer.Ready.Contains(entry.Id)
+                    || kept.Held && now - kept.HeldSince > HoldSeconds
+                )
+                    continue;
+                if (!kept.Held)
+                {
+                    kept.Held = true;
+                    kept.HeldSince = now;
+                }
+                held.Add(entry.Id);
+                candidates.Add(
+                    (entry, radius / Math.Max(distance, 1) * PixelsPerRadian, 1, distance)
+                );
                 continue;
-
-            var radius = entry.WorldAabb.HalfExtents.Length();
-            var distance = Vector3D.Distance(viewer.Eye, entry.WorldAabb.Center);
+            }
             if (distance - radius > range)
                 continue;
 
@@ -491,10 +544,12 @@ public sealed class ImpostorService : IDisposable
             candidates.Add((entry, pixels, zoom, distance));
         }
 
-        // Safe zones are few and show where players are protected, they go first. Zoomed ones
-        // are larger, so they come next and get the shape credit first.
+        // Safe zones are few and show where players are protected, they go first, then the ones
+        // held for an entity streaming in. Zoomed ones are larger, so they come next and get
+        // the shape credit first.
         var shown = candidates
             .OrderByDescending(c => c.entry.Kind == ImpostorKind.SafeZone)
+            .ThenByDescending(c => held.Contains(c.entry.Id))
             .ThenByDescending(c => c.pixels * c.zoom)
             .Take(config.MaxImpostorsPerPlayer)
             .ToList();
@@ -502,7 +557,10 @@ public sealed class ImpostorService : IDisposable
 
         var removed = viewer.Sent.Keys.Where(id => !shownIds.Contains(id)).ToList();
         foreach (var id in removed)
+        {
             viewer.Sent.Remove(id);
+            viewer.Ready.Remove(id);
+        }
         SendRemove(viewer.SteamId, removed);
         viewer.Removed += removed.Count;
         viewer.Waiting = 0;
@@ -526,10 +584,29 @@ public sealed class ImpostorService : IDisposable
             var (entry, _, _, distance) = shown[i];
             entry.Wanted = true;
             entry.Viewed = true;
+            viewer.Sent.TryGetValue(entry.Id, out var sent);
+
+            // Held in the replication cube: the shape the client has, its finest from the
+            // approach, only moved
+            if (held.Contains(entry.Id))
+            {
+                var heldState = entry.State(sent.Lod);
+                heldState.Version = sent.Version;
+                heldState.Tint = sent.Tint;
+                if (Moved(sent, heldState, distance))
+                {
+                    states.Add(heldState);
+                    sent.Position = heldState.Position;
+                    sent.Orientation = heldState.Orientation;
+                    sent.Velocity = heldState.Velocity;
+                }
+                continue;
+            }
+            if (sent != null)
+                sent.Held = false;
             if (entry.Shapes == null)
                 continue;
 
-            viewer.Sent.TryGetValue(entry.Id, out var sent);
             var (index, picked, tint) = fit[i];
             // A new impostor gets a level the client has, or a small one while the player is
             // in debt

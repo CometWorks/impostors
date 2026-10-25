@@ -4,6 +4,7 @@ using Sandbox.Game;
 using Sandbox.ModAPI;
 using VRage.Game;
 using VRage.Game.Components;
+using VRage.Library.Utils;
 using VRage.Utils;
 using VRageMath;
 using VRageRender;
@@ -61,6 +62,19 @@ namespace Impostors
         private const float ZoneTint = 0.35f;
         private const float ZoneTintPale = 0.6f;
 
+        // A real entity draws itself this long after it got into the scene with its render
+        // objects, ticks: the game fades new grids and safe zones in over up to a second
+        // (MaxTransitionInSeconds). Checked every ReadyCheckTicks.
+        private const int ReadyTicks = 60;
+        private const int ReadyCheckTicks = 10;
+
+        // An asteroid draws nothing until its clipmap's first meshing pass is done, then fades
+        // in. The client plugin sends the asteroid's id here when that pass is done; without
+        // it the impostor stays this long, ticks.
+        public const long VoxelLoadedMessage = 4721300002;
+        private const int VoxelReadyTicks = 300;
+        private readonly HashSet<long> loadedVoxels = new HashSet<long>();
+
         // Re-sort a shape's quads when the view direction turned by about 3 degrees
         private const float ResortCosine = 0.9986f;
 
@@ -89,6 +103,8 @@ namespace Impostors
         private int inView;
         private readonly List<DrawPart> parts = new List<DrawPart>();
         private readonly ByteWriter writer = new ByteWriter(16);
+        private readonly List<long> readyIds = new List<long>();
+        private readonly List<long> unreadyIds = new List<long>();
         private readonly Vector3[] lefts = new Vector3[6];
         private readonly Vector3[] ups = new Vector3[6];
         private readonly bool[] facing = new bool[6];
@@ -126,6 +142,18 @@ namespace Impostors
         private int drawnQuads;
         private int budget;
 
+        // Impostors drawn while their real entity exists but doesn't draw yet, last frame
+        private int standIns;
+
+        // Debug: time spent in SendReady since the last stats, and Ready ids sent so far
+        private readonly MyGameTimer timer = new MyGameTimer();
+        private long readyTicks;
+        private int readySent;
+
+        // Debug: the last impostors that turned ready, as id:drawable tick:ready tick:whether
+        // the client plugin reported the asteroid's meshes
+        private readonly List<string> readyLog = new List<string>();
+
         // For stats.txt: removals and shapes taken from the store since the start, impostors
         // outside the view and those over the budget in the last frame
         private int removedCount;
@@ -156,6 +184,7 @@ namespace Impostors
             if (!local)
                 MyAPIGateway.Multiplayer.RegisterSecureMessageHandler(Protocol.Channel, OnMessage);
             MyAPIGateway.Utilities.RegisterMessageHandler(BudgetMessage, OnBudget);
+            MyAPIGateway.Utilities.RegisterMessageHandler(VoxelLoadedMessage, OnVoxelLoaded);
             active = true;
 
             // Tests put this file into the storage (see StorageExists) to get stats.txt every
@@ -208,6 +237,7 @@ namespace Impostors
                     OnMessage
                 );
             MyAPIGateway.Utilities.UnregisterMessageHandler(BudgetMessage, OnBudget);
+            MyAPIGateway.Utilities.UnregisterMessageHandler(VoxelLoadedMessage, OnVoxelLoaded);
             active = false;
             impostors.Clear();
             store.Clear();
@@ -252,6 +282,14 @@ namespace Impostors
             // A few View messages per second at most
             if (tick % 10 == 0)
                 SendView();
+
+            if (tick % ReadyCheckTicks == 5)
+            {
+                var start = debug ? timer.ElapsedTicks : 0;
+                SendReady();
+                if (debug)
+                    readyTicks += timer.ElapsedTicks - start;
+            }
 
             if (debug && tick % 60 == 0)
             {
@@ -331,6 +369,89 @@ namespace Impostors
         {
             if (localInstance != null)
                 localInstance.OnMessage(Protocol.Channel, message, 0, true);
+        }
+
+        // Tells the server which impostors' real entities started or stopped drawing. Inside
+        // the replication cube it keeps an impostor until then (see Protocol.Ready).
+        private void SendReady()
+        {
+            // The local player's game has every entity, the service never holds one for it
+            if (serverInstance == 0 || local)
+                return;
+            readyIds.Clear();
+            unreadyIds.Clear();
+            foreach (var impostor in impostors.Values)
+            {
+                var id = impostor.State.Id;
+                if (id == 0)
+                    continue;
+                if (!RealDrawable(id))
+                {
+                    impostor.DrawableTick = -1;
+                    loadedVoxels.Remove(id);
+                }
+                else if (impostor.DrawableTick < 0)
+                    impostor.DrawableTick = tick;
+                var wait =
+                    impostor.State.Kind != ImpostorKind.Voxel ? ReadyTicks
+                    : loadedVoxels.Contains(id) ? ReadyCheckTicks
+                    : VoxelReadyTicks;
+                var ready = impostor.DrawableTick >= 0 && tick - impostor.DrawableTick >= wait;
+                if (ready == impostor.Ready)
+                    continue;
+                impostor.Ready = ready;
+                if (debug && ready)
+                {
+                    if (readyLog.Count == 8)
+                        readyLog.RemoveAt(0);
+                    readyLog.Add(
+                        id
+                            + ":"
+                            + impostor.DrawableTick
+                            + ":"
+                            + tick
+                            + ":"
+                            + (loadedVoxels.Contains(id) ? 1 : 0)
+                    );
+                }
+                (ready ? readyIds : unreadyIds).Add(id);
+            }
+            readySent += readyIds.Count;
+
+            // 1000 ids of each kind per message stay well under MaxMessageSize
+            const int perMessage = 1000;
+            for (
+                var start = 0;
+                start < Math.Max(readyIds.Count, unreadyIds.Count);
+                start += perMessage
+            )
+            {
+                writer.Clear();
+                writer.Byte(Protocol.Ready);
+                WriteIds(readyIds, start, perMessage);
+                WriteIds(unreadyIds, start, perMessage);
+                SendToServer();
+            }
+        }
+
+        private void WriteIds(List<long> ids, int start, int count)
+        {
+            count = Math.Max(0, Math.Min(count, ids.Count - start));
+            writer.UShort((ushort)count);
+            for (var i = start; i < start + count; i++)
+                writer.Long(ids[i]);
+        }
+
+        // The real entity is in the scene and has render objects: a streamed grid once its
+        // render cells are built, a safe zone once its model is, an asteroid its clipmap. An
+        // entity that only exists may still be loading on the creation thread.
+        private static bool RealDrawable(long id)
+        {
+            var entity = MyAPIGateway.Entities.GetEntityById(id);
+            if (entity == null || entity.Closed || !entity.InScene || entity.Render == null)
+                return false;
+            var ids = entity.Render.RenderObjectIDs;
+            return ids != null && ids.Length > 0 && ids[0] != uint.MaxValue;
         }
 
         // "impostor" in the mode file draws the impostors instead of the real entities,
@@ -444,6 +565,14 @@ namespace Impostors
                     + maxQuads
                     + " budget="
                     + budget
+                    + " standins="
+                    + standIns
+                    + " readysent="
+                    + readySent
+                    + " readylog="
+                    + string.Join(",", readyLog)
+                    + " readyus="
+                    + (readyTicks * 1000000 / MyGameTimer.Frequency)
                     + " culled="
                     + culled
                     + " overbudget="
@@ -514,6 +643,8 @@ namespace Impostors
                         + impostor.ShapeTick
                         + " real="
                         + (MyAPIGateway.Entities.EntityExists(state.Id) ? 1 : 0)
+                        + " ready="
+                        + (impostor.Ready ? 1 : 0)
                         + " drawn="
                         + (visible.Contains(impostor) ? 1 : 0)
                         + " r="
@@ -533,8 +664,15 @@ namespace Impostors
                         + ScreenPosition(state)
                 );
             }
+            readyTicks = 0;
             using (var file = WriteStorage("stats.txt"))
                 file.Write(text.ToString());
+        }
+
+        private void OnVoxelLoaded(object message)
+        {
+            if (message is long)
+                loadedVoxels.Add((long)message);
         }
 
         // Impostors the server sent no shape for yet
@@ -684,6 +822,7 @@ namespace Impostors
         public override void Draw()
         {
             visible.Clear();
+            standIns = 0;
             inView = 0;
             if (!active || impostors.Count == 0 || realOnly)
                 return;
@@ -709,15 +848,16 @@ namespace Impostors
                     continue;
                 }
 
-                // The real entity is replicated, it draws itself. Locally every entity is real,
-                // the service sends only those the game doesn't draw.
-                if (
-                    !local
-                    && !compare
-                    && shift == Vector3D.Zero
-                    && MyAPIGateway.Entities.EntityExists(impostor.State.Id)
-                )
-                    continue;
+                // The real entity draws itself. Until then, while a grid or safe zone is still
+                // streaming in, the impostor stands in for it. Locally every entity is real, the
+                // service sends only those the game doesn't draw.
+                if (!local && !compare && shift == Vector3D.Zero)
+                {
+                    if (impostor.Ready)
+                        continue;
+                    if (MyAPIGateway.Entities.EntityExists(impostor.State.Id))
+                        standIns++;
+                }
 
                 visible.Add(impostor);
             }
