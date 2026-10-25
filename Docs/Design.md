@@ -344,8 +344,9 @@ game thread's snapshot.
 
 - First sight is the time from the session being ready until every far impostor has a shape.
   It is the same in all states: the hello every 30 s, the Welcome and the first view pick
-  dominate it, a build of this world takes 0.1 s. One cold join (the first of the run, on a
-  fresh client folder) took 66 s, not seen in the other eleven joins.
+  dominate it, a build of this world takes 0.1 s. The first join of every run took 66 s,
+  also when its shapes all came from the cache: it is the client's first session after the
+  rig started, not the builds. The table leaves it out of the cold medians.
 - The client cache saves all the shape bytes of the impostors it saw before, whatever the
   server's cache. Builds are deterministic, so a server that lost its cache still builds the
   versions the clients have.
