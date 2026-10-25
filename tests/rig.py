@@ -240,9 +240,9 @@ def plugin_config(**options) -> str:
     )
 
 
-# The server's cache of built shapes, relative to its data folder. SE-700 moves it to
-# Storage/Impostors/Cache with two-digit subfolders, so look for files with rglob.
-CACHE_FOLDER = Path("ImpostorsCache")
+# The server's cache of built shapes (and a WA's index), relative to its data folder: one
+# subfolder per first 2 hex digits of the id (SE-700), so look for files with rglob
+CACHE_FOLDER = Path("Storage", "Impostors", "Cache")
 
 
 def cache_folder(data: Path) -> Path:

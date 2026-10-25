@@ -70,7 +70,7 @@ VOXEL_MAPS = Path(
 )
 CACHE_MB = os.environ.get("IMP_CACHE_MB")
 # The WA's shape cache in its data folder, as rig.CACHE_FOLDER (this runs without rig.py)
-CACHE_FOLDER = "ImpostorsCache"
+CACHE_FOLDER = Path("Storage", "Impostors", "Cache")
 CACHING = CACHE_MB != "0"
 WORK = re.compile(
     r"Impostor (build|from the cache): id=(\d+) kind=(\w+).*? cpu=([\d.]+)"
