@@ -79,6 +79,9 @@ namespace Impostors
         private readonly Dictionary<long, ClientImpostor> impostors =
             new Dictionary<long, ClientImpostor>();
         private readonly List<ClientImpostor> visible = new List<ClientImpostor>();
+
+        // In the camera's view in the last frame, before the budget (stats)
+        private int inView;
         private readonly List<DrawPart> parts = new List<DrawPart>();
         private readonly ByteWriter writer = new ByteWriter(16);
         private readonly Vector3[] lefts = new Vector3[6];
@@ -322,6 +325,8 @@ namespace Impostors
             text.AppendLine(
                 "impostors="
                     + impostors.Count
+                    + " inview="
+                    + inView
                     + " drawn="
                     + visible.Count
                     + " quads="
@@ -489,6 +494,7 @@ namespace Impostors
         public override void Draw()
         {
             visible.Clear();
+            inView = 0;
             if (!active || impostors.Count == 0 || realOnly)
                 return;
 
@@ -497,10 +503,18 @@ namespace Impostors
                 return;
             var eye = camera.Position;
 
-            // Nearest first while counting the budget, so the far ones are dropped
+            // Nearest first while counting the budget, so the far ones are dropped. Frustum
+            // culled: the ones outside the camera's view would take the budget for nothing.
             foreach (var impostor in impostors.Values)
             {
                 if (impostor.Shape == null || impostor.State.Id == 0)
+                    continue;
+
+                var sphere = new BoundingSphereD(
+                    impostor.State.Position + shift,
+                    impostor.State.Radius
+                );
+                if (!camera.IsInFrustum(ref sphere))
                     continue;
 
                 // The real entity is replicated, it draws itself
@@ -514,6 +528,7 @@ namespace Impostors
                 visible.Add(impostor);
             }
 
+            inView = visible.Count;
             visible.Sort(
                 (a, b) =>
                     Vector3D
@@ -526,15 +541,17 @@ namespace Impostors
             if (tick - frameBudgetTick <= BudgetTicks)
                 budget = MathHelper.Clamp(frameBudget, 0, maxQuads);
 
+            // One that doesn't fit is left out, the farther ones may still fit: a zoomed
+            // impostor with a fine level would otherwise drop everything behind it
             var quads = 0;
             var count = 0;
-            while (count < visible.Count)
+            for (var i = 0; i < visible.Count; i++)
             {
-                var cost = Cost(visible[count], eye);
+                var cost = Cost(visible[i], eye);
                 if (quads + cost > budget)
-                    break;
+                    continue;
                 quads += cost;
-                count++;
+                visible[count++] = visible[i];
             }
 
             var sun = MyVisualScriptLogicProvider.GetSunDirection();

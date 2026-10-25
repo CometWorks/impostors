@@ -29,7 +29,7 @@ Notes:
 - `MaxQuadsPerFrame` is the clients' budget, sent by the server. The game draws at most 32768
   billboards per frame for every effect (thruster flames, glare, tracers), so leave room for
   them. The server picks levels whose quads fit the budget together, and the client keeps the
-  nearest impostors within it. How the value gets there:
+  nearest impostors in its view within it. How the value gets there:
   - When a client joins, the mod says hello and the server answers with a Welcome that
     carries `MaxQuadsPerFrame`. The mod takes it, capped at 32768.
   - The mod says hello every 30 seconds and every Welcome carries the value again, which

@@ -446,7 +446,8 @@ public sealed class ImpostorService : IDisposable
     }
 
     // The levels for a screen this many times the size, without the hysteresis and the
-    // zoom's keep when it is under 1. Quads: the sum of half of each shape's quads.
+    // zoom's keep when it is under 1. Quads: the sum of half of each shape's quads, of the
+    // ones in the zoomed view while the player zooms.
     private List<(int index, byte picked, bool keep, Color tint)> Levels(
         Viewer viewer,
         List<(ImpostorEntry entry, double pixels, double zoom, double distance)> shown,
@@ -492,7 +493,10 @@ public sealed class ImpostorService : IDisposable
             if (full && sent != null && now < sent.KeepUntil && sent.Version == entry.Version)
                 index = Math.Max(index, entry.ShapeIndex(sent.Lod));
 
-            quads += QuadCount(entry.Shapes[index]) / 2;
+            // A zoomed client draws only what is in its view. Unzoomed the server doesn't know
+            // the direction, so all of them count.
+            if (viewer.Zoom <= 1 || zoom > 1)
+                quads += QuadCount(entry.Shapes[index]) / 2;
             result.Add((index, picked, keep, tint));
         }
         return result;

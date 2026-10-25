@@ -35,7 +35,8 @@ Billboard facts this design depends on (decompiled game 1.210):
 - 32768 billboards per frame for everything, vanilla effects included. The overflow is
   dropped silently, the last blend types first (see [Billboard limit](#billboard-limit-se-664)).
   The renderer caps itself at `MaxQuadsPerFrame` quads (16000 by default), which the server
-  sends with its Welcome.
+  sends with its Welcome. It counts only the impostors in the camera's frustum, nearest
+  first, and skips one that doesn't fit while farther ones still may.
 - Billboards are depth tested against the scene but never write depth. The `Standard` blend
   is weighted blended OIT, so overlapping opaque quads mix and look see-through. The `LDR`
   blend draws in submission order with premultiplied alpha after tone mapping. Impostors use
@@ -73,7 +74,8 @@ greedily into rectangles of one color, so a flat painted side is a single quad.
   16 down to half that size, as their coarser levels lose the shape fast. A zoomed view
   gets finer levels inside it, see "Zoomed views" below.
 - The levels of a player's impostors together stay within `MaxQuadsPerFrame`, counting half
-  of each shape's quads as facing the camera. When the picks are over it, the server picks
+  of each shape's quads as facing the camera. While the player zooms only those in the
+  zoomed view count; otherwise the server doesn't know the view direction and counts all. When the picks are over it, the server picks
   them all again as if the screen were smaller, so the near ones lose detail instead of the
   client dropping the far ones. Above the Octahedron asteroid ring (SE-666) the few
   asteroids just outside the replication range took level 32, about 3600 quads each, and
