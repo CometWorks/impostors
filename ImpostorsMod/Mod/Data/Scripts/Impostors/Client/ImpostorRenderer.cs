@@ -724,14 +724,14 @@ namespace Impostors
                             data = r.Since(start);
                             shapeCount++;
                             shapeBytes += data.Length;
+                            if (caching)
+                                cache.Add(id, version, shape.Lod, data);
                         }
 
                         var impostor = Get(id);
                         impostor.Shape = shape;
                         impostor.ShapeTick = tick;
                         store.Add(id, shape.Lod, version, data.Length, shape);
-                        if (caching)
-                            cache.Add(id, version, shape.Lod, data);
                     }
 
                     if (caching && cache.TooLarge)
