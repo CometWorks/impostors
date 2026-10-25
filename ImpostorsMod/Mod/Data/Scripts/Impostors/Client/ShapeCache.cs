@@ -105,10 +105,22 @@ namespace Impostors
             }
         }
 
-        // Ids, versions and level masks for the Inventory message; how many it had
-        public int Inventory(ByteWriter writer, Action send)
+        // Ids, versions and level masks for the Inventory message, with those of the asteroid
+        // pack if there is one; how many it had
+        public int Inventory(ByteWriter writer, Action send, AsteroidPack pack)
         {
             var masks = new Dictionary<long, Dictionary<int, byte>>();
+            if (pack != null)
+            {
+                pack.ForEach(
+                    (id, version, mask) =>
+                    {
+                        var versions = new Dictionary<int, byte>();
+                        versions[version] = mask;
+                        masks[id] = versions;
+                    }
+                );
+            }
             foreach (var list in entries.Values)
             {
                 foreach (var entry in list)

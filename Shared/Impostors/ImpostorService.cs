@@ -54,6 +54,8 @@ public sealed class ImpostorService : IDisposable
     private readonly Dictionary<ulong, Viewer> viewers = new();
     private readonly long instanceId = DateTime.UtcNow.Ticks ^ Environment.TickCount;
     private readonly ByteWriter writer = new(Protocol.MaxMessageSize + 1024);
+    private readonly AsteroidPackCache pack;
+    private bool packWritten;
     private int tick;
 
     private sealed class Viewer
@@ -168,7 +170,19 @@ public sealed class ImpostorService : IDisposable
     {
         this.config = config;
         this.log = log;
-        registry = new ImpostorRegistry(log, Cache ?? OpenDiskCache(config, log));
+        var cache = Cache ?? OpenDiskCache(config, log);
+        var asteroids =
+            config.Asteroids && config.AsteroidPack
+                ? AsteroidPackCache.Open(config.AsteroidPackMod, log)
+                : null;
+        if (asteroids != null)
+            cache = pack = new AsteroidPackCache(asteroids, cache);
+        registry = new ImpostorRegistry(log, cache);
+        if (config.WriteAsteroidPack)
+        {
+            registry.MaxBuilds = Math.Max(2, Environment.ProcessorCount / 2);
+            log.Info("Building every asteroid for the asteroid pack");
+        }
         if (config.Grids)
             sources.Add(new GridSource(config));
         if (config.Asteroids)
@@ -291,7 +305,10 @@ public sealed class ImpostorService : IDisposable
         {
             // Cluster nodes build every local entry, players on other nodes may need it. Safe
             // zones are always built, the stricter cut-off near them needs their shapes.
-            entry.Wanted = BuildAll && !entry.Source.Remote || entry.Kind == ImpostorKind.SafeZone;
+            entry.Wanted =
+                BuildAll && !entry.Source.Remote
+                || entry.Kind == ImpostorKind.SafeZone
+                || WritingPack && entry.Kind == ImpostorKind.Voxel;
             entry.Viewed = false;
         }
 
@@ -311,17 +328,63 @@ public sealed class ImpostorService : IDisposable
 
         registry.Update(now, config.RebuildSeconds, config.RefreshSeconds);
 
+        if (WritingPack)
+            TryWritePack();
+
         if (tick % 3600 == 0)
         {
             foreach (var viewer in viewers.Values)
                 LogViewer(viewer);
 
             var (built, cached, unchanged) = registry.TakeCounts();
+            var packed = pack?.TakeHits() ?? 0;
             if (built + cached + unchanged > 0)
                 log.Info(
-                    $"Impostor shapes in the last minute: {built} built, {cached} from the cache, {unchanged} unchanged"
+                    $"Impostor shapes in the last minute: {built} built, {cached - packed} from the cache, {packed} from the asteroid pack, {unchanged} unchanged"
                 );
         }
+    }
+
+    private bool WritingPack => config.WriteAsteroidPack && !packWritten;
+
+    // Once every asteroid has its shapes: writes them into the asteroid pack mod folder,
+    // ImpostorsAsteroidPack/<world> in the user data folder
+    private void TryWritePack()
+    {
+        var asteroids = registry
+            .Entries.Where(e => e.Kind == ImpostorKind.Voxel && !e.Source.Remote)
+            .ToList();
+        var done = asteroids.Count(e => e.Shapes != null && e.Input != 0 && !e.Building);
+        if (tick % 600 == 0)
+            log.Info($"Asteroid pack: {done} of {asteroids.Count} asteroids built");
+        if (done < asteroids.Count)
+            return;
+
+        packWritten = true;
+        var world = MySession.Static.Name;
+        var name = string.Concat(
+            world.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c)
+        );
+        try
+        {
+            var folder = Path.Combine(MyFileSystem.UserDataPath, "ImpostorsAsteroidPack", name);
+            Directory.CreateDirectory(folder);
+            var path = Path.Combine(folder, AsteroidPack.FileName);
+            var bytes = AsteroidPackCache.Write(
+                path,
+                world,
+                asteroids.Select(e => (e.Id, e.Input, e.Shapes)),
+                (byte)config.AsteroidPackMaxLevel
+            );
+            log.Info(
+                $"Asteroid pack written: {asteroids.Count} asteroids, {bytes / 1024} KB, levels up to {config.AsteroidPackMaxLevel}, in {folder}"
+            );
+        }
+        catch (Exception e)
+        {
+            log.Error(e, "Failed to write the asteroid pack");
+        }
+        registry.MaxBuilds = ImpostorRegistry.DefaultMaxBuilds;
     }
 
     // What a player got in the last minute: picks and their time on the game thread, shapes,

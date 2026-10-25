@@ -12,7 +12,10 @@ namespace Shared.Impostors;
 // Every entry of every source, and the background builds of their shapes
 public sealed class ImpostorRegistry
 {
-    private const int MaxConcurrentBuilds = 2;
+    public const int DefaultMaxBuilds = 2;
+
+    // Builds running at once, more while the asteroid pack is written
+    public int MaxBuilds = DefaultMaxBuilds;
 
     // A build that produced nothing is retried after this long, seconds
     private const double RetrySeconds = 5;
@@ -132,7 +135,7 @@ public sealed class ImpostorRegistry
             }
         }
 
-        if (running >= MaxConcurrentBuilds)
+        if (running >= MaxBuilds)
             return;
 
         // Missing shapes first, then the stale ones that waited longest
@@ -148,7 +151,7 @@ public sealed class ImpostorRegistry
             )
             .OrderBy(e => e.Shapes != null)
             .ThenBy(e => e.LastBuild)
-            .Take(MaxConcurrentBuilds - running)
+            .Take(MaxBuilds - running)
             .ToList();
 
         foreach (var entry in queue)

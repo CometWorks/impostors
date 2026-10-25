@@ -71,6 +71,11 @@ public class Plugin : IPlugin, ICommonPlugin
         ImpostorService.LocalClient = ImpostorRenderer.FromLocalServer;
         ImpostorRenderer.ToLocalServer = ImpostorService.FromLocalClient;
 
+        // The renderer copy of the plugin takes the asteroid pack as configured; the mod's own
+        // copy always does
+        ImpostorRenderer.UsePack = Config.AsteroidPack;
+        ImpostorRenderer.PackMod = Config.AsteroidPackMod;
+
         Log.Debug("Successfully loaded");
     }
 

@@ -39,6 +39,10 @@ public class PluginConfig : IPluginConfig
     private float replicationMargin = 500f;
     private int cacheMegabytes = 256;
     private int cacheDays = 30;
+    private bool asteroidPack = true;
+    private ulong asteroidPackMod;
+    private bool writeAsteroidPack;
+    private int asteroidPackMaxLevel = 64;
 
     public bool Enabled
     {
@@ -134,5 +138,29 @@ public class PluginConfig : IPluginConfig
     {
         get => cacheDays;
         set => SetValue(ref cacheDays, value);
+    }
+
+    public bool AsteroidPack
+    {
+        get => asteroidPack;
+        set => SetValue(ref asteroidPack, value);
+    }
+
+    public ulong AsteroidPackMod
+    {
+        get => asteroidPackMod;
+        set => SetValue(ref asteroidPackMod, value);
+    }
+
+    public bool WriteAsteroidPack
+    {
+        get => writeAsteroidPack;
+        set => SetValue(ref writeAsteroidPack, value);
+    }
+
+    public int AsteroidPackMaxLevel
+    {
+        get => asteroidPackMaxLevel;
+        set => SetValue(ref asteroidPackMaxLevel, value);
     }
 }

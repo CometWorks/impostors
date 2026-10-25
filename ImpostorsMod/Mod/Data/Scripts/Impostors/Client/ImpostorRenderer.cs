@@ -104,6 +104,13 @@ namespace Impostors
         private ShapeCache cache;
         private bool caching;
 
+        // The world's asteroid pack, announced with the disk cache in the Inventory (see
+        // AsteroidPack); null without one. The client plugin turns it off with UsePack, and
+        // names the mod with PackMod (0 for any of the world's mods).
+        private AsteroidPack pack;
+        public static bool UsePack = true;
+        public static ulong PackMod;
+
         // In the camera's view in the last frame, before the budget (stats)
         private int inView;
         private readonly List<DrawPart> parts = new List<DrawPart>();
@@ -168,6 +175,7 @@ namespace Impostors
         private int shapeCount;
         private long shapeBytes;
         private int cachedCount;
+        private int packedCount;
         private int culled;
         private int overBudget;
         private int coarser;
@@ -198,6 +206,8 @@ namespace Impostors
                 // While the game loads, so the Inventory can go out with the first Welcome
                 cache = new ShapeCache(ModContext != null);
                 cache.Load(MyAPIGateway.Session.Name);
+                if (UsePack)
+                    OpenPack();
             }
             MyAPIGateway.Utilities.RegisterMessageHandler(BudgetMessage, OnBudget);
             MyAPIGateway.Utilities.RegisterMessageHandler(VoxelLoadedMessage, OnVoxelLoaded);
@@ -206,6 +216,37 @@ namespace Impostors
             // Tests put this file into the storage (see StorageExists) to get stats.txt every
             // second and to switch between the real entities and their impostors (see ReadMode)
             debug = StorageExists("debug");
+        }
+
+        private void OpenPack()
+        {
+            var start = timer.ElapsedTicks;
+            try
+            {
+                pack = AsteroidPack.Open(PackMod);
+            }
+            catch (Exception e)
+            {
+                MyLog.Default.WriteLineAndConsole(
+                    "Impostors: failed to read the asteroid pack: " + e.Message
+                );
+                return;
+            }
+            if (pack == null)
+                return;
+            MyLog.Default.WriteLineAndConsole(
+                "Impostors: asteroid pack of mod "
+                    + pack.ModName
+                    + " for \""
+                    + pack.World
+                    + "\": "
+                    + pack.Count
+                    + " asteroids, "
+                    + pack.Bytes / 1024
+                    + " KB, index read in "
+                    + ((timer.ElapsedTicks - start) * 1000 / MyGameTimer.Frequency)
+                    + " ms"
+            );
         }
 
         // The mod's files are in its local storage. Pulsar compiles the client plugin under a
@@ -257,6 +298,7 @@ namespace Impostors
             active = false;
             impostors.Clear();
             store.Clear();
+            pack = null;
             if (cache != null)
             {
                 cache.Save();
@@ -620,6 +662,8 @@ namespace Impostors
                     + shapeBytes / 1024
                     + " cached="
                     + cachedCount
+                    + " packed="
+                    + packedCount
                     + " cachekb="
                     + (cache != null ? cache.Bytes / 1024 : 0)
                     + " stored="
@@ -843,6 +887,12 @@ namespace Impostors
                             r.Byte();
                             var lod = r.Byte();
                             data = cache != null && caching ? cache.Get(id, version, lod) : null;
+                            if (data == null && pack != null && caching)
+                            {
+                                data = pack.Get(id, version, lod);
+                                if (data != null)
+                                    packedCount++;
+                            }
                             if (data == null)
                             {
                                 // Not where the server counted on it: start over with it
@@ -890,13 +940,13 @@ namespace Impostors
             }
         }
 
-        // Tells the server what the disk cache has, from then on it keeps everything the server
-        // sends
+        // Tells the server what the disk cache and the asteroid pack have, from then on the
+        // cache keeps everything the server sends
         private void SendInventory()
         {
             if (cache == null)
                 return;
-            var versions = cache.Inventory(writer, SendToServer);
+            var versions = cache.Inventory(writer, SendToServer, pack);
             caching = true;
             MyLog.Default.WriteLineAndConsole(
                 "Impostors: "
@@ -904,6 +954,7 @@ namespace Impostors
                     + " impostor versions, "
                     + cache.Bytes / 1024
                     + " KB in the shape cache"
+                    + (pack != null ? ", " + pack.Count + " asteroids in the pack" : "")
             );
         }
 
