@@ -77,6 +77,25 @@ def shown(client: rig.Client, ids, timeout: float = 180) -> dict:
     return wait(drawn, timeout) or client.stats()[1]
 
 
+def past_questions(api) -> bool:
+    """Answers the game's question about a world saved without its binary files;
+    True once the respawn screen or the world is up"""
+    try:
+        screens = api.list_screens()
+        for screen in screens:
+            if screen.get("type") == "MyGuiScreenMessageBox":
+                for button in ("Yes", "OK"):
+                    try:
+                        api.control_click(text=button, screen=screen["index"])
+                        break
+                    except Exception:  # noqa: BLE001 -- not this button
+                        continue
+        types = [screen.get("type", "") for screen in screens]
+        return any("Medical" in t for t in types) or api.get_state().get("ready", False)
+    except Exception:  # noqa: BLE001 -- the API times out while a world loads
+        return False
+
+
 def start_host() -> rig.RemoteAPI:
     world.prepare(
         WORLD,
@@ -95,8 +114,11 @@ def start_host() -> rig.RemoteAPI:
     HOST.launch(0)
     api = HOST.wait_api()
     api.load(str(WORLD), online_mode="FRIENDS" if LOBBY else "OFFLINE")
-    rig.wait_world(api)
+    # Offline the game asks whether to load a world saved without its binary files, and
+    # the session is not ready before the player spawns
+    wait(lambda: past_questions(api), 600, 2)
     rig.ensure_character(api)
+    rig.wait_world(api)
     rig.focus_gameplay(api)
     api.character_teleport(*world.HOME)
     return api
