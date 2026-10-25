@@ -56,7 +56,10 @@ def arrive(api, target, far, near, timeout=75.0):
     """Waits far away for the impostor, jumps next to the target and samples the client's
     stats until the impostor is gone. Returns the level from afar and the samples: seconds
     since the jump and the impostor's stats (None once removed)."""
+    # Only impostors in view are drawn: the character looks at the target
+    point = target.center if isinstance(target, world.Asteroid) else target.position
     api.character_teleport(*far)
+    api.character_look_at(*point, tolerance=1)
     totals, impostors = wait_stats(lambda i: drawn(i, target), 120)
     if not check(f"{target.name} impostor from afar", drawn(impostors, target)):
         return None, []
@@ -65,6 +68,7 @@ def arrive(api, target, far, near, timeout=75.0):
 
     api.character_teleport(*near)
     start = time.monotonic()
+    api.character_look_at(*point, tolerance=1)
     samples = []
     while time.monotonic() - start < timeout:
         totals, impostors = CLIENT.stats()
