@@ -21,6 +21,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)Impostors\SafeZoneSource.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Impostors\VoxelSource.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)..\ImpostorsMod\Mod\Data\Scripts\Impostors\Common\Protocol.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)..\ImpostorsMod\Mod\Data\Scripts\Impostors\Common\ShapeCache.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Logging\IPluginLogger.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Logging\LogFormatter.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Logging\PluginLogger.cs" />

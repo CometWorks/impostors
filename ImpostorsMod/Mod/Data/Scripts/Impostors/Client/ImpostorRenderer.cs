@@ -79,6 +79,9 @@ namespace Impostors
         private readonly Dictionary<long, ClientImpostor> impostors =
             new Dictionary<long, ClientImpostor>();
         private readonly List<ClientImpostor> visible = new List<ClientImpostor>();
+
+        // The shapes of removed impostors, the server shows them again with a state only
+        private readonly ShapeCache<ClientImpostor> cache = new ShapeCache<ClientImpostor>();
         private readonly List<DrawPart> parts = new List<DrawPart>();
         private readonly ByteWriter writer = new ByteWriter(16);
         private readonly Vector3[] lefts = new Vector3[6];
@@ -108,6 +111,13 @@ namespace Impostors
         private int tick;
         private int drawnQuads;
         private int budget;
+
+        // For stats.txt: removals and returns from the cache since the start, impostors outside
+        // the view and those over the budget in the last frame
+        private int removedCount;
+        private int restoredCount;
+        private int culled;
+        private int overBudget;
 
         public override void LoadData()
         {
@@ -140,6 +150,7 @@ namespace Impostors
             MyAPIGateway.Utilities.UnregisterMessageHandler(BudgetMessage, OnBudget);
             active = false;
             impostors.Clear();
+            cache.Clear();
         }
 
         private static bool ModLoaded()
@@ -330,6 +341,22 @@ namespace Impostors
                     + maxQuads
                     + " budget="
                     + budget
+                    + " culled="
+                    + culled
+                    + " overbudget="
+                    + overBudget
+                    + " noshape="
+                    + NoShape()
+                    + " waiting="
+                    + Waiting()
+                    + " removed="
+                    + removedCount
+                    + " restored="
+                    + restoredCount
+                    + " cached="
+                    + cache.Count
+                    + " cachedkb="
+                    + cache.Bytes / 1024
                     + " sun="
                     + Vec(MyVisualScriptLogicProvider.GetSunDirection())
                     + " tick="
@@ -394,6 +421,32 @@ namespace Impostors
                 file.Write(text.ToString());
         }
 
+        // Impostors the server sent no shape for yet
+        private int NoShape()
+        {
+            var count = 0;
+            foreach (var impostor in impostors.Values)
+            {
+                if (impostor.Shape == null)
+                    count++;
+            }
+            return count;
+        }
+
+        // Impostors whose state names a level the server hasn't sent yet, for want of shape
+        // credit
+        private int Waiting()
+        {
+            var count = 0;
+            foreach (var impostor in impostors.Values)
+            {
+                var shape = impostor.Shape;
+                if (shape != null && !shape.IsZone && shape.Lod != impostor.State.Lod)
+                    count++;
+            }
+            return count;
+        }
+
         private void OnBudget(object message)
         {
             if (!(message is int))
@@ -432,6 +485,7 @@ namespace Impostors
                     if (instance != serverInstance)
                     {
                         impostors.Clear();
+                        cache.Clear();
                         serverInstance = instance;
 
                         // A new server knows nothing of the zoom yet
@@ -446,8 +500,18 @@ namespace Impostors
                     for (var i = 0; i < count; i++)
                     {
                         var state = ImpostorState.Read(r);
-                        Get(state.Id).State = state;
-                        Get(state.Id).ReceivedTick = tick;
+                        ClientImpostor impostor;
+                        if (!impostors.TryGetValue(state.Id, out impostor))
+                        {
+                            // Shown again: the server knows we kept its shape
+                            if (cache.Take(state.Id, state.Version, out impostor))
+                                restoredCount++;
+                            else
+                                impostor = new ClientImpostor();
+                            impostors[state.Id] = impostor;
+                        }
+                        impostor.State = state;
+                        impostor.ReceivedTick = tick;
                     }
                     break;
                 }
@@ -456,7 +520,16 @@ namespace Impostors
                 {
                     var count = r.UShort();
                     for (var i = 0; i < count; i++)
-                        impostors.Remove(r.Long());
+                    {
+                        var id = r.Long();
+                        ClientImpostor impostor;
+                        if (!impostors.TryGetValue(id, out impostor))
+                            continue;
+                        impostors.Remove(id);
+                        removedCount++;
+                        if (impostor.Shape != null)
+                            cache.Add(id, impostor.Shape.Version, impostor.ShapeBytes, impostor);
+                    }
                     break;
                 }
 
@@ -467,8 +540,11 @@ namespace Impostors
                     {
                         var id = r.Long();
                         var version = r.Int();
-                        Get(id).Shape = ClientShape.Read(r, version);
-                        Get(id).ShapeTick = tick;
+                        var impostor = Get(id);
+                        var start = r.Remaining;
+                        impostor.Shape = ClientShape.Read(r, version);
+                        impostor.ShapeBytes = start - r.Remaining;
+                        impostor.ShapeTick = tick;
                     }
                     break;
                 }
@@ -496,6 +572,13 @@ namespace Impostors
             if (camera == null)
                 return;
             var eye = camera.Position;
+            var forward = camera.WorldMatrix.Forward;
+            var size = camera.ViewportSize;
+            var halfAngle = Math.Atan(
+                Math.Tan(camera.FovWithZoom / 2) * Math.Sqrt(1 + size.X * size.X / size.Y / size.Y)
+            );
+            culled = 0;
+            overBudget = 0;
 
             // Nearest first while counting the budget, so the far ones are dropped
             foreach (var impostor in impostors.Values)
@@ -510,6 +593,14 @@ namespace Impostors
                     && MyAPIGateway.Entities.EntityExists(impostor.State.Id)
                 )
                     continue;
+
+                // Off screen it would only take billboards from the ones in view, and a zoomed
+                // view keeps fine levels around it
+                if (!InView(impostor, eye, forward, halfAngle))
+                {
+                    culled++;
+                    continue;
+                }
 
                 visible.Add(impostor);
             }
@@ -526,15 +617,19 @@ namespace Impostors
             if (tick - frameBudgetTick <= BudgetTicks)
                 budget = MathHelper.Clamp(frameBudget, 0, maxQuads);
 
+            // A large one over the budget leaves room for smaller ones behind it
             var quads = 0;
             var count = 0;
-            while (count < visible.Count)
+            for (var i = 0; i < visible.Count; i++)
             {
-                var cost = Cost(visible[count], eye);
+                var cost = Cost(visible[i], eye);
                 if (quads + cost > budget)
-                    break;
+                {
+                    overBudget++;
+                    continue;
+                }
                 quads += cost;
-                count++;
+                visible[count++] = visible[i];
             }
 
             var sun = MyVisualScriptLogicProvider.GetSunDirection();
@@ -649,6 +744,24 @@ namespace Impostors
                         * camera.ViewportSize.Y
                         / 2;
             return ZoneMesh.Quads(zone.Box, pixels);
+        }
+
+        // Whether any of the impostor's bounding sphere is inside the camera's view cone, the
+        // one around its diagonal. The camera's frustum ends at its far plane, 20 km or so.
+        private bool InView(ClientImpostor impostor, Vector3D eye, Vector3D forward, double half)
+        {
+            var radius = impostor.Shape.IsZone
+                ? impostor.Shape.Zone.HalfExtents.Length()
+                : impostor.State.Radius;
+            var age = Math.Min(tick - impostor.ReceivedTick, 600) / 60f;
+            var position = impostor.State.Position + impostor.State.Velocity * age + shift;
+            var toCenter = position - eye;
+            var distance = toCenter.Length();
+            if (distance <= radius)
+                return true;
+            var cos = Vector3D.Dot(toCenter, forward) / distance;
+            var angle = Math.Acos(MathHelper.Clamp(cos, -1, 1)) - Math.Asin(radius / distance);
+            return angle <= half;
         }
 
         // Quads an impostor draws: a shape the ones on the faces towards the camera, a safe

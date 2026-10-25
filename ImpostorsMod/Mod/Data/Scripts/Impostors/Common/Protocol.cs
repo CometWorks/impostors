@@ -10,7 +10,7 @@ namespace Impostors
     public static class Protocol
     {
         public const ushort Channel = 47213;
-        public const byte Version = 5;
+        public const byte Version = 6;
 
         // Client to server: byte version. Sent when the session is ready and then every
         // HelloInterval seconds, so a server that starts later or a cluster node the client
@@ -22,10 +22,14 @@ namespace Impostors
         // server (process or cluster node): the client drops every impostor it has.
         public const byte Welcome = 2;
 
-        // Server to client: ushort count, then count states (see ImpostorState).
+        // Server to client: ushort count, then count states (see ImpostorState). The state of
+        // an impostor the client has in its ShapeCache with the same version brings it back
+        // with that shape, no ShapeData follows. A state may name a level whose shape is still
+        // waiting for the player's shape credit, the client draws the shape it has until then.
         public const byte States = 3;
 
-        // Server to client: ushort count, then count long ids of impostors to drop.
+        // Server to client: ushort count, then count long ids of impostors to drop. The client
+        // keeps their shapes in its ShapeCache.
         public const byte Remove = 4;
 
         // Server to client: ushort count, then count times long id, int version and a shape
