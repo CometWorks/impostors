@@ -39,6 +39,10 @@ the whitelist, loading the mod in the game does.
   Workshop mods (built by `worlds/octahedron/build_world.py --seed 2`) and prints, per height,
   the voxel maps the client has, the impostors it got and drew, their quads and the frame's
   billboards. See its docstring.
+- `tests/cache.py` checks the client's disk cache: the client joins, leaves and joins again,
+  and the rejoin must get no shapes for the unchanged impostors. Before it, the cache file
+  gets entries retention must drop, so it checks the size cap too. `IMP_PLUGIN=1` runs it
+  with the client plugin.
 - `tests/cluster_scenario.py` checks far view across a cluster on the cluster's scenario
   bench.
 - `tests/build_times.py` makes a table of the build times from the `Impostor build:` lines of

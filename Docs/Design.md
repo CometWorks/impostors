@@ -146,6 +146,8 @@ Every second it:
 3. Sends what changed for that player: removals, a state and a shape for new impostors or
    ones with a new version or level, and a state for moved ones. A level whose shape the
    client has already, from earlier in the session, costs a state only (see "Shape store").
+   One in the client's disk cache costs 14 bytes of ShapeData and no credit (see "Disk
+   cache").
    Shapes average `ShapeBytesPerSecond` per player: one goes out while the player has credit
    left, even if it is larger than that (an asteroid's finest level is about 150 KB), and the
    next ones wait until the following seconds have paid off the debt. New impostors don't
@@ -219,6 +221,39 @@ What the server and the client do about it:
   the server sizes the impostors from there when the player may spectate (`EnableSpectator`
   or spectator rights). The replication cube stays where the game replicates.
 
+## Disk cache (SE-647)
+
+The client keeps the shapes it got on disk, so rejoining a server, or meeting the same far
+grids again after the shape store let them go, costs no shapes for unchanged impostors.
+Versions are content hashes of all levels, so (id, version, level) names a shape for good.
+
+- Storage: one file per world, by a hash of the world's name, in the mod's local storage
+  (`cache-<hash>.bin`), or in the global storage with the `Impostors.` prefix for the client
+  plugin's copy. `cache-index.txt` lists the files with their size and the day they were
+  used last. The local player's renderer copy has no cache, its shapes never cross a network.
+- After every Welcome of a new server instance the client loads the world's file (once per
+  session) and sends an `Inventory`: id, version and a mask of the levels it has, about
+  13 bytes per impostor, in messages up to 16 KB. The server keeps that per player and adds
+  every shape it sends from then on, as the client caches all of them.
+- A shape the client's store lacks but its disk cache has goes into ShapeData as the id, the
+  version, a 1 and the level, instead of the shape. The client decodes it from the cache and
+  adds it to the shape store with the shape's real size, so both copies of the store stay
+  in step.
+- The server counts on what the client announced, so nothing leaves the cache during a
+  session. Retention runs when the file is loaded and when it is saved at the end of the
+  session: an impostor keeps only the version it used last, entries unused for 30 days go,
+  the file keeps under 64 MB with the least recently used entries dropped first, and the
+  files of the worlds used least recently go while all of them are over 64 MB together. A
+  session that grew the cache over 128 MB prunes it and starts over with the server, as does
+  a client asked for a shape its cache doesn't have.
+- Saving: every 10 minutes when something new came in, on a background thread, and at the
+  end of the session. The file has a checksum; a damaged one is dropped.
+- Compatibility: a server without the cache ignores the Inventory, an older client never
+  sends one, so the protocol version stays 6.
+
+`tests/cache.py` checks it in game: join, leave, add entries retention must drop, join
+again. The rejoin must get no shapes for the unchanged impostors.
+
 A third person or cockpit camera is close enough to the controlled entity for impostors
 kilometers away.
 
@@ -236,8 +271,9 @@ Mod networking on channel 47213, reliable messages up to 16 KB:
 | Welcome | server to client | protocol version, server instance id, `MaxQuadsPerFrame` |
 | States | server to client | impostor states: id, kind (grid, voxel or safe zone), version, level, radius, position, orientation, velocity, safe zone tint (74 bytes each); a level from the shape store switches the impostor to it |
 | Remove | server to client | impostor ids |
-| ShapeData | server to client | count, then id, version and shape per impostor |
+| ShapeData | server to client | count, then id, version and shape per impostor; or a 1 and the level for a shape in the client's disk cache |
 | View | client to server | field of view with zoom, viewport width and height, view direction, spectator camera and its position; while zoomed or spectating |
+| Inventory | client to server | count, then id, version and level mask per impostor in the client's disk cache; after each Welcome of a new server instance |
 
 The repeated hello means the server needs no state about clients across restarts, and a
 cluster node a player was moved to learns about the client within 30 s. A different server
