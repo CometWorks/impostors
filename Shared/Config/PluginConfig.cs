@@ -31,7 +31,7 @@ public class PluginConfig : IPluginConfig
     private int minBlocks = 8;
     private float maxDistance = 500_000f;
     private float minPixels = 3f;
-    private int maxImpostorsPerPlayer = 1000;
+    private int maxImpostorsPerPlayer = 4000;
     private int maxQuadsPerFrame = 16000;
     private int shapeBytesPerSecond = 32 * 1024;
     private int rebuildSeconds = 60;

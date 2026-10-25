@@ -14,7 +14,7 @@ The file is read only when the server starts, so changes take effect after a res
 | `MinBlocks` | 8 | Grid groups with fewer blocks are not shown |
 | `MaxDistance` | 500000 | Farthest impostor in meters (500 km), 0 is the world's view distance |
 | `MinPixels` | 3 | Impostors less than this many pixels across on a 1080p screen are not sent |
-| `MaxImpostorsPerPlayer` | 1000 | The largest on screen win |
+| `MaxImpostorsPerPlayer` | 4000 | The largest on screen win |
 | `MaxQuadsPerFrame` | 16000 | Most impostor quads a client draws per frame, nearest first |
 | `ShapeBytesPerSecond` | 32768 | Shape data sent to one player per second, on average |
 | `RebuildSeconds` | 60 | Shortest time between two rebuilds of an impostor |
