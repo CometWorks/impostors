@@ -26,7 +26,10 @@ namespace Impostors
         private const int Magic = 0x43504d49; // "IMPC"
         private const byte Format = 1;
         private const string IndexFile = "cache-index.txt";
-        private const int SaveTicks = 10 * 60 * 60;
+
+        // Saved this long after the last new shape, and at least this often while they come
+        private static readonly TimeSpan SaveQuiet = TimeSpan.FromSeconds(30);
+        private static readonly TimeSpan SaveEvery = TimeSpan.FromMinutes(10);
 
         private class Entry
         {
@@ -45,7 +48,8 @@ namespace Impostors
         private long order;
         private bool dirty;
         private bool saving;
-        private int savedTick;
+        private DateTime changed;
+        private DateTime saved = DateTime.UtcNow;
 
         public long Bytes { get; private set; }
 
@@ -89,6 +93,16 @@ namespace Impostors
                 Bytes = 0;
             }
             Prune();
+            try
+            {
+                UpdateIndex();
+            }
+            catch (Exception e)
+            {
+                MyLog.Default.WriteLineAndConsole(
+                    "Impostors: failed to update the shape cache index: " + e.Message
+                );
+            }
         }
 
         // Ids, versions and level masks for the Inventory message
@@ -173,7 +187,7 @@ namespace Impostors
             entry.Day = Today;
             entry.Order = order++;
             Bytes += data.Length;
-            dirty = true;
+            Changed();
         }
 
         // Retention, only where the server doesn't count on the entries: on load, on save at
@@ -213,7 +227,7 @@ namespace Impostors
                 Bytes += entry.Data.Length;
             }
             if (Count != before)
-                dirty = true;
+                Changed();
         }
 
         private int Count
@@ -227,12 +241,23 @@ namespace Impostors
             }
         }
 
-        // Every 10 minutes, on a background thread, what changed since without pruning
-        public void Update(int tick)
+        private void Changed()
         {
-            if (!Loaded || !dirty || saving || tick - savedTick < SaveTicks)
+            dirty = true;
+            changed = DateTime.UtcNow;
+        }
+
+        // On a background thread, without pruning: once no new shape came for SaveQuiet, or
+        // SaveEvery while they keep coming. A session that ends without unloading, like a
+        // crash, loses only the last few seconds.
+        public void Update()
+        {
+            if (!Loaded || !dirty || saving)
                 return;
-            savedTick = tick;
+            var now = DateTime.UtcNow;
+            if (now - changed < SaveQuiet && now - saved < SaveEvery)
+                return;
+            saved = now;
             var data = Serialize();
             var name = file;
             saving = true;
