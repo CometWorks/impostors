@@ -249,7 +249,7 @@ Versions are content hashes of all levels, so (id, version, level) names a shape
 - Saving: every 10 minutes when something new came in, on a background thread, and at the
   end of the session. The file has a checksum; a damaged one is dropped.
 - Compatibility: a server without the cache ignores the Inventory, an older client never
-  sends one, so the protocol version stays 6.
+  sends one, so the cache needs no new protocol version.
 
 `tests/cache.py` checks it in game: join, leave, add entries retention must drop, join
 again. The rejoin must get no shapes for the unchanged impostors.
