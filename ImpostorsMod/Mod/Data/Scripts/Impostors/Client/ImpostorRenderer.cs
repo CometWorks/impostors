@@ -80,8 +80,9 @@ namespace Impostors
             new Dictionary<long, ClientImpostor>();
         private readonly List<ClientImpostor> visible = new List<ClientImpostor>();
 
-        // The shapes of removed impostors, the server shows them again with a state only
-        private readonly ShapeCache<ClientImpostor> cache = new ShapeCache<ClientImpostor>();
+        // Every shape the server sent, it switches to one of them or shows a removed impostor
+        // again with a state only
+        private readonly ShapeStore<ClientShape> store = new ShapeStore<ClientShape>();
         private readonly List<DrawPart> parts = new List<DrawPart>();
         private readonly ByteWriter writer = new ByteWriter(16);
         private readonly Vector3[] lefts = new Vector3[6];
@@ -115,8 +116,8 @@ namespace Impostors
         private int drawnQuads;
         private int budget;
 
-        // For stats.txt: removals and returns from the cache since the start, impostors outside
-        // the view and those over the budget in the last frame
+        // For stats.txt: removals and shapes taken from the store since the start, impostors
+        // outside the view and those over the budget in the last frame
         private int removedCount;
         private int restoredCount;
         private int culled;
@@ -153,7 +154,7 @@ namespace Impostors
             MyAPIGateway.Utilities.UnregisterMessageHandler(BudgetMessage, OnBudget);
             active = false;
             impostors.Clear();
-            cache.Clear();
+            store.Clear();
         }
 
         private static bool ModLoaded()
@@ -176,6 +177,7 @@ namespace Impostors
                 writer.Clear();
                 writer.Byte(Protocol.Hello);
                 writer.Byte(Protocol.Version);
+                writer.Byte((byte)(serverInstance == 0 ? 1 : 0));
                 MyAPIGateway.Multiplayer.SendMessageToServer(Protocol.Channel, writer.ToArray());
             }
 
@@ -374,10 +376,10 @@ namespace Impostors
                     + removedCount
                     + " restored="
                     + restoredCount
-                    + " cached="
-                    + cache.Count
-                    + " cachedkb="
-                    + cache.Bytes / 1024
+                    + " stored="
+                    + store.Count
+                    + " storedkb="
+                    + store.Bytes / 1024
                     + " sun="
                     + Vec(MyVisualScriptLogicProvider.GetSunDirection())
                     + " tick="
@@ -520,7 +522,7 @@ namespace Impostors
                     if (instance != serverInstance)
                     {
                         impostors.Clear();
-                        cache.Clear();
+                        store.Clear();
                         serverInstance = instance;
 
                         // A new server knows nothing of the view yet
@@ -536,18 +538,25 @@ namespace Impostors
                     for (var i = 0; i < count; i++)
                     {
                         var state = ImpostorState.Read(r);
-                        ClientImpostor impostor;
-                        if (!impostors.TryGetValue(state.Id, out impostor))
-                        {
-                            // Shown again: the server knows we kept its shape
-                            if (cache.Take(state.Id, state.Version, out impostor))
-                                restoredCount++;
-                            else
-                                impostor = new ClientImpostor();
-                            impostors[state.Id] = impostor;
-                        }
+                        var impostor = Get(state.Id);
                         impostor.State = state;
                         impostor.ReceivedTick = tick;
+
+                        // A level we have: the server sends no shape for it. One we don't
+                        // have is on its way or waits for shape credit.
+                        var shape = impostor.Shape;
+                        ClientShape stored;
+                        if (
+                            (
+                                shape == null
+                                || shape.Lod != state.Lod
+                                || shape.Version != state.Version
+                            ) && store.TryGet(state.Id, state.Lod, state.Version, out stored)
+                        )
+                        {
+                            impostor.Shape = stored;
+                            restoredCount++;
+                        }
                     }
                     break;
                 }
@@ -557,14 +566,8 @@ namespace Impostors
                     var count = r.UShort();
                     for (var i = 0; i < count; i++)
                     {
-                        var id = r.Long();
-                        ClientImpostor impostor;
-                        if (!impostors.TryGetValue(id, out impostor))
-                            continue;
-                        impostors.Remove(id);
-                        removedCount++;
-                        if (impostor.Shape != null)
-                            cache.Add(id, impostor.Shape.Version, impostor.ShapeBytes, impostor);
+                        if (impostors.Remove(r.Long()))
+                            removedCount++;
                     }
                     break;
                 }
@@ -578,9 +581,10 @@ namespace Impostors
                         var version = r.Int();
                         var impostor = Get(id);
                         var start = r.Remaining;
-                        impostor.Shape = ClientShape.Read(r, version);
-                        impostor.ShapeBytes = start - r.Remaining;
+                        var shape = ClientShape.Read(r, version);
+                        impostor.Shape = shape;
                         impostor.ShapeTick = tick;
+                        store.Add(id, shape.Lod, version, start - r.Remaining, shape);
                     }
                     break;
                 }

@@ -53,8 +53,8 @@ public sealed class ImpostorService : IDisposable
         public readonly ulong SteamId;
         public readonly Dictionary<long, Sent> Sent = new();
 
-        // The shapes of the impostors removed from this player, which its client keeps
-        public readonly ShapeCache<Sent> Cache = new();
+        // The shapes this player's client has, by id, level and version
+        public readonly ShapeStore<bool> Store = new();
 
         // Where the server picked for this player last
         public Vector3D Eye;
@@ -101,10 +101,9 @@ public sealed class ImpostorService : IDisposable
     {
         public int Version;
 
-        // The level of the shape the client has, its size and the level of the last state, which
-        // is a finer one while its shape waits for shape credit
+        // The level of the shape the client draws, and the level of the last state, which is a
+        // finer one while its shape waits for shape credit
         public byte Lod;
-        public int Bytes;
         public byte StateLod;
 
         // The level picked before a safe zone lowered it, for the hysteresis
@@ -239,8 +238,8 @@ public sealed class ImpostorService : IDisposable
     }
 
     // What a player got in the last minute: picks and their time on the game thread, shapes,
-    // states, removals and those shown again from the client's cache, and the most impostors
-    // that waited for shape credit at once
+    // states, removals, the levels switched to with a state only as the client had their
+    // shapes, and the most impostors that waited for shape credit at once
     private void LogViewer(Viewer viewer)
     {
         if (viewer.Picks == 0)
@@ -250,8 +249,8 @@ public sealed class ImpostorService : IDisposable
             $"Impostors of player {viewer.SteamId} in the last minute: {viewer.Picks} picks, "
                 + $"{viewer.PickTicks * ms / viewer.Picks:0.00} ms average, {viewer.MaxPickTicks * ms:0.00} ms most, "
                 + $"{viewer.Shapes} shapes ({viewer.ShapeBytes / 1024} KB), {viewer.States} states, "
-                + $"{viewer.Removed} removed, {viewer.Restored} restored from the cache "
-                + $"({viewer.Cache.Count} cached, {viewer.Cache.Bytes / 1024} KB), {viewer.MaxWaiting} waiting at most, "
+                + $"{viewer.Removed} removed, {viewer.Restored} from the client's store "
+                + $"({viewer.Store.Count} stored, {viewer.Store.Bytes / 1024} KB), {viewer.MaxWaiting} waiting at most, "
                 + $"{viewer.Sent.Count} shown"
         );
         viewer.Picks = 0;
@@ -304,10 +303,14 @@ public sealed class ImpostorService : IDisposable
             return;
         }
 
-        if (!viewers.ContainsKey(sender))
+        // A client without a Welcome yet has nothing of what we may have sent before, like after
+        // rejoining before the player was gone here
+        var fresh = message.Length > 2 && message[2] == 1;
+        if (!viewers.ContainsKey(sender) || fresh)
         {
+            if (!viewers.ContainsKey(sender))
+                log.Info($"Player {sender} draws impostors");
             viewers[sender] = new Viewer(sender);
-            log.Info($"Player {sender} draws impostors");
         }
 
         writer.Clear();
@@ -426,14 +429,9 @@ public sealed class ImpostorService : IDisposable
             .ToList();
         var shownIds = new HashSet<long>(shown.Select(c => c.entry.Id));
 
-        // The client keeps the shapes of removed impostors in the same cache, in the same order
         var removed = viewer.Sent.Keys.Where(id => !shownIds.Contains(id)).ToList();
         foreach (var id in removed)
-        {
-            var gone = viewer.Sent[id];
             viewer.Sent.Remove(id);
-            viewer.Cache.Add(id, gone.Version, gone.Bytes, gone);
-        }
         SendRemove(viewer.SteamId, removed);
         viewer.Removed += removed.Count;
         viewer.Waiting = 0;
@@ -455,20 +453,7 @@ public sealed class ImpostorService : IDisposable
             if (entry.Shapes == null)
                 continue;
 
-            // Shown again with the shape the client kept, a state brings it back
-            if (
-                !viewer.Sent.TryGetValue(entry.Id, out var sent)
-                && viewer.Cache.Take(entry.Id, entry.Version, out sent)
-            )
-            {
-                viewer.Sent[entry.Id] = sent;
-                viewer.Restored++;
-                var restored = entry.State(sent.Lod);
-                restored.Tint = sent.Tint;
-                sent.StateLod = sent.Lod;
-                states.Add(restored);
-            }
-
+            viewer.Sent.TryGetValue(entry.Id, out var sent);
             var picked = PickLod(pixels * zoom, sent?.Picked ?? 0, entry.Kind);
             var index = entry.ShapeIndex(picked);
 
@@ -487,11 +472,17 @@ public sealed class ImpostorService : IDisposable
             if (sent != null && now < sent.KeepUntil && sent.Version == entry.Version)
                 index = Math.Max(index, entry.ShapeIndex(sent.Lod));
 
-            // A new impostor gets a small level first while the player is in debt
-            if (sent == null && viewer.ShapeCredit <= 0)
+            // A new impostor gets a level the client has, or a small one while the player is
+            // in debt
+            if (sent == null && viewer.ShapeCredit <= 0 && !Stored(viewer, entry, index))
             {
-                while (index > 0 && entry.Shapes[index].Length > DebtShapeBytes)
-                    index--;
+                var small = index;
+                while (small > 0 && entry.Shapes[small].Length > DebtShapeBytes)
+                    small--;
+                var stored = index;
+                while (stored > small && !Stored(viewer, entry, stored))
+                    stored--;
+                index = stored;
             }
 
             // The level of the shape at hand, which may be coarser than the wanted one
@@ -502,11 +493,17 @@ public sealed class ImpostorService : IDisposable
 
             if (sent == null || sent.Version != entry.Version || sent.Lod != lod)
             {
-                // New impostors don't wait, the rest wait while the player is in debt. A shape
-                // larger than a second's worth still goes out, or it would never be sent.
-                // The state names the wanted level once, so the client can tell it waits.
-                if (viewer.ShapeCredit <= 0 && sent != null)
+                if (Stored(viewer, entry, index))
                 {
+                    // The client has this shape already, the state switches to it
+                    viewer.Restored++;
+                }
+                else if (viewer.ShapeCredit <= 0 && sent != null)
+                {
+                    // New impostors don't wait, the rest wait while the player is in debt. A
+                    // shape larger than a second's worth still goes out, or it would never be
+                    // sent. The state names the wanted level once, so the client can tell it
+                    // waits; it keeps drawing the shape it has.
                     viewer.Waiting++;
                     if (sent.StateLod != lod && sent.Version == entry.Version)
                     {
@@ -520,14 +517,17 @@ public sealed class ImpostorService : IDisposable
                     }
                     continue;
                 }
-                viewer.ShapeCredit -= shape.Length;
-                viewer.Shapes++;
-                viewer.ShapeBytes += shape.Length;
+                else
+                {
+                    viewer.ShapeCredit -= shape.Length;
+                    viewer.Shapes++;
+                    viewer.ShapeBytes += shape.Length;
+                    shapes.Add((entry, shape));
+                }
 
                 // The states go first, so the client knows the version a shape belongs to
                 states.Add(state);
-                shapes.Add((entry, shape));
-                viewer.Sent[entry.Id] = sent = new Sent { Bytes = shape.Length };
+                viewer.Sent[entry.Id] = sent = new Sent();
             }
             else if (!Moved(sent, state, distance) && sent.Tint == tint)
             {
@@ -552,10 +552,21 @@ public sealed class ImpostorService : IDisposable
                 sent.KeepUntil = now + ZoomKeepSeconds;
         }
 
+        // After the lookups above and in the order of the ShapeData messages, as the client
+        // adds them
+        foreach (var (entry, shape) in shapes)
+            viewer.Store.Add(entry.Id, shape[0], entry.Version, shape.Length, true);
+
         viewer.States += states.Count;
         viewer.MaxWaiting = Math.Max(viewer.MaxWaiting, viewer.Waiting);
         SendStates(viewer.SteamId, states);
         SendShapes(viewer.SteamId, shapes);
+    }
+
+    // The client has this level of the entry's current version
+    private static bool Stored(Viewer viewer, ImpostorEntry entry, int index)
+    {
+        return viewer.Store.TryGet(entry.Id, entry.Shapes[index][0], entry.Version, out _);
     }
 
     // Where the game replicates entities to the player: its controlled entity, or the spectator

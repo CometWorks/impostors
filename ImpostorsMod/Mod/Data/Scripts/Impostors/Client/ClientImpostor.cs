@@ -116,8 +116,5 @@ namespace Impostors
         public int ReceivedTick;
         public ClientShape Shape;
         public int ShapeTick;
-
-        // The size of the shape as the server encoded it, what it counts in the ShapeCache
-        public int ShapeBytes;
     }
 }
