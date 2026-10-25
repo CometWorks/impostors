@@ -291,7 +291,7 @@ def reset() -> int:
         raise SystemExit(f"No pack in {PACK}, run write first")
     versions = pack_versions()
     ids = setup_world(True)
-    (SERVER.world / "Impostors.asteroids").unlink(missing_ok=True)
+    (SERVER.world / "Storage" / "Impostors.asteroids").unlink(missing_ok=True)
     SERVER.write_plugin_config(
         rig.plugin_config(
             MaxDistance=500000,
@@ -362,7 +362,7 @@ def reset() -> int:
             and mined
             and version == mined[0]
             and not builds(asteroid, text),
-            f"after the restart: {known and known.group(1)} hashes loaded, {asteroid} version {version}, "
+            f"after the restart: {known and known.group(1)} hashes loaded, {asteroid} version {version} changed={changed}, "
             f"built {len(builds(asteroid, text))} times, asteroid builds {len(re.findall(r'Impostor build: .*kind=Voxel', text))}",
         )
         reused = re.findall(r"took (\d+) ms CPU", text)

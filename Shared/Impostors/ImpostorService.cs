@@ -55,7 +55,6 @@ public sealed class ImpostorService : IDisposable
     private readonly Dictionary<ulong, Viewer> viewers = new();
     private readonly long instanceId = DateTime.UtcNow.Ticks ^ Environment.TickCount;
     private readonly ByteWriter writer = new(Protocol.MaxMessageSize + 1024);
-    private readonly AsteroidPackCache pack;
     private bool packWritten;
     private int tick;
 
@@ -177,7 +176,7 @@ public sealed class ImpostorService : IDisposable
                 ? AsteroidPackCache.Open(config.AsteroidPackMod, log)
                 : null;
         if (asteroids != null)
-            cache = pack = new AsteroidPackCache(asteroids, cache);
+            cache = new AsteroidPackCache(asteroids, cache);
         registry = new ImpostorRegistry(log, cache);
         if (config.WriteAsteroidPack)
         {
@@ -339,11 +338,10 @@ public sealed class ImpostorService : IDisposable
             foreach (var viewer in viewers.Values)
                 LogViewer(viewer);
 
-            var (built, cached, unchanged, reusedCpuMs) = registry.TakeCounts();
-            var packed = pack?.TakeHits() ?? 0;
-            if (built + cached + unchanged > 0)
+            var (built, cached, packed, unchanged, reusedCpuMs) = registry.TakeCounts();
+            if (built + cached + packed + unchanged > 0)
                 log.Info(
-                    $"Impostor shapes in the last minute: {built} built, {cached - packed} from the cache, {packed} from the asteroid pack, {unchanged} unchanged; "
+                    $"Impostor shapes in the last minute: {built} built, {cached} from the cache, {packed} from the asteroid pack, {unchanged} unchanged; "
                         + $"the reused ones took {reusedCpuMs:0} ms CPU"
                 );
         }

@@ -98,13 +98,14 @@ public sealed class VoxelSource : ImpostorSource, IDisposable
             MySession.Static.OnSavingCheckpoint -= Save;
     }
 
-    // File in the world's folder: the game time of the save, Settings, then a line
+    // File in the world's Storage folder (a save deletes the other files of the world's folder
+    // that it didn't write itself): the game time of the save, Settings, then a line
     // per voxel map with its id and content hash. Taken only with the save it was written with: an older
     // backup of the world, or a world that crashed before its next save, may hold other voxels.
     private Dictionary<long, long> Load()
     {
         var result = new Dictionary<long, long>();
-        var path = Path.Combine(MySession.Static.CurrentPath ?? "", KnownFile);
+        var path = KnownPath;
         try
         {
             if (!File.Exists(path))
@@ -163,12 +164,19 @@ public sealed class VoxelSource : ImpostorSource, IDisposable
         return match.Success ? match.Groups[1].Value : "";
     }
 
-    // While the world saves, on the game thread: the hashes are those of the voxels being saved
+    private static string KnownPath =>
+        Path.Combine(MySession.Static.CurrentPath ?? "", "Storage", KnownFile);
+
+    // While the world saves, on the game thread: the hashes are those of the voxels being saved.
+    // A client's world request makes a checkpoint too, that one has the clients.
     private void Save(MyObjectBuilder_Checkpoint checkpoint)
     {
-        var path = Path.Combine(MySession.Static.CurrentPath ?? "", KnownFile);
+        if (checkpoint.Clients != null)
+            return;
+        var path = KnownPath;
         try
         {
+            Directory.CreateDirectory(Path.GetDirectoryName(path));
             List<string> lines;
             lock (sync)
             {

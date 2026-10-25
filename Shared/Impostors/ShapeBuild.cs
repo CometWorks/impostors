@@ -20,6 +20,9 @@ public sealed class ShapeBuild
     public bool Unchanged;
     public bool Cached;
 
+    // The cached shapes are from the world's asteroid pack
+    public bool Packed;
+
     public ShapeBuild(ImpostorEntry entry, IShapeCache cache)
     {
         id = entry.Id;
@@ -41,7 +44,9 @@ public sealed class ShapeBuild
             return lastShapes;
         }
 
-        var shapes = cache?.Get(id, Input);
+        var shapes = cache is AsteroidPackCache pack
+            ? pack.Get(id, Input, out Packed)
+            : cache?.Get(id, Input);
         Cached = shapes != null;
         return shapes;
     }

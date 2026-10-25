@@ -10,6 +10,12 @@ the players with the world's other mods. Then:
   per shape, which the Impostors mod reads from the pack,
 - players without it, and asteroids somebody mined, work as before.
 
+The server doesn't read an asteroid's voxels while nobody has edited it: it remembers the
+content hash of each asteroid and forgets it when the voxels change. A mined asteroid is read
+and built once, and from then on built from its remembered hash until it changes again; after
+a voxel reset it is read once more and gets the pack's original shapes back. The remembered
+hashes are saved with the world (`Storage/Impostors.asteroids` in the save's folder).
+
 It pays off on worlds with many saved asteroids, like an asteroid ring. Asteroids that
 nobody edited and that the world doesn't save get no impostors anyway (see
 [Asteroids](Asteroids.md)), so they need no pack.

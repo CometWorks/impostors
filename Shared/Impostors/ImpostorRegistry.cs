@@ -37,10 +37,11 @@ public sealed class ImpostorRegistry
     private int running;
     private int scan;
 
-    // Builds since the last TakeCounts: shapes built, taken from the cache, and found unchanged
-    // by a refresh
+    // Builds since the last TakeCounts: shapes built, taken from the cache or the asteroid
+    // pack, and found unchanged by a refresh
     private int built;
     private int cached;
+    private int packed;
     private int unchanged;
 
     // CPU time of the builds that reused shapes (the content hash), microseconds
@@ -89,10 +90,16 @@ public sealed class ImpostorRegistry
         entries.Remove(id);
     }
 
-    public (int built, int cached, int unchanged, double reusedCpuMs) TakeCounts()
+    public (int built, int cached, int packed, int unchanged, double reusedCpuMs) TakeCounts()
     {
-        var counts = (built, cached, unchanged, Interlocked.Exchange(ref reusedCpu, 0) / 1000.0);
-        built = cached = unchanged = 0;
+        var counts = (
+            built,
+            cached,
+            packed,
+            unchanged,
+            Interlocked.Exchange(ref reusedCpu, 0) / 1000.0
+        );
+        built = cached = packed = unchanged = 0;
         return counts;
     }
 
@@ -126,7 +133,10 @@ public sealed class ImpostorRegistry
                 if (result.build.Unchanged)
                     unchanged++;
                 else if (result.build.Cached)
-                    cached++;
+                    if (result.build.Packed)
+                        packed++;
+                    else
+                        cached++;
                 else
                     built++;
             }

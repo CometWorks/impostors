@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Threading;
 using Impostors;
 using Shared.Logging;
 
@@ -15,7 +14,6 @@ public sealed class AsteroidPackCache : IShapeCache
 {
     private readonly AsteroidPack pack;
     private readonly IShapeCache inner;
-    private int hits;
 
     public AsteroidPackCache(AsteroidPack pack, IShapeCache inner)
     {
@@ -23,12 +21,13 @@ public sealed class AsteroidPackCache : IShapeCache
         this.inner = inner;
     }
 
-    // Builds taken from the pack since the last call
-    public int TakeHits() => Interlocked.Exchange(ref hits, 0);
+    public byte[][] Get(long id, long input) => Get(id, input, out _);
 
-    public byte[][] Get(long id, long input)
+    // The same, telling whether the shapes came from the pack
+    public byte[][] Get(long id, long input, out bool fromPack)
     {
         var packed = pack.Get(id, input);
+        fromPack = packed != null;
         if (packed == null)
             return inner?.Get(id, input);
 
@@ -40,7 +39,6 @@ public sealed class AsteroidPackCache : IShapeCache
             if (k >= 0)
                 shapes[k] = shape;
         }
-        Interlocked.Increment(ref hits);
         return shapes;
     }
 
