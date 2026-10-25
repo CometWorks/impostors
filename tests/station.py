@@ -100,16 +100,26 @@ def start_server() -> tuple[rig.RemoteAPI, Path]:
     return CLIENT.wait_api(), SERVER.world
 
 
+def look(api, target) -> None:
+    for _ in range(5):
+        if api.character_look_at(*target, tolerance=1).get("oriented"):
+            return
+        time.sleep(3)
+    raise RuntimeError(f"Can't look at {target}")
+
+
 def view(api, name: str) -> bool:
     totals, impostors = CLIENT.stats()
     levels = collections.Counter(
-        int(i["shape"]) for i in impostors.values() if i.get("drawn") == "1"
+        int(i["shape"].split("/")[1])
+        for i in impostors.values()
+        if i.get("drawn") == "1"
     )
     drawn = int(totals.get("drawn", 0))
     print(
         f"{MODE} {name} impostors={totals.get('impostors')} inview={totals.get('inview')} "
         f"drawn={drawn} quads={totals.get('quads')} budget={totals.get('budget')} "
-        f"levels={dict(sorted(levels.items()))}",
+        f"levels={dict(sorted(levels.items()))} forward={totals.get('forward')}",
         flush=True,
     )
     tag = f"{MODE}-{name}"
@@ -123,9 +133,12 @@ def main() -> int:
     SHOTS.mkdir(parents=True, exist_ok=True)
     try:
         api, world = start_offline() if MODE == "offline" else start_server()
+        # Offline the session isn't ready before the player spawns
+        rig.ensure_character(api, timeout=2400)
         rig.wait_world(api, timeout=2400)
-        rig.ensure_character(api)
         rig.focus_gameplay(api)
+        # Out of power or air in space while the rocks are built, a respawn would move it
+        api.set_admin_flag("invulnerable", True)
         if api.get_view().get("thirdPerson"):
             api.key("V")
         center, normal, side, points = ring.ring_geometry(world)
@@ -150,8 +163,11 @@ def main() -> int:
         ok = True
         for i, (name, direction) in enumerate(directions.items()):
             api.character_teleport(*eye)
-            api.character_look_at(*(center + direction * radius), tolerance=1)
+            look(api, center + direction * radius)
             time.sleep(SETTLE if i == 0 else 60)
+            # Offline the first turn right after the spawn may not stick
+            look(api, center + direction * radius)
+            time.sleep(2)
             ok &= view(api, name)
     finally:
         CLIENT.stop()
