@@ -7,6 +7,8 @@ tests/ring.py.
         python tests/asteroid_pack.py write      # the pack, into ~/.se-test/<task>-pack
     ... python tests/asteroid_pack.py measure    # a join without the pack, then with it
     ... python tests/asteroid_pack.py reset      # mine an asteroid, restart, reset it
+    ... python tests/asteroid_pack.py offline    # offline with the client plugin, without
+                                                 # the pack, with it, with AsteroidPackMod set
     IMP_PACK_LEVEL=32 ...                        # write: finest level in the pack (64)
     IMP_HEIGHT=10000 IMP_SETTLE=240 ...          # measure: meters above the ring, seconds
     IMP_RUNS=pack ...                            # measure: only the run with the pack
@@ -15,6 +17,10 @@ tests/ring.py.
 has a new one, after a server restart (the known hashes saved with the world) it keeps that
 without a build, and after a voxel reset it has the pack's version again without a build. A
 PASS/FAIL line per step.
+
+`offline` loads the world offline in a client with the client plugin, whose service serves
+the local player, and compares the same numbers from the client's log and stats, without the
+pack and with it (AsteroidPackMod 0, then the pack's id).
 
 `write` runs the server alone with WriteAsteroidPack, every asteroid is built, and prints the
 pack's size and how long it took. `measure` starts the server and the client with empty shape
@@ -53,20 +59,25 @@ SERVER = ring.SERVER
 CLIENT = ring.CLIENT
 
 
+def add_pack(world: Path) -> None:
+    """The pack mod in the world's mod list"""
+    for name in ("Sandbox.sbc", "Sandbox_config.sbc"):
+        f = world / name
+        text = f.read_text(encoding="utf-8").replace(
+            "</Mods>",
+            '<ModItem FriendlyName="Impostors Asteroid Pack">'
+            f"<Name>{PACK_ID}.sbm</Name><PublishedFileId>{PACK_ID}</PublishedFileId>"
+            "<PublishedServiceName>Steam</PublishedServiceName></ModItem>\n    </Mods>",
+            1,
+        )
+        f.write_text(text, encoding="utf-8")
+
+
 def setup_world(with_pack: bool) -> list[int]:
     """The save with its mods staged on the server, plus the pack mod when asked"""
     ids = ring.copy_world(SERVER.world)
     if with_pack:
-        for name in ("Sandbox.sbc", "Sandbox_config.sbc"):
-            f = SERVER.world / name
-            text = f.read_text(encoding="utf-8").replace(
-                "</Mods>",
-                '<ModItem FriendlyName="Impostors Asteroid Pack">'
-                f"<Name>{PACK_ID}.sbm</Name><PublishedFileId>{PACK_ID}</PublishedFileId>"
-                "<PublishedServiceName>Steam</PublishedServiceName></ModItem>\n    </Mods>",
-                1,
-            )
-            f.write_text(text, encoding="utf-8")
+        add_pack(SERVER.world)
         ids.append(PACK_ID)
     SERVER.prepare([CLIENT.steam_id])
     cfg = SERVER.data / "SpaceEngineers-Dedicated.cfg"
@@ -355,7 +366,8 @@ def reset() -> int:
 
         SERVER.start(timeout=3600)
         api = join(ids, eye, target)
-        time.sleep(60)
+        # The impostors come in two at a time, this one may take a minute or two
+        wait_for(lambda: entry(api, asteroid)[0], 240)
         text = log_text()
         known = re.search(r"Asteroid hashes: (\d+) known from the last save", text)
         version, changed, _ = entry(api, asteroid)
@@ -394,6 +406,118 @@ def reset() -> int:
     return 0 if ok else 1
 
 
+def offline_run(tag: str, with_pack: bool, pack_mod: int = 0) -> dict:
+    """The world offline in a client with the client plugin and no Impostors mod"""
+    import local
+
+    client = rig.Client(2, "Viktor", plugin=True)
+    world_dir = client.appdata / "Saves" / ring.WORLD_NAME
+    ring.PLUGIN = True  # no Impostors mod in the world, the plugin draws
+    ids = ring.copy_world(world_dir)
+    for name in ("Sandbox.sbc", "Sandbox_config.sbc"):
+        f = world_dir / name
+        f.write_text(
+            f.read_text(encoding="utf-8").replace(
+                "<OnlineMode>PUBLIC</OnlineMode>", "<OnlineMode>OFFLINE</OnlineMode>"
+            ),
+            encoding="utf-8",
+        )
+    if with_pack:
+        add_pack(world_dir)
+        ids.append(PACK_ID)
+    center, normal, side, _ = ring.ring_geometry(world_dir)
+    client.appdata.mkdir(parents=True, exist_ok=True)
+    (client.appdata / "Impostors.cfg").write_text(
+        rig.plugin_config(AsteroidPack=True, AsteroidPackMod=pack_mod), encoding="utf-8"
+    )
+    shutil.rmtree(client.appdata / "ImpostorsCache", ignore_errors=True)
+    args = client.args
+    client.args = lambda _port: [
+        a for a in args(0) if a not in ("--connect", "127.0.0.1:0")
+    ]
+    rig.CLIENT_GIB = 10.0
+    client.launch(0)
+    stage(client.appdata / "Mods", ids)
+    result = {"tag": tag}
+    log = lambda: client.log.read_text(errors="replace") if client.log.exists() else ""
+    try:
+        api = client.wait_api()
+        start = time.monotonic()
+        api.load(str(world_dir), online_mode="OFFLINE")
+        local.wait(lambda: local.past_questions(api), 900, 2)
+        rig.ensure_character(api)
+        rig.wait_world(api, timeout=1200)
+        rig.focus_gameplay(api)
+        print(f"{tag} loaded in {time.monotonic() - start:.0f} s", flush=True)
+        base = center + side * 120000
+        eye = base + normal * (HEIGHT + 300)
+        api.character_teleport(*eye)
+        time.sleep(5)
+        api.character_look_at(
+            *(base + np.cross(normal, side) * (HEIGHT + 5000)), tolerance=2
+        )
+        start = time.monotonic()
+        while time.monotonic() - start < SETTLE:
+            time.sleep(10)
+            totals, impostors = client.stats()
+            shaped = sum(
+                1 for i in impostors.values() if i.get("shape", "none") != "none"
+            )
+            print(
+                f"{tag} t={time.monotonic() - start:.0f}s impostors={totals.get('impostors')} "
+                f"shaped={shaped}",
+                flush=True,
+            )
+        text = log()
+        cpus = [
+            float(c)
+            for c in re.findall(r"Impostor build: .*kind=Voxel .* cpu=([0-9.]+)", text)
+        ]
+        packed = re.findall(r"(\d+) from the asteroid pack", text)
+        reused = re.findall(r"the reused ones took (\d+) ms CPU", text)
+        pack_line = re.search(r"Asteroid pack of mod .*", text)
+        result.update(
+            impostors=int(totals.get("impostors", 0)),
+            builds=len(cpus),
+            build_cpu_s=sum(cpus) / 1000,
+            packed=sum(map(int, packed)),
+            reused_cpu_s=sum(map(int, reused)) / 1000,
+            pack=pack_line.group(0) if pack_line else None,
+        )
+    finally:
+        client.stop()
+    print(
+        f"{tag}: {result.get('impostors')} impostors, {result.get('builds')} asteroid builds "
+        f"({result.get('build_cpu_s', 0):.1f} s CPU), {result.get('packed')} from the pack "
+        f"(reused builds {result.get('reused_cpu_s', 0):.1f} s CPU, whole minutes); {result.get('pack')}",
+        flush=True,
+    )
+    return result
+
+
+def offline() -> int:
+    if not (PACK / "ImpostorsAsteroidPack.bin").exists():
+        raise SystemExit(f"No pack in {PACK}, run write first")
+    runs = os.environ.get("IMP_RUNS", "nopack,pack,packid").split(",")
+    results = {}
+    if "nopack" in runs:
+        results["nopack"] = offline_run("offline-nopack", False)
+    if "pack" in runs:
+        results["pack"] = offline_run("offline-pack", True)
+    if "packid" in runs:
+        results["packid"] = offline_run("offline-packid", True, PACK_ID)
+    ok = all(
+        r.get("builds") == 0 and r.get("packed", 0) > 0
+        for k, r in results.items()
+        if k != "nopack"
+    )
+    print(
+        f"{'PASS' if ok else 'FAIL'} offline with the pack: no asteroid builds, pack hits",
+        flush=True,
+    )
+    return 0 if ok else 1
+
+
 def measure() -> int:
     if not (PACK / "ImpostorsAsteroidPack.bin").exists():
         raise SystemExit(f"No pack in {PACK}, run write first")
@@ -412,7 +536,7 @@ def measure() -> int:
 
 if __name__ == "__main__":
     mode = sys.argv[1] if len(sys.argv) > 1 else ""
-    modes = {"write": write, "measure": measure, "reset": reset}
+    modes = {"write": write, "measure": measure, "reset": reset, "offline": offline}
     if mode not in modes:
         raise SystemExit(__doc__)
     sys.exit(modes[mode]())
