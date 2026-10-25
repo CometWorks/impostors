@@ -72,6 +72,12 @@ greedily into rectangles of one color, so a flat painted side is a single quad.
   1080p screen with a 70° field of view: about one cell per 2.5 pixels. Grids keep level
   16 down to half that size, as their coarser levels lose the shape fast. A zoomed view
   gets finer levels inside it, see "Zoomed views" below.
+- The levels of a player's impostors together stay within `MaxQuadsPerFrame`, counting half
+  of each shape's quads as facing the camera. When the picks are over it, the server picks
+  them all again as if the screen were smaller, so the near ones lose detail instead of the
+  client dropping the far ones. Above the Octahedron asteroid ring (SE-666) the few
+  asteroids just outside the replication range took level 32, about 3600 quads each, and
+  the client drew 4 of 137 impostors.
 - Encoding (`Protocol.cs`): a 19 byte header (level, cell size, origin) and 10 bytes per quad
   (face, min cell, width, height, RGB565 color, normal).
 - Each quad carries the normal it is shaded with, octahedral with 6 bits per coordinate
