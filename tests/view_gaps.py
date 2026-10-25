@@ -204,7 +204,15 @@ def sample(seconds: float, label: str) -> dict:
     result["gap"] = gaps / max(1, result["expected"])
     result["worst"] = worst
     totals, _ = CLIENT.stats()
-    for key in ("removed", "restored", "stored", "storedkb", "culled", "overbudget", "coarser"):
+    for key in (
+        "removed",
+        "restored",
+        "stored",
+        "storedkb",
+        "culled",
+        "overbudget",
+        "coarser",
+    ):
         result[key] = totals.get(key)
     print(
         f"{label}: {result['samples']} samples, {result['expected']} expected, "
