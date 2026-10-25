@@ -56,11 +56,13 @@ public class Plugin : IPlugin, ICommonPlugin
         var gameVersion = MyFinalBuildConstants.APP_VERSION_STRING.ToString();
         Common.SetPlugin(this, gameVersion, MyFileSystem.UserDataPath);
 
-        if (!PatchHelpers.HarmonyPatchAll(Log, new Harmony(Name)))
+        var harmony = new Harmony(Name);
+        if (!PatchHelpers.HarmonyPatchAll(Log, harmony))
         {
             failed = true;
             return;
         }
+        BillboardPriority.Patch(harmony, Log);
 
         Log.Debug("Successfully loaded");
     }
@@ -104,6 +106,7 @@ public class Plugin : IPlugin, ICommonPlugin
     private void CustomUpdate()
     {
         PatchHelpers.PatchUpdates();
+        BillboardPriority.Update();
 
         // Serves the players who joined when this client hosts a lobby
         ImpostorService.UpdateStatic(Config, Log);
