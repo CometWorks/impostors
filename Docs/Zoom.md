@@ -39,11 +39,14 @@ Level 64 is the finest there is, so zooms beyond about 4 times show no more deta
 - A zoomed level is used only while its shape has at most `MaxQuadsPerFrame` quads, so one
   impostor can't take the client's whole quad budget.
 - A level sent for the zoom stays for 30 seconds after the zoom ends, so looking through it
-  again soon costs nothing.
+  again soon costs nothing. After that the client still has its shape in its shape store, so
+  the server switches back to it with a state only.
+- The server's cone is a quarter of the field of view wider than the view, so what a turn
+  brings in is mostly there already. The client draws only what is inside its own view.
 
 How fast: `tests/zoom.py` aims down the rifle's iron sight (70° to 40°) at a 512 m asteroid
 13 km away, and level 64 arrives 0.05 seconds after the zoom starts. A shape larger than the
 shape credit left can wait a second or two behind the ones sent just before it, see the
 settle times in the test output.
 
-More detail: [Design](Design.md), "Zoomed views".
+More detail: [Design](Design.md), "Zoomed views" and "Moving views".
