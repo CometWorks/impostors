@@ -89,8 +89,11 @@ namespace Impostors
         private readonly bool[] facing = new bool[6];
         private long serverInstance;
 
-        // The view last reported to the server, while it is zoomed
+        // The view last reported to the server, while it is zoomed or a spectator camera
         private bool viewZoomed;
+        private bool viewReported;
+        private bool sentSpectator;
+        private Vector3D sentPosition;
         private double sentZoom;
         private Vector3 sentForward;
         private int sentViewTick;
@@ -187,8 +190,9 @@ namespace Impostors
             }
         }
 
-        // Tells the server about a zoomed view (see Protocol.View): when it starts, changes
-        // its zoom by 5% or turns by an eighth of its field of view, and when it ends
+        // Tells the server about a zoomed view or a spectator camera (see Protocol.View): when
+        // it starts, changes its zoom by 5%, turns by an eighth of its field of view or moves
+        // by ViewMoveMeters, and when it ends
         private void SendView()
         {
             var camera = MyAPIGateway.Session.Camera;
@@ -200,13 +204,23 @@ namespace Impostors
             var zoom = Protocol.Zoom(fov, size.Y);
             var forward = (Vector3)camera.WorldMatrix.Forward;
             var zoomed = zoom >= Protocol.MinZoom;
-            if (!zoomed && !viewZoomed)
+            var spectator = MyAPIGateway.Session.IsCameraUserControlledSpectator;
+            var position = camera.Position;
+            var reported = zoomed || spectator;
+            if (!reported && !viewReported)
                 return;
             if (
-                zoomed
-                && viewZoomed
-                && Math.Abs(zoom / sentZoom - 1) < 0.05
+                reported
+                && viewReported
+                && zoomed == viewZoomed
+                && spectator == sentSpectator
+                && (!zoomed || Math.Abs(zoom / sentZoom - 1) < 0.05)
                 && Vector3.Dot(forward, sentForward) > Math.Cos(fov / 8)
+                && (
+                    !spectator
+                    || Vector3D.DistanceSquared(position, sentPosition)
+                        < Protocol.ViewMoveMeters * Protocol.ViewMoveMeters
+                )
             )
                 return;
 
@@ -218,10 +232,17 @@ namespace Impostors
             writer.Float(forward.X);
             writer.Float(forward.Y);
             writer.Float(forward.Z);
+            writer.Byte((byte)(spectator ? 1 : 0));
+            writer.Double(position.X);
+            writer.Double(position.Y);
+            writer.Double(position.Z);
             MyAPIGateway.Multiplayer.SendMessageToServer(Protocol.Channel, writer.ToArray());
             if (zoomed && !viewZoomed)
                 zoomTick = tick;
             viewZoomed = zoomed;
+            viewReported = reported;
+            sentSpectator = spectator;
+            sentPosition = position;
             sentZoom = zoom;
             sentForward = forward;
             sentViewTick = tick;
@@ -367,6 +388,20 @@ namespace Impostors
                     )
                     + " zoomed="
                     + (viewZoomed ? 1 : 0)
+                    + " spectator="
+                    + (sentSpectator && viewReported ? 1 : 0)
+                    + " camera="
+                    + (
+                        camera != null
+                            ? camera.Position.X.ToString("0.0")
+                                + ","
+                                + camera.Position.Y.ToString("0.0")
+                                + ","
+                                + camera.Position.Z.ToString("0.0")
+                            : ""
+                    )
+                    + " forward="
+                    + (camera != null ? Vec((Vector3)camera.WorldMatrix.Forward) : "")
                     + " viewtick="
                     + sentViewTick
                     + " zoomtick="
@@ -488,8 +523,9 @@ namespace Impostors
                         cache.Clear();
                         serverInstance = instance;
 
-                        // A new server knows nothing of the zoom yet
+                        // A new server knows nothing of the view yet
                         viewZoomed = false;
+                        viewReported = false;
                     }
                     break;
                 }

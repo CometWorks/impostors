@@ -59,6 +59,9 @@ public sealed class ImpostorService : IDisposable
         // Where the server picked for this player last
         public Vector3D Eye;
 
+        // The player's spectator camera, from its View messages while it may spectate
+        public Vector3D? Camera;
+
         // Counted for the log line once a minute
         public int Picks;
         public long PickTicks;
@@ -317,15 +320,28 @@ public sealed class ImpostorService : IDisposable
 
     private void OnView(ByteReader r, int length, ulong sender)
     {
-        if (length < 21 || !viewers.TryGetValue(sender, out var viewer))
+        if (length < 46 || !viewers.TryGetValue(sender, out var viewer))
             return;
 
         var fov = r.Float();
         var width = r.UShort();
         var height = r.UShort();
         var forward = new Vector3D(r.Float(), r.Float(), r.Float());
+        var spectator = r.Byte() == 1;
+        var camera = new Vector3D(r.Double(), r.Double(), r.Double());
         if (!(fov > 0.001f && fov < 3f) || width == 0 || height == 0 || !forward.IsValid())
             return;
+
+        // Only from players the game lets spectate, any other could look around the world
+        viewer.Camera =
+            spectator
+            && camera.IsValid()
+            && (
+                MySession.Static.Settings.EnableSpectator
+                || MySession.Static.HasPlayerSpectatorRights(sender)
+            )
+                ? camera
+                : null;
 
         var zoom = Protocol.Zoom(fov, height);
         viewer.Dirty = true;
@@ -350,21 +366,22 @@ public sealed class ImpostorService : IDisposable
         if (!MySession.Static.Players.TryGetPlayerBySteamId(viewer.SteamId, out var player))
             return;
 
-        var eye = Eye(player);
-        if (eye == null)
+        // The game replicates around this point, the impostors are sized for the camera
+        var center = ReplicationCenter(player);
+        if (center == null)
             return;
-        viewer.Eye = eye.Value;
+        viewer.Eye = viewer.Camera ?? center.Value;
         var settings = MySession.Static.Settings;
         var range = config.MaxDistance > 0 ? config.MaxDistance : settings.ViewDistance;
         var half = Math.Max(0, settings.SyncDistance - config.ReplicationMargin);
-        var replicated = new BoundingBoxD(viewer.Eye - half, viewer.Eye + half);
+        var replicated = new BoundingBoxD(center.Value - half, center.Value + half);
 
         // Saved and edited asteroids replicate farther: MyVoxelReplicable inflates their AABB
         var voxelHalf = Math.Max(
             half,
             settings.ViewDistance / Math.Sqrt(3) - config.ReplicationMargin
         );
-        var voxelReplicated = new BoundingBoxD(viewer.Eye - voxelHalf, viewer.Eye + voxelHalf);
+        var voxelReplicated = new BoundingBoxD(center.Value - voxelHalf, center.Value + voxelHalf);
 
         var zones = registry.Entries.Select(ZoneVolume.Of).Where(z => z.HasValue).ToList();
 
@@ -544,7 +561,7 @@ public sealed class ImpostorService : IDisposable
     // Where the game replicates entities to the player: its controlled entity, or the spectator
     // camera of a player with creative rights (MyClientState), which can be far from the
     // character. Without a client state yet, the controlled entity.
-    private static Vector3D? Eye(MyPlayer player)
+    private static Vector3D? ReplicationCenter(MyPlayer player)
     {
         var server = MyMultiplayer.ReplicationLayer as MyReplicationServer;
         var position = server?.GetClientData(new Endpoint(player.Id.SteamId, 0))?.Position;

@@ -37,11 +37,15 @@ namespace Impostors
         public const byte ShapeData = 5;
 
         // Client to server: float vertical field of view with zoom (radians), ushort viewport
-        // width and height, float forward x, y, z of the camera. Sent while the view is zoomed
-        // (see Zoom), when it zoomed or turned noticeably, and once more after leaving the zoom.
-        // The server sends finer levels for the impostors inside the view. Older servers
-        // ignore it.
+        // width and height, float forward x, y, z of the camera, byte 1 for a spectator camera
+        // and its double position x, y, z. Sent while the view is zoomed (see Zoom) or a
+        // spectator camera, when it zoomed, turned or moved noticeably, and once more after
+        // that ended. The server sends finer levels for the impostors inside a zoomed view, and
+        // picks for the spectator camera's position when the player may spectate.
         public const byte View = 6;
+
+        // A spectator camera that moved this far gets a new View message, meters
+        public const double ViewMoveMeters = 100;
 
         // Views at least this much larger than the server's default estimate count as zoomed
         public const double MinZoom = 1.5;
