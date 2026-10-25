@@ -34,8 +34,8 @@ nobody edited and that the world doesn't save get no impostors anyway (see
    in an offline game.
 2. The server builds every asteroid, several at a time, logging
    `Asteroid pack: N of M asteroids built` every 10 seconds, then
-   `Asteroid pack written: ...` with the folder: `ImpostorsAsteroidPack/<world name>` in the
-   server's data folder (the game's user data folder for the client plugin).
+   `Asteroid pack written: ...` with the folder: `Storage/Impostors/AsteroidPack/<world name>`
+   in the server's data folder (the game's user data folder for the client plugin).
 3. Stop the server and set `WriteAsteroidPack` back to false.
 4. Copy that folder into the game's local mods folder (`%APPDATA%\SpaceEngineers\Mods` on
    Windows) and publish it to the Workshop from the game, like any mod. Add the published mod

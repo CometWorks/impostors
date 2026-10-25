@@ -15,6 +15,7 @@ using VRage.FileSystem;
 using VRage.Game;
 using VRage.Game.ModAPI;
 using VRage.GameServices;
+using VRage.ModAPI;
 using VRage.Plugins;
 using VRage.Utils;
 using VRageMath;
@@ -124,6 +125,21 @@ public sealed class ProbeCommands : CommandModule
         return $"Probe stats: entries={string.Join(" ", entries)} viewers={string.Join(" ", viewers)}";
     }
 
+    [Command("inputs", "The impostor entries: id, version and the hash of their content.")]
+    [Permission(MyPromoteLevel.Admin)]
+    public string Inputs()
+    {
+        var service = Service;
+        if (service == null)
+            return "Probe inputs: off";
+
+        var entries = ((IEnumerable)Get(service, "Entries"))
+            .Cast<object>()
+            .Where(e => Get(e, "Shapes") != null)
+            .Select(e => $"{Get(e, "Id")}:{Get(e, "Version")}:{Get(e, "Input")}");
+        return $"Probe inputs: {string.Join(" ", entries)}";
+    }
+
     private static IEnumerable<long> Held(IDictionary sent) =>
         sent.Keys.Cast<long>().Where(id => (bool)Get(sent[id], "Held")).OrderBy(id => id);
 
@@ -164,6 +180,111 @@ public sealed class ProbeCommands : CommandModule
         grid.ColorBlocks(grid.Min, grid.Max, new Vector3(hue, -0.3f, 0.45f), false);
         return "Probe paint: done";
     }
+
+    [Command("remove", "Removes a grid's blocks in one layer, x, y or z = index.")]
+    [Permission(MyPromoteLevel.Admin)]
+    public string Remove(long gridId, string axis, int index)
+    {
+        if (!(MyEntities.GetEntityById(gridId) is MyCubeGrid grid))
+            return "Probe remove: none";
+
+        var layer = grid.GetBlocks()
+            .Select(b => b.Position)
+            .Where(p =>
+                (
+                    axis == "x" ? p.X
+                    : axis == "y" ? p.Y
+                    : p.Z
+                ) == index
+            )
+            .ToList();
+        grid.RazeBlocks(layer);
+        return $"Probe remove: {layer.Count}";
+    }
+
+    [Command("grow", "Adds a layer of armor blocks past the grid's largest x.")]
+    [Permission(MyPromoteLevel.Admin)]
+    public string Grow(long gridId, float hue)
+    {
+        if (!(MyEntities.GetEntityById(gridId) is MyCubeGrid grid))
+            return "Probe grow: none";
+
+        var x = grid.Max.X + 1;
+        var subtype =
+            grid.GridSizeEnum == MyCubeSize.Large ? "LargeBlockArmorBlock" : "SmallBlockArmorBlock";
+        var added = 0;
+        for (var y = grid.Min.Y; y <= grid.Max.Y; y++)
+        for (var z = grid.Min.Z; z <= grid.Max.Z; z++)
+        {
+            var block = new MyObjectBuilder_CubeBlock
+            {
+                SubtypeName = subtype,
+                Min = new Vector3I(x, y, z),
+                ColorMaskHSV = new Vector3(hue, -0.3f, 0.45f),
+                IntegrityPercent = 1f,
+                BuildPercent = 1f,
+            };
+            if (((IMyCubeGrid)grid).AddBlock(block, false) != null)
+                added++;
+        }
+        return $"Probe grow: {added}";
+    }
+
+    [Command("merge", "Merges grid b into grid a, next to a's largest x.")]
+    [Permission(MyPromoteLevel.Admin)]
+    public string Merge(long a, long b)
+    {
+        if (
+            !(MyEntities.GetEntityById(a) is MyCubeGrid into)
+            || !(MyEntities.GetEntityById(b) is MyCubeGrid other)
+        )
+            return "Probe merge: none";
+
+        var offset = new Vector3I(
+            into.Max.X + 1 - other.Min.X,
+            into.Min.Y - other.Min.Y,
+            into.Min.Z - other.Min.Z
+        );
+        // Without the merge order check: of two equal grids the game merges the other way round
+        var merged = into.MergeGrid_MergeBlock(other, offset, false);
+        return merged != null && other.MarkedForClose
+            ? $"Probe merge: {merged.EntityId}"
+            : $"Probe merge: failed, render {other.HasCubeGridRender}";
+    }
+
+    [Command("cut", "Cuts a sphere out of a voxel map, center in world coordinates.")]
+    [Permission(MyPromoteLevel.Admin)]
+    public string Cut(long voxelId, double x, double y, double z, float radius)
+    {
+        if (!(MyEntities.GetEntityById(voxelId) is IMyVoxelBase voxel))
+            return "Probe cut: none";
+
+        var sphere = MyAPIGateway.Session.VoxelMaps.GetSphereVoxelHand();
+        sphere.Center = new Vector3D(x, y, z);
+        sphere.Radius = radius;
+        MyAPIGateway.Session.VoxelMaps.CutOutShape(voxel, sphere);
+        return "Probe cut: done";
+    }
+
+    [Command("maxx", "A grid's largest block x.")]
+    [Permission(MyPromoteLevel.Admin)]
+    public string MaxX(long gridId) =>
+        MyEntities.GetEntityById(gridId) is MyCubeGrid grid
+            ? $"Probe maxx: {grid.Max.X}"
+            : "Probe maxx: none";
+
+    [Command("grids", "The grids on the server: id and block count.")]
+    [Permission(MyPromoteLevel.Admin)]
+    public string Grids() =>
+        "Probe grids: "
+        + string.Join(
+            " ",
+            MyEntities
+                .GetEntities()
+                .OfType<MyCubeGrid>()
+                .OrderBy(g => g.EntityId)
+                .Select(g => $"{g.EntityId}:{g.BlocksCount}")
+        );
 
     [Command("pos", "A grid's position on the server.")]
     [Permission(MyPromoteLevel.Admin)]

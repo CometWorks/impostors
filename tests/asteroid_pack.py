@@ -90,7 +90,8 @@ def setup_world(with_pack: bool) -> list[int]:
         encoding="utf-8",
     )
     stage(SERVER.data / "Mods", ids)
-    shutil.rmtree(SERVER.data / "ImpostorsCache", ignore_errors=True)
+    for cache in ("ImpostorsCache", "Storage/Impostors/Cache"):
+        shutil.rmtree(SERVER.data / cache, ignore_errors=True)
     return ids
 
 
@@ -448,7 +449,8 @@ def offline_run(
     (client.appdata / "Impostors.cfg").write_text(
         rig.plugin_config(AsteroidPack=True, AsteroidPackMod=pack_mod), encoding="utf-8"
     )
-    shutil.rmtree(client.appdata / "ImpostorsCache", ignore_errors=True)
+    for cache in ("ImpostorsCache", "Storage/Impostors/Cache"):
+        shutil.rmtree(client.appdata / cache, ignore_errors=True)
     args = client.args
     client.args = lambda _port: [
         a for a in args(0) if a not in ("--connect", "127.0.0.1:0")

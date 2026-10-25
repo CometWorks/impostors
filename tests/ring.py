@@ -34,8 +34,6 @@ import rig  # noqa: E402
 
 PLUGIN = os.environ.get("IMP_PLUGIN") == "1"
 QUALITY = os.environ.get("IMP_QUALITY", "minimal")
-if os.environ.get("IMP_MOD_FOLDER"):
-    rig.MOD_FOLDER = Path(os.environ["IMP_MOD_FOLDER"])
 HEIGHTS = [
     float(h)
     for h in os.environ.get("IMP_HEIGHTS", "0,1000,3000,6000,10000,20000,40000").split(

@@ -68,7 +68,7 @@ public interface IPluginConfig : INotifyPropertyChanged
     ulong AsteroidPackMod { get; set; }
 
     // Builds every asteroid of the world and writes the asteroid pack mod into
-    // ImpostorsAsteroidPack in the user data folder, once per session
+    // Storage/Impostors/AsteroidPack in the user data folder, once per session
     bool WriteAsteroidPack { get; set; }
 
     // Finest level written into the asteroid pack; with less than 64 the pack is smaller but

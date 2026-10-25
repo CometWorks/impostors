@@ -13,6 +13,11 @@ offline stations stay drawn, and its shape cache from disk: the player is telepo
 next to a station, whose node loads its partition and takes the station's shapes from
 the WA instead of building them (SE-648). IMP_RESTART=0 skips this part.
 
+An asteroid 12 km out is on every node: both nodes build it at once and push it to the WA,
+which must end up with it in its cache (SE-662). IMP_CACHE_MB sets CacheMegabytes on every
+process, 0 turns the caches off for a baseline; the cache checks are skipped then. The end
+prints the first-sight latency and every process's builds and cache hits with their CPU time.
+
 Run it from the cluster repository's Test folder, with its host.env or the
 environment naming the package, ports and roots, and CLUSTER_EXTRA_PLUGINS naming
 the built server plugin (a folder Impostors/ with Impostors.dll and Impostors.xml):
@@ -55,6 +60,34 @@ STATIONS = {
     "StationNorth": (130000000000000102, (0.0, 0.0, -12000.0), 0.0),
 }
 SIZE = (40, 12, 30)
+ASTEROID = (130000000000000201, (-12256.0, -256.0, -256.0), "Asteroid512-001.vx2")
+VOXEL_MAPS = Path(
+    os.environ.get(
+        "IMP_VOXEL_MAPS",
+        Path.home()
+        / ".steam/steam/steamapps/common/SpaceEngineersDedicatedServer/Content/VoxelMaps",
+    )
+)
+CACHE_MB = os.environ.get("IMP_CACHE_MB")
+# The WA's shape cache in its data folder, as rig.CACHE_FOLDER (this runs without rig.py)
+CACHE_FOLDER = Path("Storage", "Impostors", "Cache")
+CACHING = CACHE_MB != "0"
+WORK = re.compile(
+    r"Impostor (build|from the cache): id=(\d+) kind=(\w+).*? cpu=([\d.]+)"
+)
+
+
+def asteroid_xml() -> str:
+    entity_id, (x, y, z), _ = ASTEROID
+    return (
+        '<MyObjectBuilder_EntityBase xsi:type="MyObjectBuilder_VoxelMap">'
+        f"<SubtypeName /><EntityId>{entity_id}</EntityId>"
+        "<PersistentFlags>CastShadows InScene</PersistentFlags>"
+        f'<PositionAndOrientation><Position x="{x}" y="{y}" z="{z}" />'
+        '<Forward x="0" y="0" z="-1" /><Up x="0" y="1" z="0" /></PositionAndOrientation>'
+        "<StorageName>RockWest</StorageName><MutableStorage>true</MutableStorage>"
+        "</MyObjectBuilder_EntityBase>"
+    )
 
 
 def station_xml(name: str, entity_id: int, position, hue: float) -> str:
@@ -95,6 +128,8 @@ def template(root: Path) -> Path:
     sector = target / "SANDBOX_0_0_0_.sbs"
     text = sector.read_text()
     grids = "".join(station_xml(n, i, p, h) for n, (i, p, h) in STATIONS.items())
+    grids += asteroid_xml()
+    shutil.copy(VOXEL_MAPS / ASTEROID[2], target / "RockWest.vx2")
     text = text.replace("<SectorObjects>", "<SectorObjects>" + grids, 1)
     sector.write_text(text)
 
@@ -124,6 +159,14 @@ def stage(bench: Bench) -> Path:
     for folder in folders:
         folder.mkdir(parents=True, exist_ok=True)
         shutil.copytree(MOD, folder / f"{MOD_ID}.sbm", dirs_exist_ok=True)
+    if CACHE_MB is not None:
+        for p in PROCESSES:
+            (bench.run_root / f"{p}-data" / "Impostors.cfg").write_text(
+                '<?xml version="1.0" encoding="utf-8"?>\n<PluginConfig '
+                'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" '
+                'xmlns:xsd="http://www.w3.org/2001/XMLSchema">'
+                f"<CacheMegabytes>{CACHE_MB}</CacheMegabytes></PluginConfig>\n"
+            )
     storage = user_data / "Storage" / f"{MOD_ID}.sbm_Impostors"
     storage.mkdir(parents=True, exist_ok=True)
     (storage / "debug").write_text("")
@@ -212,6 +255,8 @@ def restart_checks(bench: Bench, stats_file: Path, player_node: str, ids: dict) 
     built = new_lines(bench, before, rf"Impostor build: id={entity_id} ")
     counts = new_lines(bench, before, r"Impostor shapes in the last minute")
     bench.record("restart-builds", {"built": built, "counts": counts})
+    if not CACHING:
+        return
     bench.check(
         f"{name} not built again, its shapes came from the WA",
         not built,
@@ -229,6 +274,7 @@ def run(bench: Bench, stats_file: Path) -> None:
     bench.cluster.wait_ready()
     api = bench.start_client(CLIENT_ID)
     character = bench.wait_spawned(CLIENT_ID)
+    spawned = time.monotonic()
     bench.ensure_gameplay_focus(CLIENT_ID)
 
     snapshot = bench.diag("entities")
@@ -247,11 +293,20 @@ def run(bench: Bench, stats_file: Path) -> None:
     ids = {name: i for name, (i, _, _) in STATIONS.items()}
     rows = wait(
         lambda: (r := stats(stats_file))
-        and all(drawn(r, i) for i in ids.values())
+        and all(drawn(r, i) for i in [*ids.values(), ASTEROID[0]])
         and r,
         300,
+        0.5,
     )
+    first_sight = time.monotonic() - spawned
+    bench.record("first-sight", {"seconds": first_sight})
+    print(f"first sight of the far impostors: {first_sight:.1f} s after the spawn")
     rows = rows or stats(stats_file)
+    bench.check(
+        "asteroid impostor",
+        drawn(rows, ASTEROID[0]),
+        str(rows.get(ASTEROID[0], "missing")),
+    )
     for name, entity_id in ids.items():
         bench.check(
             f"impostor {name}",
@@ -283,8 +338,40 @@ def run(bench: Bench, stats_file: Path) -> None:
         time.sleep(2)
         bench.screenshot(CLIENT_ID, f"offline-{name}")
 
+    if CACHING:
+        folder = bench.run_root / "wa-1-data" / CACHE_FOLDER
+        cached = list(folder.rglob(f"{ASTEROID[0]:016x}.shapes"))
+        bench.check("the asteroid both nodes built is in the WA's cache", bool(cached))
+
     if os.environ.get("IMP_RESTART", "1") != "0":
         restart_checks(bench, stats_file, player_node, ids)
+
+
+def work_summary(bench: Bench) -> None:
+    """Builds and cache hits per process and kind over the whole run: count and CPU ms"""
+    totals = {}
+    for p in PROCESSES:
+        for log in (bench.run_root / f"{p}-data").glob("SpaceEngineersDedicated_*.log"):
+            for what, _, kind, cpu in WORK.findall(log.read_text(errors="replace")):
+                n, total = totals.get((p, what, kind), (0, 0.0))
+                totals[(p, what, kind)] = (n + 1, total + float(cpu))
+    bench.record("work", {" ".join(k): v for k, v in totals.items()})
+    for (p, what, kind), (n, cpu) in sorted(totals.items()):
+        print(f"work: {p} {kind} {what}: {n}, {cpu:.1f} ms CPU")
+    errors = []
+    for p in PROCESSES:
+        for log in (bench.run_root / f"{p}-data").glob("SpaceEngineersDedicated_*.log"):
+            errors += [
+                l
+                for l in log.read_text(errors="replace").splitlines()
+                if re.search(
+                    r"Impostor cache: failed|Failed to build impostor|cache-get|IOException",
+                    l,
+                )
+            ]
+    bench.check(
+        "no cache errors in the server logs", not errors, " | ".join(errors[:3])
+    )
 
 
 def main() -> None:
@@ -303,6 +390,7 @@ def main() -> None:
         bench.cluster.prepare(wipe=True)
         stats_file = stage(bench)
         run(bench, stats_file)
+        work_summary(bench)
     except Exception as error:  # noqa: BLE001 -- reported as a failed check
         bench.check("no error", False, f"{type(error).__name__}: {error}")
     finally:
