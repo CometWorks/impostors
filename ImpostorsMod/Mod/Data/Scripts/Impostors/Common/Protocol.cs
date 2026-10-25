@@ -55,6 +55,7 @@ namespace Impostors
         // drawing. Inside the replication cube the server keeps sending an impostor until the
         // client reports its entity ready, so nothing is missing while a grid streams in.
         public const byte Ready = 7;
+
         // Client to server: byte 1 when more Inventory messages follow, 0 in the last one, ushort
         // count, then count times long id, int version and byte level mask (see LodBit) of the
         // shapes in the client's disk cache for this world. Sent after every Welcome of a new
