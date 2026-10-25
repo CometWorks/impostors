@@ -33,7 +33,7 @@ WORLD = HOST.appdata / "Saves" / "Impostors local"
 
 # Beyond the view distance: offline only impostors can show these
 BEYOND = world.Grid(
-    "Beyond", 120000000000000021, (0.0, 0.0, 25000.0), (20, 12, 40), True, GREEN
+    "Beyond", 120000000000000021, (0.0, 0.0, 25000.0), (20, 12, 40), True, world.GREEN
 )
 ROCK_BEYOND = world.Asteroid(
     "RockBeyond", 130000000000000021, (19744.0, -256.0, -256.0), "Asteroid512-001.vx2"
