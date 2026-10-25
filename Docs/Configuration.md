@@ -12,7 +12,7 @@ The file is read only when the server starts, so changes take effect after a res
 | `AsteroidOcclusion` | true | Darkens pits and crevices of asteroid impostors, doubles their build time |
 | `SafeZones` | true | Impostors of enabled safe zones, see [Safe zones](SafeZones.md) |
 | `MinBlocks` | 8 | Grid groups with fewer blocks are not shown |
-| `MaxDistance` | 0 | Farthest impostor in meters, 0 is the world's view distance |
+| `MaxDistance` | 500000 | Farthest impostor in meters (500 km), 0 is the world's view distance |
 | `MinPixels` | 3 | Impostors less than this many pixels across on a 1080p screen are not sent |
 | `MaxImpostorsPerPlayer` | 1000 | The largest on screen win |
 | `MaxQuadsPerFrame` | 16000 | Most impostor quads a client draws per frame, nearest first |
@@ -24,7 +24,8 @@ The file is read only when the server starts, so changes take effect after a res
 Notes:
 
 - `MaxDistance` may be larger than the view distance, which the game caps at 50 km.
-  Impostors draw fine far beyond it.
+  Impostors draw fine far beyond it. `MinPixels` and `MaxImpostorsPerPlayer` still cut off
+  the ones too small to see.
 - `MaxQuadsPerFrame` is the clients' budget, sent by the server. The game draws at most 32768
   billboards per frame for every effect (thruster flames, glare, tracers), so leave room for
   them. The client keeps the nearest impostors within the budget. How the value gets there:
