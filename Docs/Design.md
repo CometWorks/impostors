@@ -122,17 +122,28 @@ offline and to the sync distance on a lobby host. The voxel clipmaps stop there 
 nothing at all before), and on a lobby host everything beyond the sync distance, as the
 players who joined get it.
 
-- The local player is a viewer of its own. The plugin's renderer copy and the service
-  exchange the same messages, Hello and View included, as byte arrays in the same process
-  (`ImpostorService.LocalClient`, `ImpostorRenderer.ToLocalServer`), in the order they are
-  sent, so the picking, the levels, the zoom and the shape store work the same without mod
-  networking.
+- The local player is a viewer of its own. Its renderer and the service exchange the same
+  messages, Hello and View included, as byte arrays in the same process, in the order they
+  are sent, so the picking, the levels, the zoom and the shape store work the same without
+  mod networking.
+- The renderer is the mod's, as on a server (SE-670). The plugin loads the mod from its
+  `ImpostorsMod` asset (`ImpostorsMod/Mod` of its sources, see `ImpostorsClient.xml`) when
+  the world doesn't list it, the way Pulsar loads client mods: its scripts after those of
+  the world's mods (`MyScriptManager.LoadData`) and its definitions with theirs
+  (`MyDefinitionManager.LoadData`). It never goes into the world's mod list, so a save
+  doesn't get it. The mod's renderer can't see the plugin, so the two talk through mod
+  messages (`ImpostorRenderer.ToLocalServerMessage` and `FromLocalServerMessage`).
+- The plugin's own copy of the renderer draws for the local player only when the mod's
+  can't: Pulsar gave the plugin no asset folder, the mod's scripts didn't compile, or the
+  world lists an older Impostors mod without those messages (told by the text of its
+  `ImpostorRenderer.cs`). It talks to the service through delegates
+  (`ImpostorService.LocalClient`, `ImpostorRenderer.ToLocalServer`).
 - Its eye is the camera, not the controlled entity, and it gets no impostor for an entry
   whose AABB reaches into the far plane's sphere, where the game draws the real one. Its
   renderer shows every impostor it gets, as every entity exists locally.
 - Its shapes don't wait for the shape credit, there is no network to protect.
-- A player with only the mod is unchanged: the mod's renderer stands down on a server, and
-  without the plugin nothing runs the service there.
+- A player with only the mod gets nothing on a server, without the plugin nothing runs the
+  service there and nothing answers the mod's Hello.
 
 Every second it:
 
@@ -355,11 +366,13 @@ Each frame it:
 
 The client plugin compiles the same files. That copy has no mod context; on a multiplayer
 client it stands down when a session mod contains the renderer, so it only draws on servers
-whose world lacks the mod. In an offline game or on a lobby host it is the only copy that
-draws, for the local player (see "Server"). The plugin updates that copy itself: the game
-keeps the session components to update in a set ordered by priority and type name
-(`MySession.ComponentComparer`), where the plugin's copy and the mod's compare equal, so
-with the mod in the world the game updated only the mod's copy. Its debug files are `Impostors.debug`,
+whose world lacks the mod. In an offline game or on a lobby host the mod's copy draws for
+the local player, and the plugin's only when the mod's can't (see "Server"). The plugin
+updates its copy itself: the game keeps the session components to update in a set ordered
+by priority and type name (`MySession.ComponentComparer`), where the plugin's copy and the
+mod's compare equal, so with the mod loaded the game updates only the mod's copy, which it
+registers first. The mod the plugin loads keeps its files in the local storage folder
+`local_Impostors_Impostors`. The plugin copy's debug files are `Impostors.debug`,
 `Impostors.stats.txt` and `Impostors.mode` in the global storage (`<appdata>/Storage`), since
 Pulsar compiles the plugin under a random assembly name, which the local storage folder
 would take.

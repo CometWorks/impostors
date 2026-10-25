@@ -15,7 +15,9 @@ the whitelist, loading the mod in the game does.
   See its docstring.
 - `tests/local.py` checks the client plugin's service for the local player: the test world
   offline, or with `IMP_MODE=lobby` hosted as a lobby game over DirectTransport with a second
-  client joining. See its docstring.
+  client joining. The world doesn't list the mod, so the plugin loads it, and the mod must
+  draw instead of the plugin's copy of the renderer; `IMP_WORLD_MOD=1` lists it in the world.
+  See its docstring.
 - `tests/compare.py` shoots a grid (from a blueprint), an asteroid or a safe zone next to its
   impostor from the 8 cube corners at a list of distances and puts the shots into one sheet,
   like the ones on the [Grids](Grids.md), [Asteroids](Asteroids.md) and
@@ -44,6 +46,10 @@ the whitelist, loading the mod in the game does.
   Workshop mods (built by `worlds/octahedron/build_world.py --seed 2`) and prints, per height,
   the voxel maps the client has, the impostors it got and drew, their quads and the frame's
   billboards. See its docstring.
+- `tests/station.py` looks at the same ring from above North Station, 135 to 231 km away,
+  offline with the client plugin (which loads the mod) or with `IMP_MODE=server` on a
+  Magnetar server with the mod, and prints what each view has and draws, to compare the
+  two. See its docstring.
 - `tests/cache.py` checks the client's disk cache: the client joins, leaves and joins again,
   and the rejoin must get no shapes for the unchanged impostors. Before it, the cache file
   gets entries retention must drop, so it checks the size cap too. `IMP_PLUGIN=1` runs it

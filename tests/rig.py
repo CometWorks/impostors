@@ -32,6 +32,8 @@ Paths, all overridable by environment variables:
     IMP_GAME_CFG              SpaceEngineers.cfg the clients start from
     IMP_REMOTE_REPO           Remote plugin working copy
     IMP_DIRECT_TRANSPORT_REPO DirectTransport working copy
+    IMP_MOD_FOLDER            the mod the worlds list (ImpostorsMod/Mod of this
+                              working copy), for another version of it
 
 IMP_RESOLUTION sets the clients' screen size (1280x720). IMP_DISPLAY=:N gives
 the clients a real window on that X display instead of --headless. Headless
@@ -64,7 +66,7 @@ REPO = Path(__file__).resolve().parent.parent
 TESTS = REPO / "tests"
 PROBE = TESTS / "probe"
 WORKSPACE = Path(os.environ.get("IMP_WORKSPACE", REPO.parents[2]))
-MOD_FOLDER = REPO / "ImpostorsMod" / "Mod"
+MOD_FOLDER = Path(os.environ.get("IMP_MOD_FOLDER", REPO / "ImpostorsMod" / "Mod"))
 PARALLEL = WORKSPACE / "testing" / "parallel-test-work"
 NEW_PULSAR = WORKSPACE / "testing" / "pulsar-dev-instances" / "new-pulsar-instance.sh"
 MAGNETAR = Path(os.environ.get("IMP_MAGNETAR", HOME / ".config/Magnetar"))
@@ -422,6 +424,8 @@ class Client:
         self.log = self.appdata / "SpaceEngineers.log"
         # Local storage of the mod, named after its script assembly
         self.mod_storage = self.appdata / "Storage" / f"{MOD_ID}.sbm_Impostors"
+        # The same for the mod the client plugin loads offline and on a lobby host
+        self.loaded_mod_storage = self.appdata / "Storage" / "local_Impostors_Impostors"
         # The client plugin's copy of the renderer: the global storage, its files prefixed
         self.plugin_storage = self.appdata / "Storage"
 
@@ -488,6 +492,10 @@ class Client:
         (self.mod_storage / "stats.txt").unlink(missing_ok=True)
         # compare.py's last mode would carry over into the next run of any test
         (self.mod_storage / "mode").unlink(missing_ok=True)
+        self.loaded_mod_storage.mkdir(parents=True, exist_ok=True)
+        (self.loaded_mod_storage / "debug").write_text("")
+        (self.loaded_mod_storage / "stats.txt").unlink(missing_ok=True)
+        (self.loaded_mod_storage / "mode").unlink(missing_ok=True)
         (self.plugin_storage / "Impostors.stats.txt").unlink(missing_ok=True)
         (self.plugin_storage / "Impostors.mode").unlink(missing_ok=True)
         if self.plugin:
@@ -537,20 +545,24 @@ class Client:
     def stop(self) -> None:
         stop_process(self.pid_file, str(self.launcher))
 
+    def stats_files(self) -> tuple[Path, ...]:
+        return (
+            self.mod_storage / "stats.txt",
+            self.loaded_mod_storage / "stats.txt",
+            self.plugin_storage / "Impostors.stats.txt",
+        )
+
     def stats(self) -> tuple[dict, dict[int, dict]]:
-        """The renderer's stats.txt, the mod's or else the client plugin's: the totals
-        and each impostor by id"""
-        try:
-            lines = (self.mod_storage / "stats.txt").read_text().splitlines()
-        except FileNotFoundError:
+        """The renderer's stats.txt, the mod's, the one the plugin loaded or else the
+        client plugin's: the totals and each impostor by id"""
+        for path in self.stats_files():
             try:
-                lines = (
-                    (self.plugin_storage / "Impostors.stats.txt")
-                    .read_text()
-                    .splitlines()
-                )
+                lines = path.read_text().splitlines()
+                break
             except FileNotFoundError:
-                return {}, {}
+                continue
+        else:
+            return {}, {}
         parse = lambda line: dict(kv.split("=", 1) for kv in line.split())
         impostors = {}
         for line in lines[1:]:

@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using HarmonyLib;
@@ -66,12 +67,19 @@ public class Plugin : IPlugin, ICommonPlugin
         }
         BillboardPriority.Patch(harmony, Log);
 
-        // Offline and on a lobby host the service serves the local player too, straight to
-        // the renderer
-        ImpostorService.LocalClient = ImpostorRenderer.FromLocalServer;
-        ImpostorRenderer.ToLocalServer = ImpostorService.FromLocalClient;
+        // Offline and on a lobby host the service serves the local player too, through the mod
+        // or the plugin's copy of the renderer
+        LocalMod.Init();
 
         Log.Debug("Successfully loaded");
+    }
+
+    // Pulsar's assets of ImpostorsClient.xml, the mod's folder
+    // ReSharper disable once UnusedMember.Global
+    public void LoadAssets(IReadOnlyDictionary<string, string> assets)
+    {
+        if (assets.TryGetValue("ImpostorsMod", out var folder))
+            LocalMod.Folder = folder;
     }
 
     public void Dispose()

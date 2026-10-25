@@ -1,10 +1,12 @@
 """In-game check of the client plugin's service for the local player (SE-668): a
 headless client with the Impostors client plugin loads the test world without the
-mod, offline or as the host of a lobby game. Prints one PASS or FAIL line per check
+mod, offline or as the host of a lobby game. The plugin loads the mod itself, and
+the mod draws for the local player (SE-670). Prints one PASS or FAIL line per check
 and exits with the number of failures.
 
     uv run --no-project --with httpx --with pillow python tests/local.py
     IMP_MODE=lobby ...   # host a lobby (DirectTransport) and let a second client join
+    IMP_WORLD_MOD=1 ...  # the world lists the mod, the plugin loads no second copy
     IMP_KEEP=1 ...       # leave the game running
 
 Offline the game draws everything within the view distance (15 km), so only the
@@ -26,6 +28,7 @@ import rig  # noqa: E402
 import world  # noqa: E402
 
 LOBBY = os.environ.get("IMP_MODE") == "lobby"
+WORLD_MOD = os.environ.get("IMP_WORLD_MOD") == "1"
 HOST = rig.Client(1, "Alpha", plugin=True)
 JOINER = rig.Client(2, "Beta", plugin=True)
 LOBBY_PORT = rig.SLOT["DS_SERVER_PORT_BASE"]
@@ -103,7 +106,7 @@ def start_host() -> rig.RemoteAPI:
         HOST.name,
         grids=world.GRIDS + (BEYOND,),
         asteroids=world.ASTEROIDS + (ROCK_BEYOND,),
-        mod=False,
+        mod=WORLD_MOD,
     )
     # No --connect: the host loads the world through Remote
     args = HOST.args
@@ -124,6 +127,30 @@ def start_host() -> rig.RemoteAPI:
     return api
 
 
+def check_mod_draws() -> None:
+    """The mod's renderer draws for the local player, the plugin's copy stands down"""
+    log = HOST.log.read_text(errors="replace")
+    check(
+        (
+            "the plugin loads the mod"
+            if not WORLD_MOD
+            else "the plugin loads no second mod"
+        ),
+        ("Loading the Impostors mod from" in log) != WORLD_MOD,
+    )
+    check("the mod draws", "Impostors: the mod draws for the local player" in log)
+    check(
+        "the plugin's renderer stands down",
+        "Impostors: the client plugin draws for the local player" not in log,
+    )
+    stats = HOST.mod_storage if WORLD_MOD else HOST.loaded_mod_storage
+    check("the mod writes the stats", (stats / "stats.txt").exists(), stats)
+    check(
+        "the plugin's renderer writes none",
+        not (HOST.plugin_storage / "Impostors.stats.txt").exists(),
+    )
+
+
 def run_offline() -> None:
     log = lambda: HOST.log.read_text(errors="replace")
     check(
@@ -138,6 +165,7 @@ def run_offline() -> None:
         )
     within = [g.name for g in world.GRIDS + world.ASTEROIDS if g.entity_id in impostors]
     check("nothing within the view distance", not within, within)
+    check_mod_draws()
 
 
 def run_lobby(host_api) -> None:
@@ -154,6 +182,7 @@ def run_lobby(host_api) -> None:
             has_shape(impostors, thing.entity_id),
         )
     check("host has no impostor of Near", world.NEAR.entity_id not in impostors)
+    check_mod_draws()
 
     JOINER.args = lambda _port, args=JOINER.args: [
         *[a for a in args(0) if a not in ("--connect", "127.0.0.1:0")],

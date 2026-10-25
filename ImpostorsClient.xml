@@ -21,8 +21,9 @@
 
   <!-- Optional plugin description. If omitted, this will be the same as the Tooltip. 1000 characters max. -->
   <Description>Shows grids and asteroids beyond the sync distance as impostors on servers running the
-        Impostors server plugin, even when the world doesn't have the Impostors mod. When hosting a
-        lobby, sends impostors to the players who joined.
+        Impostors server plugin, even when the world doesn't have the Impostors mod. In offline games
+        and when hosting a lobby, builds them for you with the Impostors mod, loaded by the plugin
+        if the world doesn't list it, and sends them to the players who joined.
   </Description>
 
   <!-- Only source code in the Directory entries listed in SourceDirectories is compiled. Exclude any test projects or similar. -->
@@ -32,9 +33,8 @@
     <Directory>ImpostorsMod/Mod/Data/Scripts/Impostors</Directory>
   </SourceDirectories>
 
-  <!-- To specify asset files to be copied onto disk, use the AssetFolder tag.
-    <AssetFolder>Project/Assets/</AssetFolder>
-    -->
+  <!-- The Impostors mod, the plugin loads it in offline games and on lobby hosts -->
+  <Asset Name="ImpostorsMod" Path="ImpostorsMod/Mod" />
 
   <!-- To specify a required NuGet package, use either a list of PackageReference tags OR a Config tag.
     <NuGetReferences>
