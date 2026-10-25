@@ -2,7 +2,7 @@
 in (SE-672): the player jumps from far away to next to it, deep inside the
 replication cube, like a ship arriving at 10 km/s. The impostor must stay and be
 drawn until the real entity draws itself, at the level it had from afar, then
-hide and go. Same rig as scenario.py. Prints one PASS or FAIL line per check and
+hide and go. Last the player jumps into the safe zone (SE-703). Same rig as scenario.py. Prints one PASS or FAIL line per check and
 the timings, and exits with the number of failures.
 
     uv run --no-project --with httpx --with pillow python tests/streaming.py
@@ -137,7 +137,26 @@ def run(api):
         )
         if target is ROCK and PLUGIN:
             check("RockFar meshes reported by the client plugin", loaded, log)
+    inside_zone(api)
     print("server:", command(api, "!iprobe stats"))
+
+
+def inside_zone(api):
+    """SE-703: the player arrives inside a spherical zone while its impostor stands in. The
+    impostor draws the finest sphere and the client keeps running."""
+    far = (ZONE.position[0], ZONE.position[1] + 5500, ZONE.position[2])
+    inside = (ZONE.position[0], ZONE.position[1] + 200, ZONE.position[2])
+    lod, samples = arrive(api, ZONE, far, inside)
+    shown = [s[1] for s in samples if s[1] and s[1].get("drawn") == "1"]
+    check(
+        "Zone impostor drawn with the camera inside, finest sphere",
+        bool(shown) and all(i.get("zonequads") == "512" for i in shown),
+        [i.get("zonequads") for i in shown],
+    )
+    tick = lambda: int(CLIENT.stats()[0].get("tick", 0))
+    before = tick()
+    time.sleep(3)
+    check("client still drawing after the zone streamed in", tick() > before)
 
 
 def main():
