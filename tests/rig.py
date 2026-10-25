@@ -240,6 +240,15 @@ def plugin_config(**options) -> str:
     )
 
 
+# The server's cache of built shapes, relative to its data folder. SE-700 moves it to
+# Storage/Impostors/Cache with two-digit subfolders, so look for files with rglob.
+CACHE_FOLDER = Path("ImpostorsCache")
+
+
+def cache_folder(data: Path) -> Path:
+    return data / CACHE_FOLDER
+
+
 def write_build_times(server, target: Path) -> Path | None:
     """The server's build times as a Markdown table (tests/build_times.py)"""
     log = server.game_log()
@@ -378,8 +387,12 @@ class Server:
         )
         deadline = time.monotonic() + timeout
         while "Game ready" not in self.log.read_text(errors="replace"):
+            # run-test.sh execs flock, which execs the server: /proc/<pid>/cmdline can
+            # be unreadable for a moment, so a single miss isn't an exit
             if self.pid() is None:
-                raise RuntimeError(f"The server exited, see {self.log}")
+                time.sleep(2)
+                if self.pid() is None:
+                    raise RuntimeError(f"The server exited, see {self.log}")
             if time.monotonic() > deadline:
                 raise TimeoutError(f"The server did not get ready, see {self.log}")
             time.sleep(2)

@@ -93,6 +93,29 @@ public sealed class ClusterBridge : IShapeCache
     private readonly HashSet<long> removed = new();
     private readonly Dictionary<long, (int version, long input, byte[][] shapes)> shapes = new();
     private DiskShapeCache store;
+    private volatile bool storeOpened;
+    private readonly object storeOpening = new();
+
+    // The WA's store, opened on first use: the WA builds asteroids before its world is
+    // ready, and a store opened only then missed those builds and their lookups
+    private DiskShapeCache Store
+    {
+        get
+        {
+            if (!storeOpened)
+            {
+                lock (storeOpening)
+                {
+                    if (!storeOpened)
+                    {
+                        store = ImpostorService.OpenDiskCache(config, log);
+                        storeOpened = true;
+                    }
+                }
+            }
+            return store;
+        }
+    }
 
     // WA: records loaded from the saved index that no node has reported since, and the index
     // saving state
@@ -494,7 +517,7 @@ public sealed class ClusterBridge : IShapeCache
     public byte[][] Get(long id, long input)
     {
         if (IsWorldAuthority)
-            return store?.Get(id, input);
+            return Store?.Get(id, input);
 
         var result = new List<byte[]>();
         for (var i = 0; i < ImpostorEntry.Lods.Length; i++)
@@ -532,7 +555,7 @@ public sealed class ClusterBridge : IShapeCache
     public void Put(long id, ImpostorKind kind, long input, byte[][] built)
     {
         if (IsWorldAuthority)
-            store?.Put(id, kind, input, built);
+            Store?.Put(id, kind, input, built);
         else if (kind != ImpostorKind.Grid)
             PushShapes(id, ImpostorEntry.Hash(built), input, built).GetAwaiter().GetResult();
     }
@@ -540,7 +563,7 @@ public sealed class ClusterBridge : IShapeCache
     public void Forget(long id)
     {
         if (IsWorldAuthority)
-            store?.Forget(id);
+            Store?.Forget(id);
     }
 
     // ---------------------------------------------------------------------------------------
@@ -605,7 +628,7 @@ public sealed class ClusterBridge : IShapeCache
         merged.Remove(id);
         shapes.Remove(id);
         if (forgetShapes)
-            store?.Forget(id);
+            Store?.Forget(id);
         changed.Remove(id);
         unconfirmed.Remove(id);
         removed.Add(id);
@@ -636,10 +659,10 @@ public sealed class ClusterBridge : IShapeCache
         if (level < cached.shapes.Length && cached.shapes[level] == null)
         {
             cached.shapes[level] = r.Bytes(r.Remaining);
-            if (store != null && cached.shapes.All(s => s != null))
+            if (Store is { } disk && cached.shapes.All(s => s != null))
             {
                 var complete = cached;
-                Task.Run(() => store.Put(id, complete.input, complete.version, complete.shapes));
+                Task.Run(() => disk.Put(id, complete.input, complete.version, complete.shapes));
             }
         }
         shapes[id] = cached;
@@ -654,7 +677,7 @@ public sealed class ClusterBridge : IShapeCache
     {
         if (shapes.TryGetValue(id, out var cached) && match((cached.version, cached.input)))
             return cached;
-        if (store?.Read(id) is not { } stored || !match((stored.version, stored.input)))
+        if (Store?.Read(id) is not { } stored || !match((stored.version, stored.input)))
             return null;
         cached = (stored.version, stored.input, stored.shapes);
         shapes[id] = cached;
@@ -721,7 +744,7 @@ public sealed class ClusterBridge : IShapeCache
             return;
         indexLoaded = true;
 
-        store = ImpostorService.OpenDiskCache(config, log);
+        _ = Store;
         var path = IndexPath;
         if (!File.Exists(path))
             return;
