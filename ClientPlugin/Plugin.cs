@@ -114,6 +114,7 @@ public class Plugin : IPlugin, ICommonPlugin
     {
         PatchHelpers.PatchUpdates();
         BillboardPriority.Update();
+        VoxelReadiness.Update();
 
         // Serves the local player in an offline game, and on a lobby host the players who
         // joined as well
