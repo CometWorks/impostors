@@ -349,31 +349,17 @@ public sealed class ImpostorService : IDisposable
             config.ShapeBytesPerSecond
         );
         var now = MySession.Static.ElapsedPlayTime.TotalSeconds;
-        foreach (var (entry, pixels, zoom, distance) in shown)
+        var fit = FitLevels(viewer, shown, zones, now);
+        for (var i = 0; i < shown.Count; i++)
         {
+            var (entry, _, _, distance) = shown[i];
             entry.Wanted = true;
             entry.Viewed = true;
             if (entry.Shapes == null)
                 continue;
 
             viewer.Sent.TryGetValue(entry.Id, out var sent);
-            var picked = PickLod(pixels * zoom, sent?.Picked ?? 0, entry.Kind);
-            var index = entry.ShapeIndex(picked);
-
-            // A zoomed level only up to half the client's quad budget, about half of a
-            // shape's quads face the camera. The level kept from a zoom stays a while.
-            var normal = zoom > 1 ? entry.ShapeIndex(PickLod(pixels, 0, entry.Kind)) : index;
-            while (index > normal && QuadCount(entry.Shapes[index]) > config.MaxQuadsPerFrame)
-                index--;
-            var keep = index > normal;
-
-            // Inside a safe zone: one level lower and tinted with the zone's color, the zone's
-            // distorting surface shows less of it than of one outside
-            var tint = entry.Kind == ImpostorKind.SafeZone ? default : ZoneTint(zones, entry);
-            if (tint.A != 0 && index > 0)
-                index--;
-            if (sent != null && now < sent.KeepUntil && sent.Version == entry.Version)
-                index = Math.Max(index, entry.ShapeIndex(sent.Lod));
+            var (index, picked, keep, tint) = fit[i];
 
             // The level of the shape at hand, which may be coarser than the wanted one
             var shape = entry.Shapes[index];
@@ -418,6 +404,102 @@ public sealed class ImpostorService : IDisposable
 
         SendStates(viewer.SteamId, states);
         SendShapes(viewer.SteamId, shapes);
+    }
+
+    // The level of each shown impostor. Their quads together stay within the client's
+    // MaxQuadsPerFrame, about half of a shape's quads face the camera: when the wanted levels
+    // are over it, all of them are picked for a smaller screen, so the near ones lose detail
+    // instead of the client dropping the far ones. Over an asteroid ring a few near asteroids
+    // at level 32 would take the whole budget.
+    private List<(int index, byte picked, bool keep, Color tint)> FitLevels(
+        Viewer viewer,
+        List<(ImpostorEntry entry, double pixels, double zoom, double distance)> shown,
+        List<ZoneVolume?> zones,
+        double now
+    )
+    {
+        var tints = shown
+            .Select(c => c.entry.Kind == ImpostorKind.SafeZone ? default : ZoneTint(zones, c.entry))
+            .ToList();
+        var fit = Levels(viewer, shown, tints, now, 1, out var quads);
+        if (quads <= config.MaxQuadsPerFrame)
+            return fit;
+
+        double low = 0,
+            high = 1;
+        var best = Levels(viewer, shown, tints, now, 0, out _);
+        for (var step = 0; step < 12; step++)
+        {
+            var scale = (low + high) / 2;
+            var levels = Levels(viewer, shown, tints, now, scale, out quads);
+            if (quads <= config.MaxQuadsPerFrame)
+            {
+                low = scale;
+                best = levels;
+            }
+            else
+            {
+                high = scale;
+            }
+        }
+        return best;
+    }
+
+    // The levels for a screen this many times the size, without the hysteresis and the
+    // zoom's keep when it is under 1. Quads: the sum of half of each shape's quads, of the
+    // ones in the zoomed view while the player zooms.
+    private List<(int index, byte picked, bool keep, Color tint)> Levels(
+        Viewer viewer,
+        List<(ImpostorEntry entry, double pixels, double zoom, double distance)> shown,
+        List<Color> tints,
+        double now,
+        double scale,
+        out int quads
+    )
+    {
+        var result = new List<(int, byte, bool, Color)>(shown.Count);
+        quads = 0;
+        for (var i = 0; i < shown.Count; i++)
+        {
+            var (entry, pixels, zoom, _) = shown[i];
+            if (entry.Shapes == null)
+            {
+                result.Add((0, 0, false, default));
+                continue;
+            }
+
+            viewer.Sent.TryGetValue(entry.Id, out var sent);
+            var full = scale >= 1;
+            var picked = PickLod(
+                pixels * zoom * scale,
+                full ? sent?.Picked ?? 0 : (byte)0,
+                entry.Kind
+            );
+            var index = entry.ShapeIndex(picked);
+
+            // A zoomed level only up to half the client's quad budget, about half of a
+            // shape's quads face the camera. The level kept from a zoom stays a while.
+            var normal =
+                zoom > 1 ? entry.ShapeIndex(PickLod(pixels * scale, 0, entry.Kind)) : index;
+            while (index > normal && QuadCount(entry.Shapes[index]) > config.MaxQuadsPerFrame)
+                index--;
+            var keep = full && index > normal;
+
+            // Inside a safe zone: one level lower and tinted with the zone's color, the zone's
+            // distorting surface shows less of it than of one outside
+            var tint = tints[i];
+            if (tint.A != 0 && index > 0)
+                index--;
+            if (full && sent != null && now < sent.KeepUntil && sent.Version == entry.Version)
+                index = Math.Max(index, entry.ShapeIndex(sent.Lod));
+
+            // A zoomed client draws only what is in its view. Unzoomed the server doesn't know
+            // the direction, so all of them count.
+            if (viewer.Zoom <= 1 || zoom > 1)
+                quads += QuadCount(entry.Shapes[index]) / 2;
+            result.Add((index, picked, keep, tint));
+        }
+        return result;
     }
 
     // The color of the first enabled safe zone holding the entry's center, none if outside

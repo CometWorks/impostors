@@ -27,6 +27,10 @@ the whitelist, loading the mod in the game does.
   billboards until a frame is over 32768 and reports which billboards the game cuts. With
   the mod only the impostors keep within `MaxQuadsPerFrame` (and the game still cuts other
   billboards); with `IMP_PLUGIN=1` only impostor quads go. See its docstring.
+- `tests/ring.py` flies over the asteroid ring of the "Octahedron - Seed 2" world with its
+  Workshop mods (built by `worlds/octahedron/build_world.py --seed 2`) and prints, per height,
+  the voxel maps the client has, the impostors it got and drew, their quads and the frame's
+  billboards. See its docstring.
 - `tests/cluster_scenario.py` checks far view across a cluster on the cluster's scenario
   bench.
 - `tests/build_times.py` makes a table of the build times from the `Impostor build:` lines of
