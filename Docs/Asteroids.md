@@ -69,7 +69,9 @@ ambient occlusion and the impostor with it.
 
 Counts with ambient occlusion off; with it on they are about 3% higher. Each quad is 10
 bytes, so level 64 is about 150 KB. The server sends one level per impostor
-and player, about one cell per 2.5 pixels of the impostor's size on a 1080p screen.
+and player, about one cell per 2.5 pixels of the impostor's size on a 1080p screen. When a
+player's impostors would be over `MaxQuadsPerFrame` together, as above an asteroid ring, all
+of them get coarser levels.
 
 A zoomed view, like the rifle's iron sight or a camera or telescope mod, shows impostors
 larger than that estimate. The mod tells the server, which sends finer levels for the

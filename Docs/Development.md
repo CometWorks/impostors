@@ -26,10 +26,19 @@ the whitelist, loading the mod in the game does.
 - `tests/zoom.py` checks the finer levels of a zoomed view: the client aims down the rifle's
   iron sight (70° to 40°) on a 1920x1080 screen, and it measures how soon the finer shapes
   arrive, in client ticks.
+- `tests/view_gaps.py` counts the gaps of a moving view: a ring of saved asteroids, zoomed
+  pans across it and a fast spectator flight over it, flown by the client test probe
+  (`camera.txt`). Every second it compares what the mod draws with the asteroids that
+  should be on screen, and says why the missing ones are missing. `IMP_SURVIVAL=1` runs it
+  without creative rights, where only the `View` message tells the server about the camera.
 - `tests/billboards.py` checks the billboard limit: the client test probe adds PostPP and LDR
   billboards until a frame is over 32768 and reports which billboards the game cuts. With
   the mod only the impostors keep within `MaxQuadsPerFrame` (and the game still cuts other
   billboards); with `IMP_PLUGIN=1` only impostor quads go. See its docstring.
+- `tests/ring.py` flies over the asteroid ring of the "Octahedron - Seed 2" world with its
+  Workshop mods (built by `worlds/octahedron/build_world.py --seed 2`) and prints, per height,
+  the voxel maps the client has, the impostors it got and drew, their quads and the frame's
+  billboards. See its docstring.
 - `tests/cluster_scenario.py` checks far view across a cluster on the cluster's scenario
   bench.
 - `tests/build_times.py` makes a table of the build times from the `Impostor build:` lines of

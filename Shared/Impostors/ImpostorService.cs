@@ -1,12 +1,15 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using Impostors;
+using Sandbox.Engine.Multiplayer;
 using Sandbox.Game.Multiplayer;
 using Sandbox.Game.World;
 using Sandbox.ModAPI;
 using Shared.Config;
 using Shared.Logging;
+using VRage.Network;
 using VRageMath;
 
 namespace Shared.Impostors;
@@ -25,8 +28,15 @@ public sealed class ImpostorService : IDisposable
     // Zoomed views beyond this are treated as this much, finer levels give nothing more
     private const double MaxZoom = 32;
 
-    // A finer level sent for a zoomed view stays this long after the zoom ended, seconds
-    private const double ZoomKeepSeconds = 30;
+    // A turning zoomed view gets a margin of what it turns in this many seconds
+    private const double TurnLeadSeconds = 0.5;
+
+    // A new impostor that comes while the player is out of shape credit gets a level of at most
+    // this many bytes first, the finer one follows once the credit is paid off. Turning a zoomed
+    // view over an asteroid ring brings dozens of new ones at once, at their finest levels
+    // (about 150 KB each) that was minutes of debt, and no other impostor got a finer level
+    // in the meantime.
+    private const int DebtShapeBytes = 2048;
 
     private static ImpostorService instance;
     private static MySession session;
@@ -48,6 +58,26 @@ public sealed class ImpostorService : IDisposable
         public readonly bool Local;
         public readonly Dictionary<long, Sent> Sent = new();
 
+        // The shapes this player's client has, by id, level and version
+        public readonly ShapeStore<bool> Store = new();
+
+        // Where the server picked for this player last
+        public Vector3D Eye;
+
+        // The player's spectator camera, from its View messages while it may spectate
+        public Vector3D? Camera;
+
+        // Counted for the log line once a minute
+        public int Picks;
+        public long PickTicks;
+        public long MaxPickTicks;
+        public int Shapes;
+        public long ShapeBytes;
+        public int States;
+        public int Removed;
+        public int Restored;
+        public int MaxWaiting;
+
         // Shape bytes this player may still get, negative after a shape larger than what was
         // left: the next seconds pay that off
         public int ShapeCredit;
@@ -59,6 +89,14 @@ public sealed class ImpostorService : IDisposable
         public double Zoom = 1;
         public Vector3D Forward;
         public double HalfAngle;
+        public int ViewTick;
+
+        // Added to HalfAngle while the view keeps turning: the client sends a View at least
+        // every 10 ticks then
+        public double TurnMargin;
+
+        // Impostors whose new level waits for shape credit at the last pick
+        public int Waiting;
 
         // A View message arrived, the impostors are picked again on the next tick
         public bool Dirty;
@@ -73,7 +111,11 @@ public sealed class ImpostorService : IDisposable
     private sealed class Sent
     {
         public int Version;
+
+        // The level of the shape the client draws, and the level of the last state, which is a
+        // finer one while its shape waits for shape credit
         public byte Lod;
+        public byte StateLod;
 
         // The level picked before a safe zone lowered it, for the hysteresis
         public byte Picked;
@@ -81,9 +123,6 @@ public sealed class ImpostorService : IDisposable
         public Vector3D Position;
         public Quaternion Orientation;
         public Vector3 Velocity;
-
-        // A finer level sent for a zoomed view is not replaced by a coarser one before this
-        public double KeepUntil;
     }
 
     // Extra sources registered by the plugin, for example the cluster bridge
@@ -212,10 +251,44 @@ public sealed class ImpostorService : IDisposable
         }
 
         registry.Update(now, config.RebuildSeconds, config.RefreshSeconds);
+
+        if (tick % 3600 == 0)
+        {
+            foreach (var viewer in viewers.Values)
+                LogViewer(viewer);
+        }
+    }
+
+    // What a player got in the last minute: picks and their time on the game thread, shapes,
+    // states, removals, the levels switched to with a state only as the client had their
+    // shapes, and the most impostors that waited for shape credit at once
+    private void LogViewer(Viewer viewer)
+    {
+        if (viewer.Picks == 0)
+            return;
+        var ms = 1000.0 / Stopwatch.Frequency;
+        log.Info(
+            $"Impostors of player {viewer.SteamId} in the last minute: {viewer.Picks} picks, "
+                + $"{viewer.PickTicks * ms / viewer.Picks:0.00} ms average, {viewer.MaxPickTicks * ms:0.00} ms most, "
+                + $"{viewer.Shapes} shapes ({viewer.ShapeBytes / 1024} KB), {viewer.States} states, "
+                + $"{viewer.Removed} removed, {viewer.Restored} from the client's store "
+                + $"({viewer.Store.Count} stored, {viewer.Store.Bytes / 1024} KB), {viewer.MaxWaiting} waiting at most, "
+                + $"{viewer.Sent.Count} shown"
+        );
+        viewer.Picks = 0;
+        viewer.PickTicks = 0;
+        viewer.MaxPickTicks = 0;
+        viewer.Shapes = 0;
+        viewer.ShapeBytes = 0;
+        viewer.States = 0;
+        viewer.Removed = 0;
+        viewer.Restored = 0;
+        viewer.MaxWaiting = 0;
     }
 
     private void TryUpdateViewer(Viewer viewer)
     {
+        var start = Stopwatch.GetTimestamp();
         try
         {
             UpdateViewer(viewer);
@@ -224,6 +297,10 @@ public sealed class ImpostorService : IDisposable
         {
             log.Error(e, $"Failed to update the impostors of player {viewer.SteamId}");
         }
+        var elapsed = Stopwatch.GetTimestamp() - start;
+        viewer.Picks++;
+        viewer.PickTicks += elapsed;
+        viewer.MaxPickTicks = Math.Max(viewer.MaxPickTicks, elapsed);
     }
 
     private void OnMessage(ushort channel, byte[] message, ulong sender, bool fromServer)
@@ -254,12 +331,16 @@ public sealed class ImpostorService : IDisposable
             return;
         }
 
-        if (!viewers.ContainsKey(sender))
+        // A client without a Welcome yet has nothing of what we may have sent before, like after
+        // rejoining before the player was gone here
+        var fresh = message.Length > 2 && message[2] == 1;
+        if (!viewers.ContainsKey(sender) || fresh)
         {
+            if (!viewers.ContainsKey(sender))
+                log.Info(
+                    local ? "The local player draws impostors" : $"Player {sender} draws impostors"
+                );
             viewers[sender] = new Viewer(sender, local);
-            log.Info(
-                local ? "The local player draws impostors" : $"Player {sender} draws impostors"
-            );
         }
 
         writer.Clear();
@@ -272,15 +353,28 @@ public sealed class ImpostorService : IDisposable
 
     private void OnView(ByteReader r, int length, ulong sender)
     {
-        if (length < 21 || !viewers.TryGetValue(sender, out var viewer))
+        if (length < 46 || !viewers.TryGetValue(sender, out var viewer))
             return;
 
         var fov = r.Float();
         var width = r.UShort();
         var height = r.UShort();
         var forward = new Vector3D(r.Float(), r.Float(), r.Float());
+        var spectator = r.Byte() == 1;
+        var camera = new Vector3D(r.Double(), r.Double(), r.Double());
         if (!(fov > 0.001f && fov < 3f) || width == 0 || height == 0 || !forward.IsValid())
             return;
+
+        // Only from players the game lets spectate, any other could look around the world
+        viewer.Camera =
+            spectator
+            && camera.IsValid()
+            && (
+                MySession.Static.Settings.EnableSpectator
+                || MySession.Static.HasPlayerSpectatorRights(sender)
+            )
+                ? camera
+                : null;
 
         var zoom = Protocol.Zoom(fov, height);
         viewer.Dirty = true;
@@ -290,17 +384,31 @@ public sealed class ImpostorService : IDisposable
             return;
         }
 
+        // How fast the view turns, from the last View message: a fast pan brings things in
+        // before the next View and pick could
+        forward = Vector3D.Normalize(forward);
+        var turn = 0.0;
+        if (viewer.Zoom > 1 && tick > viewer.ViewTick)
+        {
+            var angle = Math.Acos(Math.Max(-1, Math.Min(1, Vector3D.Dot(forward, viewer.Forward))));
+            turn = angle * 60 / (tick - viewer.ViewTick);
+        }
+        viewer.ViewTick = tick;
         viewer.Zoom = Math.Min(zoom, MaxZoom);
-        viewer.Forward = Vector3D.Normalize(forward);
-        viewer.HalfAngle = Math.Atan(
-            Math.Tan(fov / 2) * Math.Sqrt(1 + (double)width * width / height / height)
-        );
+        viewer.Forward = forward;
+
+        // The client reports a turn of an eighth of its field of view, the margin covers that
+        // and what a turning view brings in within TurnLeadSeconds, a field of view at most
+        viewer.HalfAngle =
+            Math.Atan(Math.Tan(fov / 2) * Math.Sqrt(1 + (double)width * width / height / height))
+            + fov / 4;
+        viewer.TurnMargin = Math.Min(turn * TurnLeadSeconds, fov);
     }
 
     private void UpdateViewer(Viewer viewer)
     {
         viewer.Dirty = false;
-        Vector3D eye;
+        Vector3D? center;
         double drawn = 0;
         if (viewer.Local)
         {
@@ -309,7 +417,7 @@ public sealed class ImpostorService : IDisposable
             var camera = MySector.MainCamera;
             if (camera == null)
                 return;
-            eye = camera.Position;
+            center = viewer.Eye = camera.Position;
             drawn = camera.FarPlaneDistance;
         }
         else
@@ -317,24 +425,24 @@ public sealed class ImpostorService : IDisposable
             if (!MySession.Static.Players.TryGetPlayerBySteamId(viewer.SteamId, out var player))
                 return;
 
-            var controlled = player.Controller?.ControlledEntity?.Entity ?? player.Character;
-            if (controlled == null)
+            // The game replicates around this point, the impostors are sized for the camera
+            center = ReplicationCenter(player);
+            if (center == null)
                 return;
-
-            eye = controlled.GetTopMostParent().PositionComp.WorldAABB.Center;
+            viewer.Eye = viewer.Camera ?? center.Value;
         }
 
         var settings = MySession.Static.Settings;
         var range = config.MaxDistance > 0 ? config.MaxDistance : settings.ViewDistance;
         var half = Math.Max(0, settings.SyncDistance - config.ReplicationMargin);
-        var replicated = new BoundingBoxD(eye - half, eye + half);
+        var replicated = new BoundingBoxD(center.Value - half, center.Value + half);
 
         // Saved and edited asteroids replicate farther: MyVoxelReplicable inflates their AABB
         var voxelHalf = Math.Max(
             half,
             settings.ViewDistance / Math.Sqrt(3) - config.ReplicationMargin
         );
-        var voxelReplicated = new BoundingBoxD(eye - voxelHalf, eye + voxelHalf);
+        var voxelReplicated = new BoundingBoxD(center.Value - voxelHalf, center.Value + voxelHalf);
 
         var zones = registry.Entries.Select(ZoneVolume.Of).Where(z => z.HasValue).ToList();
 
@@ -350,7 +458,10 @@ public sealed class ImpostorService : IDisposable
             {
                 var aabb = entry.WorldAabb;
                 if (
-                    Vector3D.DistanceSquared(Vector3D.Clamp(eye, aabb.Min, aabb.Max), eye)
+                    Vector3D.DistanceSquared(
+                        Vector3D.Clamp(viewer.Eye, aabb.Min, aabb.Max),
+                        viewer.Eye
+                    )
                     <= drawn * drawn
                 )
                     continue;
@@ -364,13 +475,14 @@ public sealed class ImpostorService : IDisposable
                 continue;
 
             var radius = entry.WorldAabb.HalfExtents.Length();
-            var distance = Vector3D.Distance(eye, entry.WorldAabb.Center);
+            var distance = Vector3D.Distance(viewer.Eye, entry.WorldAabb.Center);
             if (distance - radius > range)
                 continue;
 
             var pixels = radius / Math.Max(distance, 1) * PixelsPerRadian;
             var zoom =
-                viewer.Zoom > 1 && InView(viewer, entry.WorldAabb.Center - eye, distance, radius)
+                viewer.Zoom > 1
+                && InView(viewer, entry.WorldAabb.Center - viewer.Eye, distance, radius)
                     ? viewer.Zoom
                     : 1;
             if (2 * pixels * zoom < config.MinPixels)
@@ -392,6 +504,8 @@ public sealed class ImpostorService : IDisposable
         foreach (var id in removed)
             viewer.Sent.Remove(id);
         SendRemove(viewer.SteamId, removed);
+        viewer.Removed += removed.Count;
+        viewer.Waiting = 0;
 
         var states = new List<ImpostorState>();
         var shapes = new List<(ImpostorEntry entry, byte[] shape)>();
@@ -402,32 +516,33 @@ public sealed class ImpostorService : IDisposable
             viewer.ShapeCredit + config.ShapeBytesPerSecond * elapsed / 60,
             config.ShapeBytesPerSecond
         );
-        var now = MySession.Static.ElapsedPlayTime.TotalSeconds;
-        foreach (var (entry, pixels, zoom, distance) in shown)
+
+        // The local player's shapes don't go over the network, they never wait
+        if (viewer.Local)
+            viewer.ShapeCredit = int.MaxValue;
+        var fit = FitLevels(viewer, shown, zones);
+        for (var i = 0; i < shown.Count; i++)
         {
+            var (entry, _, _, distance) = shown[i];
             entry.Wanted = true;
             entry.Viewed = true;
             if (entry.Shapes == null)
                 continue;
 
             viewer.Sent.TryGetValue(entry.Id, out var sent);
-            var picked = PickLod(pixels * zoom, sent?.Picked ?? 0, entry.Kind);
-            var index = entry.ShapeIndex(picked);
-
-            // A zoomed level only up to half the client's quad budget, about half of a
-            // shape's quads face the camera. The level kept from a zoom stays a while.
-            var normal = zoom > 1 ? entry.ShapeIndex(PickLod(pixels, 0, entry.Kind)) : index;
-            while (index > normal && QuadCount(entry.Shapes[index]) > config.MaxQuadsPerFrame)
-                index--;
-            var keep = index > normal;
-
-            // Inside a safe zone: one level lower and tinted with the zone's color, the zone's
-            // distorting surface shows less of it than of one outside
-            var tint = entry.Kind == ImpostorKind.SafeZone ? default : ZoneTint(zones, entry);
-            if (tint.A != 0 && index > 0)
-                index--;
-            if (sent != null && now < sent.KeepUntil && sent.Version == entry.Version)
-                index = Math.Max(index, entry.ShapeIndex(sent.Lod));
+            var (index, picked, tint) = fit[i];
+            // A new impostor gets a level the client has, or a small one while the player is
+            // in debt
+            if (sent == null && viewer.ShapeCredit <= 0 && !Stored(viewer, entry, index))
+            {
+                var small = index;
+                while (small > 0 && entry.Shapes[small].Length > DebtShapeBytes)
+                    small--;
+                var stored = index;
+                while (stored > small && !Stored(viewer, entry, stored))
+                    stored--;
+                index = stored;
+            }
 
             // The level of the shape at hand, which may be coarser than the wanted one
             var shape = entry.Shapes[index];
@@ -437,22 +552,44 @@ public sealed class ImpostorService : IDisposable
 
             if (sent == null || sent.Version != entry.Version || sent.Lod != lod)
             {
-                // New impostors don't wait, the rest wait while the player is in debt. A shape
-                // larger than a second's worth still goes out, or it would never be sent.
-                // The local player's shapes don't go over the network.
-                if (viewer.ShapeCredit <= 0 && sent != null && !viewer.Local)
+                if (Stored(viewer, entry, index))
+                {
+                    // The client has this shape already, the state switches to it
+                    viewer.Restored++;
+                }
+                else if (viewer.ShapeCredit <= 0 && sent != null)
+                {
+                    // New impostors don't wait, the rest wait while the player is in debt. A
+                    // shape larger than a second's worth still goes out, or it would never be
+                    // sent. The state names the wanted level once, so the client can tell it
+                    // waits; it keeps drawing the shape it has.
+                    viewer.Waiting++;
+                    if (sent.StateLod != lod && sent.Version == entry.Version)
+                    {
+                        var waiting = entry.State(lod);
+                        waiting.Tint = sent.Tint;
+                        waiting.Position = sent.Position;
+                        waiting.Orientation = sent.Orientation;
+                        waiting.Velocity = sent.Velocity;
+                        sent.StateLod = lod;
+                        states.Add(waiting);
+                    }
                     continue;
-                viewer.ShapeCredit -= shape.Length;
+                }
+                else
+                {
+                    viewer.ShapeCredit -= shape.Length;
+                    viewer.Shapes++;
+                    viewer.ShapeBytes += shape.Length;
+                    shapes.Add((entry, shape));
+                }
 
                 // The states go first, so the client knows the version a shape belongs to
                 states.Add(state);
-                shapes.Add((entry, shape));
                 viewer.Sent[entry.Id] = sent = new Sent();
             }
             else if (!Moved(sent, state, distance) && sent.Tint == tint)
             {
-                if (keep)
-                    sent.KeepUntil = now + ZoomKeepSeconds;
                 continue;
             }
             else
@@ -462,17 +599,135 @@ public sealed class ImpostorService : IDisposable
 
             sent.Version = entry.Version;
             sent.Lod = lod;
+            sent.StateLod = lod;
             sent.Picked = picked;
             sent.Tint = tint;
             sent.Position = state.Position;
             sent.Orientation = state.Orientation;
             sent.Velocity = state.Velocity;
-            if (keep)
-                sent.KeepUntil = now + ZoomKeepSeconds;
         }
 
+        // After the lookups above and in the order of the ShapeData messages, as the client
+        // adds them
+        foreach (var (entry, shape) in shapes)
+            viewer.Store.Add(entry.Id, shape[0], entry.Version, shape.Length, true);
+
+        viewer.States += states.Count;
+        viewer.MaxWaiting = Math.Max(viewer.MaxWaiting, viewer.Waiting);
         SendStates(viewer.SteamId, states);
         SendShapes(viewer.SteamId, shapes);
+    }
+
+    // The client has this level of the entry's current version
+    private static bool Stored(Viewer viewer, ImpostorEntry entry, int index)
+    {
+        return viewer.Store.TryGet(entry.Id, entry.Shapes[index][0], entry.Version, out _);
+    }
+
+    // Where the game replicates entities to the player: its controlled entity, or the spectator
+    // camera of a player with creative rights (MyClientState), which can be far from the
+    // character. Without a client state yet, the controlled entity.
+    private static Vector3D? ReplicationCenter(MyPlayer player)
+    {
+        var server = MyMultiplayer.ReplicationLayer as MyReplicationServer;
+        var position = server?.GetClientData(new Endpoint(player.Id.SteamId, 0))?.Position;
+        if (position.HasValue && position.Value != Vector3D.Zero)
+            return position.Value;
+
+        var controlled = player.Controller?.ControlledEntity?.Entity ?? player.Character;
+        return controlled?.GetTopMostParent().PositionComp.WorldAABB.Center;
+    }
+
+    // The level of each shown impostor. Their quads together stay within the client's
+    // MaxQuadsPerFrame, about half of a shape's quads face the camera: when the wanted levels
+    // are over it, all of them are picked for a smaller screen, so the near ones lose detail
+    // instead of the client dropping the far ones. Over an asteroid ring a few near asteroids
+    // at level 32 would take the whole budget.
+    private List<(int index, byte picked, Color tint)> FitLevels(
+        Viewer viewer,
+        List<(ImpostorEntry entry, double pixels, double zoom, double distance)> shown,
+        List<ZoneVolume?> zones
+    )
+    {
+        var tints = shown
+            .Select(c => c.entry.Kind == ImpostorKind.SafeZone ? default : ZoneTint(zones, c.entry))
+            .ToList();
+        var fit = Levels(viewer, shown, tints, 1, out var quads);
+        if (quads <= config.MaxQuadsPerFrame)
+            return fit;
+
+        double low = 0,
+            high = 1;
+        var best = Levels(viewer, shown, tints, 0, out _);
+        for (var step = 0; step < 12; step++)
+        {
+            var scale = (low + high) / 2;
+            var levels = Levels(viewer, shown, tints, scale, out quads);
+            if (quads <= config.MaxQuadsPerFrame)
+            {
+                low = scale;
+                best = levels;
+            }
+            else
+            {
+                high = scale;
+            }
+        }
+        return best;
+    }
+
+    // The levels for a screen this many times the size, without the hysteresis when it is
+    // under 1. Quads: the sum of half of each shape's quads, of the
+    // ones in the zoomed view while the player zooms.
+    private List<(int index, byte picked, Color tint)> Levels(
+        Viewer viewer,
+        List<(ImpostorEntry entry, double pixels, double zoom, double distance)> shown,
+        List<Color> tints,
+        double scale,
+        out int quads
+    )
+    {
+        var result = new List<(int, byte, Color)>(shown.Count);
+        quads = 0;
+        for (var i = 0; i < shown.Count; i++)
+        {
+            var (entry, pixels, zoom, _) = shown[i];
+            if (entry.Shapes == null)
+            {
+                result.Add((0, 0, default));
+                continue;
+            }
+
+            viewer.Sent.TryGetValue(entry.Id, out var sent);
+            var full = scale >= 1;
+            var picked = PickLod(
+                pixels * zoom * scale,
+                full ? sent?.Picked ?? 0 : (byte)0,
+                entry.Kind
+            );
+            var index = entry.ShapeIndex(picked);
+
+            // A zoomed level only up to half the client's quad budget, about half of a
+            // shape's quads face the camera. After the zoom the client still has it in its
+            // shape store, so zooming in again costs a state only.
+            var normal =
+                zoom > 1 ? entry.ShapeIndex(PickLod(pixels * scale, 0, entry.Kind)) : index;
+            while (index > normal && QuadCount(entry.Shapes[index]) > config.MaxQuadsPerFrame)
+                index--;
+
+            // Inside a safe zone: one level lower and tinted with the zone's color, the zone's
+            // distorting surface shows less of it than of one outside
+            var tint = tints[i];
+            if (tint.A != 0 && index > 0)
+                index--;
+
+            // A zoomed client draws only what is in its view. Unzoomed the server doesn't know
+            // the direction, so all of them count.
+            if (viewer.Zoom <= 1 || zoom > 1)
+                quads += QuadCount(entry.Shapes[index]) / 2;
+            result.Add((index, picked, tint));
+        }
+        return result;
     }
 
     // The color of the first enabled safe zone holding the entry's center, none if outside
@@ -492,13 +747,13 @@ public sealed class ImpostorService : IDisposable
 
     // Inside the zoomed view: the angle off its direction, less the impostor's own angular
     // radius, is within the view's half diagonal
-    private static bool InView(Viewer viewer, Vector3D toCenter, double distance, double radius)
+    private bool InView(Viewer viewer, Vector3D toCenter, double distance, double radius)
     {
         if (radius >= distance)
             return true;
         var cos = Vector3D.Dot(toCenter, viewer.Forward) / distance;
         var angle = Math.Acos(Math.Max(-1, Math.Min(1, cos))) - Math.Asin(radius / distance);
-        return angle <= viewer.HalfAngle;
+        return angle <= viewer.HalfAngle + (tick - viewer.ViewTick <= 30 ? viewer.TurnMargin : 0);
     }
 
     private static int QuadCount(byte[] shape)
