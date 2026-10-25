@@ -45,7 +45,8 @@ TARGETS = (
     (
         ZONE,
         (ZONE.position[0], ZONE.position[1] + 5500, ZONE.position[2]),
-        (ZONE.position[0], ZONE.position[1] + 700, ZONE.position[2]),
+        # Outside its bounding sphere, 866 m: from inside the impostor isn't drawn
+        (ZONE.position[0], ZONE.position[1] + 950, ZONE.position[2]),
     ),
     # Saved asteroids replicate to 8.66 km per axis: from HOME it is 11 km away
     (ROCK, world.HOME, (ROCK.center[0] + 1000, ROCK.center[1], ROCK.center[2])),
@@ -142,21 +143,26 @@ def run(api):
 
 
 def inside_zone(api):
-    """SE-703: the player arrives inside a spherical zone while its impostor stands in. The
-    impostor draws the finest sphere and the client keeps running."""
+    """SE-703: the player arrives inside a spherical zone while its impostor stands in. With
+    the camera inside its bounding sphere the impostor isn't drawn, and the client keeps
+    running."""
     far = (ZONE.position[0], ZONE.position[1] + 5500, ZONE.position[2])
     inside = (ZONE.position[0], ZONE.position[1] + 200, ZONE.position[2])
     lod, samples = arrive(api, ZONE, far, inside)
-    shown = [s[1] for s in samples if s[1] and s[1].get("drawn") == "1"]
+    if not samples:
+        return
+    # Only stats written after the jump: a client that crashed leaves its last ones
+    tick = lambda s: int(s[2].get("tick", 0))
+    fresh = [s[1] for s in samples if tick(s) > tick(samples[0])]
     check(
-        "Zone impostor drawn with the camera inside, finest sphere",
-        bool(shown) and all(i.get("zonequads") == "512" for i in shown),
-        [i.get("zonequads") for i in shown],
+        "Zone impostor not drawn with the camera inside",
+        bool(fresh) and all(i is None or i.get("drawn") != "1" for i in fresh),
+        [i.get("drawn") if i else "removed" for i in fresh],
     )
-    tick = lambda: int(CLIENT.stats()[0].get("tick", 0))
-    before = tick()
+    now = lambda: int(CLIENT.stats()[0].get("tick", 0))
+    before = now()
     time.sleep(3)
-    check("client still drawing after the zone streamed in", tick() > before)
+    check("client still drawing after the zone streamed in", now() > before)
 
 
 def main():

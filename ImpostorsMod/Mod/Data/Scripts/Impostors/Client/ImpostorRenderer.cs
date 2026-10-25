@@ -959,11 +959,17 @@ namespace Impostors
                 if (impostor.Shape == null || impostor.State.Id == 0)
                     continue;
 
-                if (!InView(camera, view, impostor.State.Position + shift, impostor.State.Radius))
+                var center = impostor.State.Position + shift;
+                var radius = impostor.State.Radius;
+                if (!InView(camera, view, center, radius))
                 {
                     culled++;
                     continue;
                 }
+
+                // Never with the camera inside its bounding sphere
+                if (Vector3D.DistanceSquared(eye, center) <= (double)radius * radius)
+                    continue;
 
                 // The real entity draws itself. Until then, while a grid or safe zone is still
                 // streaming in, the impostor stands in for it. Locally every entity is real, the
