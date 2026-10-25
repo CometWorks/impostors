@@ -133,6 +133,10 @@ namespace Impostors
         private long readyTicks;
         private int readySent;
 
+        // Debug: the last impostors that turned ready, as id:drawable tick:ready tick:whether
+        // the client plugin reported the asteroid's meshes
+        private readonly List<string> readyLog = new List<string>();
+
         public override void LoadData()
         {
             if (MyAPIGateway.Utilities.IsDedicated || MyAPIGateway.Multiplayer.IsServer)
@@ -278,6 +282,20 @@ namespace Impostors
                 if (ready == impostor.Ready)
                     continue;
                 impostor.Ready = ready;
+                if (debug && ready)
+                {
+                    if (readyLog.Count == 8)
+                        readyLog.RemoveAt(0);
+                    readyLog.Add(
+                        id
+                            + ":"
+                            + impostor.DrawableTick
+                            + ":"
+                            + tick
+                            + ":"
+                            + (loadedVoxels.Contains(id) ? 1 : 0)
+                    );
+                }
                 (ready ? readyIds : unreadyIds).Add(id);
             }
             readySent += readyIds.Count;
@@ -436,6 +454,8 @@ namespace Impostors
                     + standIns
                     + " readysent="
                     + readySent
+                    + " readylog="
+                    + string.Join(",", readyLog)
                     + " readyus="
                     + (readyTicks * 1000000 / MyGameTimer.Frequency)
                     + " sun="

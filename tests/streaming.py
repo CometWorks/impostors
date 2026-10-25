@@ -26,7 +26,8 @@ from scenario import CLIENT, SERVER, check, command, drawn, wait_stats  # noqa: 
 import rig  # noqa: E402
 import scenario  # noqa: E402
 
-if os.environ.get("IMP_WITH_PLUGIN") == "1":
+PLUGIN = os.environ.get("IMP_WITH_PLUGIN") == "1"
+if PLUGIN:
     # The world keeps the mod: the plugin's copy of the renderer stands down
     CLIENT = scenario.CLIENT = rig.Client(1, "Alpha", plugin=True)
 
@@ -58,11 +59,10 @@ def arrive(api, target, far, near, timeout=75.0):
     api.character_teleport(*far)
     totals, impostors = wait_stats(lambda i: drawn(i, target), 120)
     if not check(f"{target.name} impostor from afar", drawn(impostors, target)):
-        return None, [], 0
+        return None, []
     time.sleep(5)  # finer levels for the new distance
     lod = CLIENT.stats()[1].get(target.entity_id, {}).get("lod")
 
-    reported = int(CLIENT.stats()[0].get("readysent", 0))
     api.character_teleport(*near)
     start = time.monotonic()
     samples = []
@@ -73,59 +73,66 @@ def arrive(api, target, far, near, timeout=75.0):
         if i is None:
             break
         time.sleep(0.5)
-    return lod, samples, reported
+    return lod, samples
 
 
-def first(samples, predicate):
-    return next((t for t, i, _ in samples if predicate(i)), None)
+def ready_log(totals: dict, entity_id: int):
+    """The client's ticks when the target's real entity became drawable and when it counted
+    as drawing, and whether the client plugin reported an asteroid's meshes"""
+    for entry in totals.get("readylog", "").split(","):
+        if entry.startswith(f"{entity_id}:"):
+            _, drawable, ready, loaded = entry.split(":")
+            return int(drawable), int(ready), loaded == "1"
+    return None
 
 
 def run(api):
     for target, far, near in TARGETS:
-        lod, samples, reported = arrive(api, target, far, near)
+        lod, samples = arrive(api, target, far, near)
         if not samples:
             continue
         scenario.SHOTS.mkdir(parents=True, exist_ok=True)
         (scenario.SHOTS / f"streaming-{target.name}.json").write_text(
-            json.dumps([(t, i, totals) for t, i, totals in samples], indent=1)
+            json.dumps(samples, indent=1)
         )
-        real = first(samples, lambda i: i and i.get("real") == "1")
-        gone = first(samples, lambda i: i is None)
-        ready = first(samples, lambda i: i and i.get("ready") == "1")
-        if ready is None and gone is not None:
-            # Ready and removed between two stats: the Ready id went out before the removal
-            if real is not None and int(samples[-1][2].get("readysent", 0)) > reported:
-                ready = gone
-        held = [i for t, i, _ in samples if ready is None or t < ready]
+        # Client ticks, from the first stats after the jump (up to a second late)
+        jump = int(samples[0][2].get("tick", 0))
+        log = ready_log(samples[-1][2], target.entity_id)
+        drawable, ready, loaded = log or (None, None, False)
+        tick = lambda s: int(s[2].get("tick", 0))
+        gone = next((tick(s) for s in samples if s[1] is None), None)
+        seconds = lambda t: None if t is None else round((t - jump) / 60, 2)
         print(
-            f"{target.name}: level from afar {lod}, real entity at {real} s, "
-            f"drawing at {ready} s, impostor removed at {gone} s, "
-            f"stand-ins seen {max(int(s[2].get('standins', 0)) for s in samples)}, "
+            f"{target.name}: level from afar {lod}, drawable at {seconds(drawable)} s, "
+            f"drawing at {seconds(ready)} s, impostor removed by {seconds(gone)} s, "
+            f"meshes reported {loaded}, "
             f"readyus {max(int(s[2].get('readyus', 0)) for s in samples)}"
         )
+        before = [s[1] for s in samples if ready is None or tick(s) < ready]
+        after = [s[1] for s in samples if ready is not None and tick(s) >= ready + 10]
         check(
             f"{target.name} impostor kept until the real one draws",
-            ready is not None and all(i is not None for i in held),
-            f"removed at {gone} s, ready at {ready} s",
+            ready is not None and all(i is not None for i in before),
+            f"ready at tick {ready}, removed by {gone}",
         )
         check(
             f"{target.name} impostor drawn meanwhile",
-            all(i and i.get("drawn") == "1" for i in held),
-            [i.get("drawn") if i else "removed" for i in held],
+            all(i and i.get("drawn") == "1" for i in before),
+            [i.get("drawn") if i else "removed" for i in before],
         )
         check(
             f"{target.name} level from afar kept",
-            all(i and i.get("lod") == lod for i in held),
-            [i.get("lod") if i else "removed" for i in held],
+            all(i and i.get("lod") == lod for i in before),
+            [i.get("lod") if i else "removed" for i in before],
         )
-        after = [i for t, i, _ in samples if ready is not None and t >= ready]
         check(
             f"{target.name} impostor hidden, then removed",
-            bool(after)
-            and all(i is None or i.get("drawn") == "0" for i in after)
-            and after[-1] is None,
+            samples[-1][1] is None
+            and all(i is None or i.get("drawn") == "0" for i in after),
             after[-3:],
         )
+        if target is ROCK and PLUGIN:
+            check("RockFar meshes reported by the client plugin", loaded, log)
     print("server:", command(api, "!iprobe stats"))
 
 
