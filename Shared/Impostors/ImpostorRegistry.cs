@@ -92,7 +92,7 @@ public sealed class ImpostorRegistry
     // Drops the cached shapes of deleted entities
     private void ForgetDeleted()
     {
-        foreach (var (id, since) in gone.Where(g => scan - g.Value >= ForgetScans).ToList())
+        foreach (var (id, _) in gone.Where(g => scan - g.Value >= ForgetScans).ToList())
         {
             gone.Remove(id);
             if (!entries.ContainsKey(id) && !MyEntities.EntityExists(id))
