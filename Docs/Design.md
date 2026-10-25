@@ -153,7 +153,8 @@ second at most. For that player the server then:
   extra picks don't raise the bandwidth.
 - takes a zoomed level only while its shape has at most `MaxQuadsPerFrame` quads, about
   half of them facing the camera, so one zoomed impostor can't take the client's whole
-  budget.
+  budget, and while all of the zoomed ones fit into three quarters of it (see "Moving
+  views").
 - keeps a level sent for the zoom for 30 seconds after it was last wanted, so looking
   through the zoom again soon costs nothing.
 
@@ -175,10 +176,15 @@ What the server and the client do about it:
   ones start small while the player is in debt, and the finer level follows like any other.
 - Waiting: when a finer level waits for credit, the server sends a state naming it once. The
   client keeps drawing the shape it has; `stats.txt` counts these (`waiting`).
+- Quad budget: the impostors inside a zoomed view share three quarters of the client's
+  `MaxQuadsPerFrame` with their finer levels, the largest on screen first (half of a shape's
+  quads counted, those facing the camera). Over a ring, two or three asteroids at level 64
+  took the whole budget and the client left out the rest of the view.
 - Culling: the client draws only the impostors whose bounding sphere is inside the view cone
   (around its diagonal), before it counts the quad budget. Off-screen quads took billboards
   from the ones in view, and a zoomed view keeps fine levels around it for 30 s. An impostor
-  over the budget no longer stops the ones behind it.
+  that doesn't fit into the budget is drawn at the finest coarser level the client has that
+  fits, or left out without stopping the ones behind it.
 - The zoomed cone the server uses is a quarter of the field of view wider than the view,
   which covers the eighth of a turn before the client reports the view again.
 - Eye: the server picks from where the game replicates to the player (`MyClientState`): the
