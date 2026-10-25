@@ -26,10 +26,6 @@ public sealed class ImpostorService : IDisposable
     // Zoomed views beyond this are treated as this much, finer levels give nothing more
     private const double MaxZoom = 32;
 
-    // The share of the client's quad budget the impostors inside a zoomed view may take with
-    // their finer levels, the rest is for everything else on screen
-    private const double ZoomQuadShare = 0.75;
-
     // A turning zoomed view gets a margin of what it turns in this many seconds
     private const double TurnLeadSeconds = 0.5;
 
@@ -463,46 +459,17 @@ public sealed class ImpostorService : IDisposable
             viewer.ShapeCredit + config.ShapeBytesPerSecond * elapsed / 60,
             config.ShapeBytesPerSecond
         );
-        var zoomQuads = 0;
-        foreach (var (entry, pixels, zoom, distance) in shown)
+        var fit = FitLevels(viewer, shown, zones);
+        for (var i = 0; i < shown.Count; i++)
         {
+            var (entry, _, _, distance) = shown[i];
             entry.Wanted = true;
             entry.Viewed = true;
             if (entry.Shapes == null)
                 continue;
 
             viewer.Sent.TryGetValue(entry.Id, out var sent);
-            var picked = PickLod(pixels * zoom, sent?.Picked ?? 0, entry.Kind);
-            var index = entry.ShapeIndex(picked);
-
-            // A zoomed level only up to half the client's quad budget, about half of a
-            // shape's quads face the camera. After the zoom the client still has it in its
-            // shape store, so zooming in again costs a state only.
-            var normal = zoom > 1 ? entry.ShapeIndex(PickLod(pixels, 0, entry.Kind)) : index;
-            while (index > normal && QuadCount(entry.Shapes[index]) > config.MaxQuadsPerFrame)
-                index--;
-
-            // Inside a safe zone: one level lower and tinted with the zone's color, the zone's
-            // distorting surface shows less of it than of one outside
-            var tint = entry.Kind == ImpostorKind.SafeZone ? default : ZoneTint(zones, entry);
-            if (tint.A != 0 && index > 0)
-                index--;
-
-            // The zoomed ones share ZoomQuadShare of the client's quad budget, largest on
-            // screen first, about half of each shape's quads facing the camera. Over a ring
-            // two or three asteroids at level 64 took all of it, and the client dropped the
-            // rest of the view.
-            if (zoom > 1)
-            {
-                while (
-                    index > normal
-                    && zoomQuads + QuadCount(entry.Shapes[index]) / 2
-                        > config.MaxQuadsPerFrame * ZoomQuadShare
-                )
-                    index--;
-                zoomQuads += QuadCount(entry.Shapes[index]) / 2;
-            }
-
+            var (index, picked, tint) = fit[i];
             // A new impostor gets a level the client has, or a small one while the player is
             // in debt
             if (sent == null && viewer.ShapeCredit <= 0 && !Stored(viewer, entry, index))
@@ -608,6 +575,98 @@ public sealed class ImpostorService : IDisposable
 
         var controlled = player.Controller?.ControlledEntity?.Entity ?? player.Character;
         return controlled?.GetTopMostParent().PositionComp.WorldAABB.Center;
+    }
+
+    // The level of each shown impostor. Their quads together stay within the client's
+    // MaxQuadsPerFrame, about half of a shape's quads face the camera: when the wanted levels
+    // are over it, all of them are picked for a smaller screen, so the near ones lose detail
+    // instead of the client dropping the far ones. Over an asteroid ring a few near asteroids
+    // at level 32 would take the whole budget.
+    private List<(int index, byte picked, Color tint)> FitLevels(
+        Viewer viewer,
+        List<(ImpostorEntry entry, double pixels, double zoom, double distance)> shown,
+        List<ZoneVolume?> zones
+    )
+    {
+        var tints = shown
+            .Select(c => c.entry.Kind == ImpostorKind.SafeZone ? default : ZoneTint(zones, c.entry))
+            .ToList();
+        var fit = Levels(viewer, shown, tints, 1, out var quads);
+        if (quads <= config.MaxQuadsPerFrame)
+            return fit;
+
+        double low = 0,
+            high = 1;
+        var best = Levels(viewer, shown, tints, 0, out _);
+        for (var step = 0; step < 12; step++)
+        {
+            var scale = (low + high) / 2;
+            var levels = Levels(viewer, shown, tints, scale, out quads);
+            if (quads <= config.MaxQuadsPerFrame)
+            {
+                low = scale;
+                best = levels;
+            }
+            else
+            {
+                high = scale;
+            }
+        }
+        return best;
+    }
+
+    // The levels for a screen this many times the size, without the hysteresis when it is
+    // under 1. Quads: the sum of half of each shape's quads, of the
+    // ones in the zoomed view while the player zooms.
+    private List<(int index, byte picked, Color tint)> Levels(
+        Viewer viewer,
+        List<(ImpostorEntry entry, double pixels, double zoom, double distance)> shown,
+        List<Color> tints,
+        double scale,
+        out int quads
+    )
+    {
+        var result = new List<(int, byte, Color)>(shown.Count);
+        quads = 0;
+        for (var i = 0; i < shown.Count; i++)
+        {
+            var (entry, pixels, zoom, _) = shown[i];
+            if (entry.Shapes == null)
+            {
+                result.Add((0, 0, default));
+                continue;
+            }
+
+            viewer.Sent.TryGetValue(entry.Id, out var sent);
+            var full = scale >= 1;
+            var picked = PickLod(
+                pixels * zoom * scale,
+                full ? sent?.Picked ?? 0 : (byte)0,
+                entry.Kind
+            );
+            var index = entry.ShapeIndex(picked);
+
+            // A zoomed level only up to half the client's quad budget, about half of a
+            // shape's quads face the camera. After the zoom the client still has it in its
+            // shape store, so zooming in again costs a state only.
+            var normal =
+                zoom > 1 ? entry.ShapeIndex(PickLod(pixels * scale, 0, entry.Kind)) : index;
+            while (index > normal && QuadCount(entry.Shapes[index]) > config.MaxQuadsPerFrame)
+                index--;
+
+            // Inside a safe zone: one level lower and tinted with the zone's color, the zone's
+            // distorting surface shows less of it than of one outside
+            var tint = tints[i];
+            if (tint.A != 0 && index > 0)
+                index--;
+
+            // A zoomed client draws only what is in its view. Unzoomed the server doesn't know
+            // the direction, so all of them count.
+            if (viewer.Zoom <= 1 || zoom > 1)
+                quads += QuadCount(entry.Shapes[index]) / 2;
+            result.Add((index, picked, tint));
+        }
+        return result;
     }
 
     // The color of the first enabled safe zone holding the entry's center, none if outside

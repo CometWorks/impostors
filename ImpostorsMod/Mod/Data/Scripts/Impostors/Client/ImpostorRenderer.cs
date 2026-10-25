@@ -83,6 +83,9 @@ namespace Impostors
         // Every shape the server sent, it switches to one of them or shows a removed impostor
         // again with a state only
         private readonly ShapeStore<ClientShape> store = new ShapeStore<ClientShape>();
+
+        // In the camera's view in the last frame, before the budget (stats)
+        private int inView;
         private readonly List<DrawPart> parts = new List<DrawPart>();
         private readonly ByteWriter writer = new ByteWriter(16);
         private readonly Vector3[] lefts = new Vector3[6];
@@ -357,6 +360,8 @@ namespace Impostors
             text.AppendLine(
                 "impostors="
                     + impostors.Count
+                    + " inview="
+                    + inView
                     + " drawn="
                     + visible.Count
                     + " quads="
@@ -610,6 +615,7 @@ namespace Impostors
         public override void Draw()
         {
             visible.Clear();
+            inView = 0;
             if (!active || impostors.Count == 0 || realOnly)
                 return;
 
@@ -617,19 +623,22 @@ namespace Impostors
             if (camera == null)
                 return;
             var eye = camera.Position;
-            var forward = camera.WorldMatrix.Forward;
-            var size = camera.ViewportSize;
-            var halfAngle = Math.Atan(
-                Math.Tan(camera.FovWithZoom / 2) * Math.Sqrt(1 + size.X * size.X / size.Y / size.Y)
-            );
+            var view = MatrixD.Transpose(camera.WorldMatrix);
             culled = 0;
             overBudget = 0;
 
-            // Nearest first while counting the budget, so the far ones are dropped
+            // Nearest first while counting the budget, so the far ones are dropped. Frustum
+            // culled: the ones outside the camera's view would take the budget for nothing.
             foreach (var impostor in impostors.Values)
             {
                 if (impostor.Shape == null || impostor.State.Id == 0)
                     continue;
+
+                if (!InView(camera, view, impostor.State.Position + shift, impostor.State.Radius))
+                {
+                    culled++;
+                    continue;
+                }
 
                 // The real entity is replicated, it draws itself
                 if (
@@ -639,16 +648,10 @@ namespace Impostors
                 )
                     continue;
 
-                // Off screen it would only take billboards from the ones in view
-                if (!InView(impostor, eye, forward, halfAngle))
-                {
-                    culled++;
-                    continue;
-                }
-
                 visible.Add(impostor);
             }
 
+            inView = visible.Count;
             visible.Sort(
                 (a, b) =>
                     Vector3D
@@ -716,6 +719,23 @@ namespace Impostors
                     DrawImpostor(part.Impostor, eye, sun);
             }
             visible.RemoveRange(count, visible.Count - count);
+        }
+
+        // A sphere inside the four side planes of the camera's view. Not IMyCamera.IsInFrustum:
+        // that frustum ends at the far plane, 20 km away, and impostors go much farther.
+        private static bool InView(
+            VRage.ModAPI.IMyCamera camera,
+            MatrixD view,
+            Vector3D center,
+            double radius
+        )
+        {
+            var local = Vector3D.TransformNormal(center - camera.Position, view);
+            var depth = -local.Z;
+            var tanY = Math.Tan(camera.FovWithZoom / 2);
+            var tanX = tanY * camera.ViewportSize.X / camera.ViewportSize.Y;
+            return Math.Abs(local.X) - depth * tanX <= radius * Math.Sqrt(1 + tanX * tanX)
+                && Math.Abs(local.Y) - depth * tanY <= radius * Math.Sqrt(1 + tanY * tanY);
         }
 
         private struct DrawPart
@@ -797,24 +817,6 @@ namespace Impostors
                         * camera.ViewportSize.Y
                         / 2;
             return ZoneMesh.Quads(zone.Box, pixels);
-        }
-
-        // Whether any of the impostor's bounding sphere is inside the camera's view cone, the
-        // one around its diagonal. The camera's frustum ends at its far plane, 20 km or so.
-        private bool InView(ClientImpostor impostor, Vector3D eye, Vector3D forward, double half)
-        {
-            var radius = impostor.Shape.IsZone
-                ? impostor.Shape.Zone.HalfExtents.Length()
-                : impostor.State.Radius;
-            var age = Math.Min(tick - impostor.ReceivedTick, 600) / 60f;
-            var position = impostor.State.Position + impostor.State.Velocity * age + shift;
-            var toCenter = position - eye;
-            var distance = toCenter.Length();
-            if (distance <= radius)
-                return true;
-            var cos = Vector3D.Dot(toCenter, forward) / distance;
-            var angle = Math.Acos(MathHelper.Clamp(cos, -1, 1)) - Math.Asin(radius / distance);
-            return angle <= half;
         }
 
         // Quads an impostor draws: a shape the ones on the faces towards the camera, a safe

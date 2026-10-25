@@ -35,7 +35,8 @@ Billboard facts this design depends on (decompiled game 1.210):
 - 32768 billboards per frame for everything, vanilla effects included. The overflow is
   dropped silently, the last blend types first (see [Billboard limit](#billboard-limit-se-664)).
   The renderer caps itself at `MaxQuadsPerFrame` quads (16000 by default), which the server
-  sends with its Welcome.
+  sends with its Welcome. It counts only the impostors in the camera's frustum, nearest
+  first, and skips one that doesn't fit while farther ones still may.
 - Billboards are depth tested against the scene but never write depth. The `Standard` blend
   is weighted blended OIT, so overlapping opaque quads mix and look see-through. The `LDR`
   blend draws in submission order with premultiplied alpha after tone mapping. Impostors use
@@ -72,6 +73,13 @@ greedily into rectangles of one color, so a flat painted side is a single quad.
   1080p screen with a 70° field of view: about one cell per 2.5 pixels. Grids keep level
   16 down to half that size, as their coarser levels lose the shape fast. A zoomed view
   gets finer levels inside it, see "Zoomed views" below.
+- The levels of a player's impostors together stay within `MaxQuadsPerFrame`, counting half
+  of each shape's quads as facing the camera. While the player zooms only those in the
+  zoomed view count; otherwise the server doesn't know the view direction and counts all. When the picks are over it, the server picks
+  them all again as if the screen were smaller, so the near ones lose detail instead of the
+  client dropping the far ones. Above the Octahedron asteroid ring (SE-666) the few
+  asteroids just outside the replication range took level 32, about 3600 quads each, and
+  the client drew 4 of 137 impostors.
 - Encoding (`Protocol.cs`): a 19 byte header (level, cell size, origin) and 10 bytes per quad
   (face, min cell, width, height, RGB565 color, normal).
 - Each quad carries the normal it is shaded with, octahedral with 6 bits per coordinate
@@ -153,8 +161,7 @@ second at most. For that player the server then:
   extra picks don't raise the bandwidth.
 - takes a zoomed level only while its shape has at most `MaxQuadsPerFrame` quads, about
   half of them facing the camera, so one zoomed impostor can't take the client's whole
-  budget, and while all of the zoomed ones fit into three quarters of it (see "Moving
-  views").
+  budget; with the others they fit the budget together (see "Billboard limit").
 - puts the normal level back when the zoom ends. The client keeps the zoomed one in its
   shape store, so looking through the zoom again costs a state only.
 
@@ -178,15 +185,10 @@ What the server and the client do about it:
   ones start small while the player is in debt, and the finer level follows like any other.
 - Waiting: when a finer level waits for credit, the server sends a state naming it once. The
   client keeps drawing the shape it has; `stats.txt` counts these (`waiting`).
-- Quad budget: the impostors inside a zoomed view share three quarters of the client's
-  `MaxQuadsPerFrame` with their finer levels, the largest on screen first (half of a shape's
-  quads counted, those facing the camera). Over a ring, two or three asteroids at level 64
-  took the whole budget and the client left out the rest of the view.
-- Culling: the client draws only the impostors whose bounding sphere is inside the view cone
-  (around its diagonal), before it counts the quad budget. Off-screen quads took billboards
-  from the ones in view. An impostor
-  that doesn't fit into the budget is drawn at the finest coarser level the client has that
-  fits, or left out without stopping the ones behind it.
+- Quad budget: the levels fit `MaxQuadsPerFrame` together (SE-666, see "Billboard limit").
+  Over a ring two or three asteroids at zoomed level 64 took the whole budget before. On the
+  client an impostor that doesn't fit is drawn at the finest coarser level it has in its
+  shape store that fits, or left out without stopping the ones behind it.
 - The zoomed cone the server uses is a quarter of the field of view wider than the view,
   which covers the eighth of a turn before the client reports the view again, plus what a
   turning view turns in half a second (up to a field of view), estimated from the last two
@@ -230,7 +232,6 @@ Each frame it:
 
 - skips impostors whose real entity exists on the client (`EntityExists` by id): within the
   replication range the real grid draws itself,
-- skips impostors outside the view cone,
 - keeps the nearest impostors within the quad budget, counting the quads each one really
   draws: those on the faces towards the camera, all of a safe zone's,
 - draws them far to near, each with its back faces culled and its quads sorted back to front

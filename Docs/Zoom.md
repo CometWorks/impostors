@@ -37,8 +37,7 @@ Level 64 is the finest there is, so zooms beyond about 4 times show no more deta
   others, and the server picks that player's impostors again within 10 ticks instead of at
   the next full second.
 - A zoomed level is used only while its shape has at most `MaxQuadsPerFrame` quads, so one
-  impostor can't take the client's whole quad budget, and the zoomed impostors together get
-  three quarters of the budget at most, the largest first.
+  impostor can't take the client's whole quad budget, and all the levels together fit it.
 - When the zoom ends the server puts the normal level back. The client keeps every shape it
   got in its shape store, so looking through the zoom again costs a state only. (Until
   SE-671 the zoomed level stayed for 30 seconds instead, and over an asteroid ring the near
