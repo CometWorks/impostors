@@ -33,8 +33,9 @@ Billboard facts this design depends on (decompiled game 1.210):
 - No distance culling, and the projection has no far plane: billboards at 50 km draw fine,
   vertices are made camera relative in double precision.
 - 32768 billboards per frame for everything, vanilla effects included. The overflow is
-  dropped silently. The renderer caps itself at `MaxQuadsPerFrame` quads (16000 by default),
-  which the server sends with its Welcome.
+  dropped silently, the last blend types first (see [Billboard limit](#billboard-limit-se-664)).
+  The renderer caps itself at `MaxQuadsPerFrame` quads (16000 by default), which the server
+  sends with its Welcome.
 - Billboards are depth tested against the scene but never write depth. The `Standard` blend
   is weighted blended OIT, so overlapping opaque quads mix and look see-through. The `LDR`
   blend draws in submission order with premultiplied alpha after tone mapping. Impostors use
@@ -185,7 +186,8 @@ Each frame it:
 
 - skips impostors whose real entity exists on the client (`EntityExists` by id): within the
   replication range the real grid draws itself,
-- keeps the nearest impostors within the `MaxQuadsPerFrame` quad budget,
+- keeps the nearest impostors within the quad budget, counting the quads each one really
+  draws: those on the faces towards the camera, all of a safe zone's,
 - draws them far to near, each with its back faces culled and its quads sorted back to front
   for the current view direction (re-sorted when the view turns by about 3°),
 - shades each quad with its normal: `0.08 + 1.6 × max(0, n·sun)`, fitted to
@@ -195,6 +197,42 @@ Each frame it:
 
 The client plugin compiles the same files. That copy has no mod context; it stands down when
 a session mod contains the renderer, so it only draws on servers whose world lacks the mod.
+
+## Billboard limit (SE-664)
+
+The impostors share the 32768 billboards of a frame with the game's effects and every other
+mod. When there are more, impostor quads should be the ones to go: players notice a missing
+thruster flame, tracer or HUD marker far more than a coarser far view.
+
+How the game cuts (`MyBillboardRenderer.PrepareList`, decompiled 1.210): it groups the frame's
+billboards by blend type in the order `Standard`, `AdditiveBottom`, `AdditiveTop`, `LDR`,
+`PostPP` and draws only the first 32768. `LDR` and `PostPP` keep the order they were added in.
+So effects of the first three blend types always win over the impostors, which are `LDR`, but
+`PostPP` billboards (the game's hints, some mods' HUD markers) and the `LDR` billboards a mod
+adds after the Impostors mod's `Draw` are cut first. Mods draw in the order their session
+components were registered, not by their `Priority`.
+
+What each client gets:
+
+- The mod and the client plugin draw at most the budget, `MaxQuadsPerFrame` from the server.
+  They count the quads that really face the camera and keep the nearest impostors that fit,
+  while still drawing far to near. A vanilla client with the mod only relies on this: other
+  billboards are safe up to `32768 - MaxQuadsPerFrame` of them. The mod can't see how many
+  the frame has (`MyRenderProxy` isn't whitelisted), so it can't do more.
+- The client plugin patches `PrepareList`. When a frame is over the limit, it takes as many
+  impostor quads out of the `LDR` bucket as the frame is over, the first ones (the farthest,
+  as they are drawn far to near), so every other billboard moves into the drawn range. It
+  knows impostor quads by their material, `ImpostorSquare`: a copy of the game's `Square`
+  that the mod defines in `Data/TransparentMaterials.sbc` and the plugin adds itself when the
+  world has no mod.
+- The client plugin also lowers the budget to the room the last frame left:
+  `32768 - other billboards - 2048`, never above `MaxQuadsPerFrame`. It sends that to the
+  renderer as a mod message every tick, which reaches the mod's copy too. In a steady frame
+  the impostors then fit, and the patch only has to step in when effects come in a burst.
+  The renderer goes back to `MaxQuadsPerFrame` when the messages stop.
+- Once a minute the client plugin logs the frames' billboard totals while impostors are drawn:
+  the peak count, the peak of other billboards, impostor quads dropped and the time its patch
+  took (`Billboards in the last minute: ...`).
 
 ## Grids (SE-382)
 
@@ -266,7 +304,7 @@ game never reads it and draws those zones anyway.
   like the game's shield (fitted to comparison sheets, see [Safe zones](SafeZones.md)). The
   far half is drawn before the impostors inside the zone, the near half after them. Both
   halves are drawn, so a zone counts with all its quads against `MaxQuadsPerFrame`, where
-  grids and asteroids count with half of theirs.
+  grids and asteroids count with those on their faces towards the camera.
 - Zones go first among a player's `MaxImpostorsPerPlayer`. They are always built, even when
   nobody is shown them, because the impostors inside them need them.
 
@@ -326,6 +364,7 @@ one message under the SDK's 64 KiB payload limit.
 | Server background | 2 builds at a time |
 | Network per player | `ShapeBytesPerSecond` (32 KB/s) for shapes, about 74 bytes per moving impostor per second |
 | Client | `MaxQuadsPerFrame` quads per frame (16000) |
+| Client plugin, render thread | its `PrepareList` patch: 7 µs per frame, 25 µs while every 14th frame is over the limit by 1182 impostor quads, 0.7 ms at most (`tests/billboards.py`, about 33000 billboards, Ryzen 9800X3D) |
 
 Typical shapes, measured on the test grids: see the test results in the ticket.
 

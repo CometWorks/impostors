@@ -36,5 +36,12 @@ Notes:
   - Until the first Welcome the mod uses its own starting value, the same as the default
     (16000). It hardly matters: the server sends impostors only after the Welcome.
   - The client plugin draws with the same code, so it gets the budget the same way.
+  - The client counts the quads it really draws, those facing the camera, and never draws
+    more than the budget.
+  - The client plugin lowers the budget further, to the room the frame's other billboards
+    leave, and when a frame is over 32768 anyway it drops impostor quads before any other
+    billboard. A client with only the mod can't: there the other billboards are safe only up
+    to 32768 minus `MaxQuadsPerFrame`. See
+    [Billboard limit](Design.md#billboard-limit-se-664).
 - A larger shape than `ShapeBytesPerSecond` still goes out; the following ones wait until the
   player's next seconds have paid it off. New impostors never wait.
