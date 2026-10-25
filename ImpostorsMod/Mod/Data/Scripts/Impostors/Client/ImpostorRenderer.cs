@@ -166,7 +166,10 @@ namespace Impostors
             if (!local)
             {
                 MyAPIGateway.Multiplayer.RegisterSecureMessageHandler(Protocol.Channel, OnMessage);
+
+                // While the game loads, so the Inventory can go out with the first Welcome
                 cache = new ShapeCache(ModContext != null);
+                cache.Load(MyAPIGateway.Session.Name);
             }
             MyAPIGateway.Utilities.RegisterMessageHandler(BudgetMessage, OnBudget);
             active = true;
@@ -266,6 +269,7 @@ namespace Impostors
                 writer.Byte(Protocol.Hello);
                 writer.Byte(Protocol.Version);
                 writer.Byte((byte)(serverInstance == 0 ? 1 : 0));
+                writer.Byte((byte)(cache != null ? 1 : 0));
                 SendToServer();
             }
 
@@ -748,16 +752,21 @@ namespace Impostors
             }
         }
 
-        // Loads the world's shapes from the disk cache once and tells the server what it has, from
-        // then on the cache keeps everything the server sends
+        // Tells the server what the disk cache has, from then on it keeps everything the server
+        // sends
         private void SendInventory()
         {
             if (cache == null)
                 return;
-            if (!cache.Loaded)
-                cache.Load(MyAPIGateway.Session.Name);
-            cache.Inventory(writer, SendToServer);
+            var versions = cache.Inventory(writer, SendToServer);
             caching = true;
+            MyLog.Default.WriteLineAndConsole(
+                "Impostors: "
+                    + versions
+                    + " impostor versions, "
+                    + cache.Bytes / 1024
+                    + " KB in the shape cache"
+            );
         }
 
         // The server counts on shapes we don't have: forget its impostors and ask it to start
@@ -773,6 +782,7 @@ namespace Impostors
             writer.Clear();
             writer.Byte(Protocol.Hello);
             writer.Byte(Protocol.Version);
+            writer.Byte(1);
             writer.Byte(1);
             SendToServer();
         }

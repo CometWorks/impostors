@@ -105,8 +105,8 @@ namespace Impostors
             }
         }
 
-        // Ids, versions and level masks for the Inventory message
-        public void Inventory(ByteWriter writer, Action send)
+        // Ids, versions and level masks for the Inventory message; how many it had
+        public int Inventory(ByteWriter writer, Action send)
         {
             var masks = new Dictionary<long, Dictionary<int, byte>>();
             foreach (var list in entries.Values)
@@ -123,11 +123,13 @@ namespace Impostors
             }
 
             var count = 0;
+            var total = 0;
             var countPosition = 0;
             Action start = () =>
             {
                 writer.Clear();
                 writer.Byte(Protocol.Inventory);
+                writer.Byte(1);
                 countPosition = writer.Length;
                 writer.UShort(0);
                 count = 0;
@@ -147,10 +149,13 @@ namespace Impostors
                     writer.Int(version.Key);
                     writer.Byte(version.Value);
                     count++;
+                    total++;
                 }
             }
             writer.UShortAt(countPosition, (ushort)count);
+            writer.ByteAt(1, 0);
             send();
+            return total;
         }
 
         public byte[] Get(long id, int version, byte lod)

@@ -254,10 +254,13 @@ Versions are content hashes of all levels, so (id, version, level) names a shape
   (`cache-<hash>.bin`), or in the global storage with the `Impostors.` prefix for the client
   plugin's copy. `cache-index.txt` lists the files with their size and the day they were
   used last. The local player's renderer copy has no cache, its shapes never cross a network.
-- After every Welcome of a new server instance the client loads the world's file (once per
-  session) and sends an `Inventory`: id, version and a mask of the levels it has, about
-  13 bytes per impostor, in messages up to 16 KB. The server keeps that per player and adds
-  every shape it sends from then on, as the client caches all of them.
+- The client loads the world's file while the game loads, and after every Welcome of a new
+  server instance sends an `Inventory`: id, version and a mask of the levels it has, about
+  13 bytes per impostor, in messages up to 16 KB. Its Hello says that one will follow, and a
+  server that starts over with the player holds its impostors back until the last part
+  arrived, 10 s at most; otherwise the first second's shapes would go out before the server
+  knew the client has them. The server keeps the inventory per player and adds every shape
+  it sends from then on, as the client caches all of them.
 - A shape the client's store lacks but its disk cache has goes into ShapeData as the id, the
   version, a 1 and the level, instead of the shape. The client decodes it from the cache and
   adds it to the shape store with the shape's real size, so both copies of the store stay
@@ -292,13 +295,13 @@ Mod networking on channel 47213, reliable messages up to 16 KB:
 
 | Message | Direction | Content |
 |---|---|---|
-| Hello | client to server | protocol version, whether the client has nothing from the server yet; at load and every 30 s |
+| Hello | client to server | protocol version, whether the client has nothing from the server yet, whether an Inventory follows; at load and every 30 s |
 | Welcome | server to client | protocol version, server instance id, `MaxQuadsPerFrame` |
 | States | server to client | impostor states: id, kind (grid, voxel or safe zone), version, level, radius, position, orientation, velocity, safe zone tint (74 bytes each); a level from the shape store switches the impostor to it |
 | Remove | server to client | impostor ids |
 | ShapeData | server to client | count, then id, version and shape per impostor; or a 1 and the level for a shape in the client's disk cache |
 | View | client to server | field of view with zoom, viewport width and height, view direction, spectator camera and its position; while zoomed or spectating |
-| Inventory | client to server | count, then id, version and level mask per impostor in the client's disk cache; after each Welcome of a new server instance |
+| Inventory | client to server | whether more follow, count, then id, version and level mask per impostor in the client's disk cache; after each Welcome of a new server instance |
 
 The repeated hello means the server needs no state about clients across restarts, and a
 cluster node a player was moved to learns about the client within 30 s. A different server
