@@ -16,7 +16,9 @@ namespace Impostors
         // shapes from the server yet (no Welcome), 0 after. Sent when the session is ready and
         // then every HelloInterval seconds, so a server that starts later or a cluster node the
         // client was moved to learns that this client draws impostors. A server that knew the
-        // client already starts over with it on a 1.
+        // client already starts over with it on a 1. Then byte 1 when the client has a disk
+        // cache: a server that starts over with it holds its impostors back until the
+        // Inventory arrived, InventoryWait at most.
         public const byte Hello = 1;
 
         // Server to client: byte version, long server instance id, int most impostor quads the
@@ -36,7 +38,8 @@ namespace Impostors
 
         // Server to client: ushort count, then count times long id, int version and a shape
         // (see Shape, or ZoneShape for a safe zone). Small shapes share a message. The client
-        // adds each to its ShapeStore.
+        // adds each to its ShapeStore. In place of a shape, byte FromCache and the byte level
+        // tell the client to take that shape from its disk cache (see Inventory).
         public const byte ShapeData = 5;
 
         // Client to server: float vertical field of view with zoom (radians), ushort viewport
@@ -52,6 +55,21 @@ namespace Impostors
         // drawing. Inside the replication cube the server keeps sending an impostor until the
         // client reports its entity ready, so nothing is missing while a grid streams in.
         public const byte Ready = 7;
+
+        // Client to server: byte 1 when more Inventory messages follow, 0 in the last one, ushort
+        // count, then count times long id, int version and byte level mask (see LodBit) of the
+        // shapes in the client's disk cache for this world. Sent after every Welcome of a new
+        // server instance, an empty one too. From then on the server counts every shape it
+        // sends as cached as well, the client keeps all of them until the session ends. A
+        // server without the disk cache ignores the message and the Hello's last byte, an older
+        // client never sends them, so the protocol version stays.
+        public const byte Inventory = 8;
+
+        // Most seconds a server waits for an announced Inventory
+        public const int InventoryWait = 10;
+
+        // Marks a ShapeData entry the client has in its disk cache, no shape level is 1
+        public const byte FromCache = 1;
 
         // A spectator camera that moved this far gets a new View message, meters
         public const double ViewMoveMeters = 100;
@@ -70,6 +88,19 @@ namespace Impostors
         // Pixels per radian near the screen center the server assumes: a 1080p screen with a
         // 70 degree vertical field of view
         public const double PixelsPerRadian = 540 / 0.7002075382097097;
+
+        // The bit of a level in an Inventory mask: bit 0 for level 0 (a safe zone), bit k for
+        // level 2^k
+        public static byte LodBit(byte lod)
+        {
+            var bit = 0;
+            while (lod > 1)
+            {
+                lod >>= 1;
+                bit++;
+            }
+            return (byte)(1 << bit);
+        }
 
         // How many times larger a view shows things than the server's default estimate
         public static double Zoom(double fov, double height)
@@ -340,6 +371,11 @@ namespace Impostors
             length += value.Length;
         }
 
+        public void ByteAt(int position, byte value)
+        {
+            buffer[position] = value;
+        }
+
         // Overwrites a ushort written earlier, used for counts known only at the end
         public void UShortAt(int position, ushort value)
         {
@@ -362,6 +398,24 @@ namespace Impostors
         public int Remaining
         {
             get { return buffer.Length - position; }
+        }
+
+        public int Position
+        {
+            get { return position; }
+        }
+
+        public byte Peek()
+        {
+            return buffer[position];
+        }
+
+        // A copy of bytes read already, from start to the current position
+        public byte[] Since(int start)
+        {
+            var result = new byte[position - start];
+            Buffer.BlockCopy(buffer, start, result, 0, result.Length);
+            return result;
         }
 
         public byte Byte()
