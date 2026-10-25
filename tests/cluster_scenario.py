@@ -149,29 +149,35 @@ def wait(predicate, timeout: float, interval: float = 3.0):
 
 
 def drawn(rows: dict[int, dict], entity_id: int) -> bool:
+    """The client has the impostor with a shape; whether this frame draws it depends on
+    the view, the renderer culls those outside the frustum"""
     row = rows.get(entity_id)
-    return bool(row) and row["drawn"] == "1" and row["shape"] != "none"
+    return bool(row) and row["real"] == "0" and row["shape"] != "none"
 
 
-def game_log_lines(bench: Bench, process: str, pattern: str, since: float) -> list[str]:
-    """Lines of a process's game logs written since the epoch time"""
+def game_logs(bench: Bench) -> dict[Path, int]:
+    """The nodes' game logs and their line counts"""
+    return {
+        log: len(log.read_text(errors="replace").splitlines())
+        for p in PROCESSES
+        if p != "wa-1"
+        for log in (bench.run_root / f"{p}-data").glob("SpaceEngineersDedicated_*.log")
+    }
+
+
+def new_lines(bench: Bench, before: dict[Path, int], pattern: str) -> list[str]:
+    """Lines of the nodes' game logs past the counts in before that match"""
     lines = []
-    for log in (bench.run_root / f"{process}-data").glob(
-        "SpaceEngineersDedicated_*.log"
-    ):
-        if log.stat().st_mtime >= since:
-            lines += [
-                l
-                for l in log.read_text(errors="replace").splitlines()
-                if re.search(pattern, l)
-            ]
+    for log in game_logs(bench):
+        rest = log.read_text(errors="replace").splitlines()[before.get(log, 0) :]
+        lines += [l for l in rest if re.search(pattern, l)]
     return lines
 
 
 def restart_checks(bench: Bench, stats_file: Path, player_node: str, ids: dict) -> None:
     """The WA's saved index and shape cache across a WA restart"""
     time.sleep(70)  # The WA saves its index at most once a minute
-    restarted = time.time()
+    before = game_logs(bench)
     bench.cluster.restart_node("wa-1")
     loaded = bench.cluster.wait_node_log(
         "wa-1", r"cluster index: loaded \d+ saved records", 600
@@ -203,21 +209,8 @@ def restart_checks(bench: Bench, stats_file: Path, player_node: str, ids: dict) 
     owner = wait(online, 300, 5)
     bench.check(f"{name} back online after the teleport", bool(owner), str(owner))
     time.sleep(60)  # A scan, a build, and the minute's shape counts
-    nodes = [p for p in PROCESSES if p != "wa-1"]
-    built = [
-        l
-        for p in nodes
-        for l in game_log_lines(
-            bench, p, rf"Impostor build: id={entity_id} ", restarted
-        )
-    ]
-    counts = [
-        l
-        for p in nodes
-        for l in game_log_lines(
-            bench, p, r"Impostor shapes in the last minute", restarted
-        )
-    ]
+    built = new_lines(bench, before, rf"Impostor build: id={entity_id} ")
+    counts = new_lines(bench, before, r"Impostor shapes in the last minute")
     bench.record("restart-builds", {"built": built, "counts": counts})
     bench.check(
         f"{name} not built again, its shapes came from the WA",

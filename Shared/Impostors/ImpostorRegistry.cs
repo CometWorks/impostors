@@ -113,12 +113,16 @@ public sealed class ImpostorRegistry
             if (result.shapes == null || !entries.ContainsKey(entry.Id))
                 continue;
 
-            if (result.build.Unchanged)
-                unchanged++;
-            else if (result.build.Cached)
-                cached++;
-            else
-                built++;
+            // Remote shapes are fetched from another server, not built here
+            if (!entry.Source.Remote)
+            {
+                if (result.build.Unchanged)
+                    unchanged++;
+                else if (result.build.Cached)
+                    cached++;
+                else
+                    built++;
+            }
             entry.Input = result.build.Input;
             var version = ImpostorEntry.Hash(result.shapes);
             if (version != entry.Version)
