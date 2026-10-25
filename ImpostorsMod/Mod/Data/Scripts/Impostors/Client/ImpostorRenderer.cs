@@ -502,6 +502,7 @@ namespace Impostors
             if (camera == null)
                 return;
             var eye = camera.Position;
+            var view = MatrixD.Transpose(camera.WorldMatrix);
 
             // Nearest first while counting the budget, so the far ones are dropped. Frustum
             // culled: the ones outside the camera's view would take the budget for nothing.
@@ -510,11 +511,7 @@ namespace Impostors
                 if (impostor.Shape == null || impostor.State.Id == 0)
                     continue;
 
-                var sphere = new BoundingSphereD(
-                    impostor.State.Position + shift,
-                    impostor.State.Radius
-                );
-                if (!camera.IsInFrustum(ref sphere))
+                if (!InView(camera, view, impostor.State.Position + shift, impostor.State.Radius))
                     continue;
 
                 // The real entity is replicated, it draws itself
@@ -585,6 +582,23 @@ namespace Impostors
                     DrawImpostor(part.Impostor, eye, sun);
             }
             visible.RemoveRange(count, visible.Count - count);
+        }
+
+        // A sphere inside the four side planes of the camera's view. Not IMyCamera.IsInFrustum:
+        // that frustum ends at the far plane, 20 km away, and impostors go much farther.
+        private static bool InView(
+            VRage.ModAPI.IMyCamera camera,
+            MatrixD view,
+            Vector3D center,
+            double radius
+        )
+        {
+            var local = Vector3D.TransformNormal(center - camera.Position, view);
+            var depth = -local.Z;
+            var tanY = Math.Tan(camera.FovWithZoom / 2);
+            var tanX = tanY * camera.ViewportSize.X / camera.ViewportSize.Y;
+            return Math.Abs(local.X) - depth * tanX <= radius * Math.Sqrt(1 + tanX * tanX)
+                && Math.Abs(local.Y) - depth * tanY <= radius * Math.Sqrt(1 + tanY * tanY);
         }
 
         private struct DrawPart
