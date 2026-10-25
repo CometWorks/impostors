@@ -11,11 +11,12 @@ using VRageRender;
 namespace Impostors
 {
     // Draws the impostors a server running the Impostors plugin sends: grids and asteroids
-    // beyond the sync distance, as flat shaded quads. Runs on multiplayer clients only, the
-    // server and single player have the real entities anyway.
+    // beyond the sync distance, as flat shaded quads. The mod runs on multiplayer clients only.
     //
     // The client plugin compiles this file too, so Pulsar players get impostors on servers
-    // whose world doesn't list the mod. That copy stands down when the mod is loaded.
+    // whose world doesn't list the mod. That copy stands down when the mod is loaded. In an
+    // offline game or on a lobby host it draws for the local player, from the plugin's service
+    // in the same process (ToLocalServer, FromLocalServer).
     [MySessionComponentDescriptor(MyUpdateOrder.BeforeSimulation)]
     public class ImpostorRenderer : MySessionComponentBase
     {
@@ -95,6 +96,12 @@ namespace Impostors
         private bool active;
         private bool debug;
 
+        // The client plugin's copy in an offline game or on a lobby host: messages go to and
+        // come from the service in this process, and every entity is real here
+        public static Action<byte[]> ToLocalServer;
+        private static ImpostorRenderer localInstance;
+        private bool local;
+
         // Debug: draws the impostors in place of the real entities, which it hides
         private bool compare;
 
@@ -111,24 +118,63 @@ namespace Impostors
 
         public override void LoadData()
         {
-            if (MyAPIGateway.Utilities.IsDedicated || MyAPIGateway.Multiplayer.IsServer)
+            if (MyAPIGateway.Utilities.IsDedicated)
                 return;
 
-            // The client plugin's copy has no mod context
-            if (ModContext == null && ModLoaded())
+            // The client plugin's copy has no mod context, only it can draw on a server
+            if (MyAPIGateway.Multiplayer.IsServer)
+            {
+                if (ModContext != null || ToLocalServer == null)
+                    return;
+                local = true;
+                localInstance = this;
+                MyLog.Default.WriteLineAndConsole("Impostors: drawing for the local player");
+            }
+            else if (ModContext == null && ModLoaded())
+            {
                 return;
+            }
 
-            MyAPIGateway.Multiplayer.RegisterSecureMessageHandler(Protocol.Channel, OnMessage);
+            if (!local)
+                MyAPIGateway.Multiplayer.RegisterSecureMessageHandler(Protocol.Channel, OnMessage);
             MyAPIGateway.Utilities.RegisterMessageHandler(BudgetMessage, OnBudget);
             active = true;
 
-            // Tests put this file into the mod's local storage to get stats.txt every second
-            // and to switch between the real entities and their impostors (see ReadMode)
+            // Tests put this file into the storage (see StorageExists) to get stats.txt every
+            // second and to switch between the real entities and their impostors (see ReadMode)
+            debug = StorageExists("debug");
+        }
+
+        // The mod's files are in its local storage. Pulsar compiles the client plugin under a
+        // random assembly name, so its copy uses the global storage with an "Impostors." prefix.
+        private bool StorageExists(string file)
+        {
             if (ModContext != null)
-                debug = MyAPIGateway.Utilities.FileExistsInLocalStorage(
-                    "debug",
+                return MyAPIGateway.Utilities.FileExistsInLocalStorage(
+                    file,
                     typeof(ImpostorRenderer)
                 );
+            return MyAPIGateway.Utilities.FileExistsInGlobalStorage("Impostors." + file);
+        }
+
+        private System.IO.TextReader ReadStorage(string file)
+        {
+            if (ModContext != null)
+                return MyAPIGateway.Utilities.ReadFileInLocalStorage(
+                    file,
+                    typeof(ImpostorRenderer)
+                );
+            return MyAPIGateway.Utilities.ReadFileInGlobalStorage("Impostors." + file);
+        }
+
+        private System.IO.TextWriter WriteStorage(string file)
+        {
+            if (ModContext != null)
+                return MyAPIGateway.Utilities.WriteFileInLocalStorage(
+                    file,
+                    typeof(ImpostorRenderer)
+                );
+            return MyAPIGateway.Utilities.WriteFileInGlobalStorage("Impostors." + file);
         }
 
         protected override void UnloadData()
@@ -136,7 +182,13 @@ namespace Impostors
             if (!active)
                 return;
 
-            MyAPIGateway.Multiplayer.UnregisterSecureMessageHandler(Protocol.Channel, OnMessage);
+            if (local)
+                localInstance = null;
+            else
+                MyAPIGateway.Multiplayer.UnregisterSecureMessageHandler(
+                    Protocol.Channel,
+                    OnMessage
+                );
             MyAPIGateway.Utilities.UnregisterMessageHandler(BudgetMessage, OnBudget);
             active = false;
             impostors.Clear();
@@ -154,15 +206,27 @@ namespace Impostors
 
         public override void UpdateBeforeSimulation()
         {
-            if (!active)
-                return;
+            if (active && !local)
+                Update();
+        }
 
+        // The client plugin updates its local copy itself: the game keeps the session components
+        // to update in a set ordered by priority and type name, where the plugin's copy and the
+        // mod's are the same, so with the mod in the world the plugin's copy never got updated
+        public static void UpdateLocal()
+        {
+            if (localInstance != null)
+                localInstance.Update();
+        }
+
+        private void Update()
+        {
             if (tick++ % (Protocol.HelloInterval * 60) == 60)
             {
                 writer.Clear();
                 writer.Byte(Protocol.Hello);
                 writer.Byte(Protocol.Version);
-                MyAPIGateway.Multiplayer.SendMessageToServer(Protocol.Channel, writer.ToArray());
+                SendToServer();
             }
 
             // A few View messages per second at most
@@ -207,7 +271,7 @@ namespace Impostors
             writer.Float(forward.X);
             writer.Float(forward.Y);
             writer.Float(forward.Z);
-            MyAPIGateway.Multiplayer.SendMessageToServer(Protocol.Channel, writer.ToArray());
+            SendToServer();
             if (zoomed && !viewZoomed)
                 zoomTick = tick;
             viewZoomed = zoomed;
@@ -216,20 +280,30 @@ namespace Impostors
             sentViewTick = tick;
         }
 
+        private void SendToServer()
+        {
+            if (local)
+                ToLocalServer(writer.ToArray());
+            else
+                MyAPIGateway.Multiplayer.SendMessageToServer(Protocol.Channel, writer.ToArray());
+        }
+
+        // A message of the client plugin's service for the local player
+        public static void FromLocalServer(byte[] message)
+        {
+            if (localInstance != null)
+                localInstance.OnMessage(Protocol.Channel, message, 0, true);
+        }
+
         // "impostor" in the mode file draws the impostors instead of the real entities,
         // "shift x y z" draws them moved by that vector next to the real ones, "real" draws
         // none of them
         private void ReadMode()
         {
             var mode = "";
-            if (MyAPIGateway.Utilities.FileExistsInLocalStorage("mode", typeof(ImpostorRenderer)))
+            if (StorageExists("mode"))
             {
-                using (
-                    var file = MyAPIGateway.Utilities.ReadFileInLocalStorage(
-                        "mode",
-                        typeof(ImpostorRenderer)
-                    )
-                )
+                using (var file = ReadStorage("mode"))
                     mode = file.ReadToEnd().Trim();
             }
             var words = mode.Split(' ');
@@ -385,12 +459,7 @@ namespace Impostors
                         + ScreenPosition(state)
                 );
             }
-            using (
-                var file = MyAPIGateway.Utilities.WriteFileInLocalStorage(
-                    "stats.txt",
-                    typeof(ImpostorRenderer)
-                )
-            )
+            using (var file = WriteStorage("stats.txt"))
                 file.Write(text.ToString());
         }
 
@@ -503,9 +572,11 @@ namespace Impostors
                 if (impostor.Shape == null || impostor.State.Id == 0)
                     continue;
 
-                // The real entity is replicated, it draws itself
+                // The real entity is replicated, it draws itself. Locally every entity is real,
+                // the service sends only those the game doesn't draw.
                 if (
-                    !compare
+                    !local
+                    && !compare
                     && shift == Vector3D.Zero
                     && MyAPIGateway.Entities.EntityExists(impostor.State.Id)
                 )

@@ -422,6 +422,8 @@ class Client:
         self.log = self.appdata / "SpaceEngineers.log"
         # Local storage of the mod, named after its script assembly
         self.mod_storage = self.appdata / "Storage" / f"{MOD_ID}.sbm_Impostors"
+        # The client plugin's copy of the renderer: the global storage, its files prefixed
+        self.plugin_storage = self.appdata / "Storage"
 
     def args(self, server_port: int) -> list:
         return [
@@ -486,6 +488,10 @@ class Client:
         (self.mod_storage / "stats.txt").unlink(missing_ok=True)
         # compare.py's last mode would carry over into the next run of any test
         (self.mod_storage / "mode").unlink(missing_ok=True)
+        if self.plugin:
+            (self.plugin_storage / "Impostors.debug").write_text("")
+            (self.plugin_storage / "Impostors.stats.txt").unlink(missing_ok=True)
+            (self.plugin_storage / "Impostors.mode").unlink(missing_ok=True)
         self.set_fov(None)
         self.appdata.mkdir(parents=True, exist_ok=True)
         (self.appdata / "Remote.cfg").write_text(
@@ -532,11 +538,19 @@ class Client:
         stop_process(self.pid_file, str(self.launcher))
 
     def stats(self) -> tuple[dict, dict[int, dict]]:
-        """The mod's stats.txt: the totals and each impostor by id"""
+        """The renderer's stats.txt, the mod's or else the client plugin's: the totals
+        and each impostor by id"""
         try:
             lines = (self.mod_storage / "stats.txt").read_text().splitlines()
         except FileNotFoundError:
-            return {}, {}
+            try:
+                lines = (
+                    (self.plugin_storage / "Impostors.stats.txt")
+                    .read_text()
+                    .splitlines()
+                )
+            except FileNotFoundError:
+                return {}, {}
         parse = lambda line: dict(kv.split("=", 1) for kv in line.split())
         impostors = {}
         for line in lines[1:]:

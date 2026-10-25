@@ -1,0 +1,165 @@
+"""In-game check of the client plugin's service for the local player (SE-668): a
+headless client with the Impostors client plugin loads the test world without the
+mod, offline or as the host of a lobby game. Prints one PASS or FAIL line per check
+and exits with the number of failures.
+
+    uv run --no-project --with httpx --with pillow python tests/local.py
+    IMP_MODE=lobby ...   # host a lobby (DirectTransport) and let a second client join
+    IMP_KEEP=1 ...       # leave the game running
+
+Offline the game draws everything within the view distance (15 km), so only the
+grid and the asteroid beyond it get impostors. A lobby host draws only within the
+sync distance (3 km, MySector.LoadData), so it gets the far grids and asteroids
+too, and the joiner gets them over mod networking as before.
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import rig  # noqa: E402
+import world  # noqa: E402
+
+LOBBY = os.environ.get("IMP_MODE") == "lobby"
+HOST = rig.Client(1, "Alpha", plugin=True)
+JOINER = rig.Client(2, "Beta", plugin=True)
+LOBBY_PORT = rig.SLOT["DS_SERVER_PORT_BASE"]
+WORLD = HOST.appdata / "Saves" / "Impostors local"
+
+# Beyond the view distance: offline only impostors can show these
+BEYOND = world.Grid(
+    "Beyond", 120000000000000021, (0.0, 0.0, 25000.0), (20, 12, 40), True, GREEN
+)
+ROCK_BEYOND = world.Asteroid(
+    "RockBeyond", 130000000000000021, (19744.0, -256.0, -256.0), "Asteroid512-001.vx2"
+)
+NEAR_GRIDS = (world.SHIP, world.STATION, world.FAR)
+
+failures = 0
+
+
+def check(name: str, ok: bool, detail="") -> bool:
+    global failures
+    failures += 0 if ok else 1
+    print(f"{'PASS' if ok else 'FAIL'} {name}{': ' + str(detail) if detail else ''}")
+    return ok
+
+
+def wait(predicate, timeout: float, interval: float = 3.0):
+    deadline = time.monotonic() + timeout
+    while True:
+        result = predicate()
+        if result or time.monotonic() > deadline:
+            return result
+        time.sleep(interval)
+
+
+def shown(client: rig.Client, ids, timeout: float = 180) -> dict:
+    """Waits until the client's renderer draws every id; its stats per id"""
+    ids = set(ids)
+
+    def drawn():
+        _, impostors = client.stats()
+        ok = all(impostors.get(i, {}).get("drawn") == "1" for i in ids)
+        return impostors if ok else None
+
+    return wait(drawn, timeout) or client.stats()[1]
+
+
+def start_host() -> rig.RemoteAPI:
+    world.prepare(
+        WORLD,
+        HOST.steam_id,
+        HOST.name,
+        grids=world.GRIDS + (BEYOND,),
+        asteroids=world.ASTEROIDS + (ROCK_BEYOND,),
+        mod=False,
+    )
+    # No --connect: the host loads the world through Remote
+    args = HOST.args
+    HOST.args = lambda _port: [
+        *[a for a in args(0) if a not in ("--connect", "127.0.0.1:0")],
+        *(["--host-lobby", LOBBY_PORT] if LOBBY else []),
+    ]
+    HOST.launch(0)
+    api = HOST.wait_api()
+    api.load(str(WORLD), online_mode="FRIENDS" if LOBBY else "OFFLINE")
+    rig.wait_world(api)
+    rig.ensure_character(api)
+    rig.focus_gameplay(api)
+    api.character_teleport(*world.HOME)
+    return api
+
+
+def run_offline() -> None:
+    log = lambda: HOST.log.read_text(errors="replace")
+    check(
+        "service serves the local player",
+        bool(wait(lambda: "The local player draws impostors" in log(), 120)),
+    )
+    impostors = shown(HOST, (BEYOND.entity_id, ROCK_BEYOND.entity_id))
+    for thing in (BEYOND, ROCK_BEYOND):
+        check(
+            f"{thing.name} drawn",
+            impostors.get(thing.entity_id, {}).get("drawn") == "1",
+        )
+    within = [g.name for g in world.GRIDS + world.ASTEROIDS if g.entity_id in impostors]
+    check("nothing within the view distance", not within, within)
+
+
+def run_lobby(host_api) -> None:
+    log = lambda: HOST.log.read_text(errors="replace")
+    check(
+        "service serves the host's own player",
+        bool(wait(lambda: "The local player draws impostors" in log(), 120)),
+    )
+    far = NEAR_GRIDS + world.ASTEROIDS + (BEYOND, ROCK_BEYOND)
+    impostors = shown(HOST, (t.entity_id for t in far))
+    for thing in far:
+        check(
+            f"host draws {thing.name}",
+            impostors.get(thing.entity_id, {}).get("drawn") == "1",
+        )
+    check("host has no impostor of Near", world.NEAR.entity_id not in impostors)
+
+    JOINER.args = lambda _port, args=JOINER.args: [
+        *[a for a in args(0) if a not in ("--connect", "127.0.0.1:0")],
+        "--join-lobby",
+        f"127.0.0.1:{LOBBY_PORT}",
+    ]
+    JOINER.launch(0)
+    api = JOINER.wait_api()
+    rig.wait_world(api)
+    rig.ensure_character(api)
+    rig.focus_gameplay(api)
+    api.character_teleport(*world.HOME)
+    check(
+        "service serves the joiner",
+        bool(wait(lambda: f"Player {JOINER.steam_id} draws impostors" in log(), 120)),
+    )
+    impostors = shown(JOINER, (g.entity_id for g in NEAR_GRIDS))
+    for g in NEAR_GRIDS:
+        check(
+            f"joiner draws {g.name}", impostors.get(g.entity_id, {}).get("drawn") == "1"
+        )
+
+
+def main():
+    try:
+        api = start_host()
+        run_lobby(api) if LOBBY else run_offline()
+    finally:
+        if os.environ.get("IMP_KEEP") != "1":
+            JOINER.stop()
+            HOST.stop()
+    print(f"{'PASSED' if failures == 0 else 'FAILED'}: {failures} failure(s)")
+    sys.exit(failures)
+
+
+if __name__ == "__main__":
+    main()
