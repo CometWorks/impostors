@@ -204,7 +204,7 @@ def sample(seconds: float, label: str) -> dict:
     result["gap"] = gaps / max(1, result["expected"])
     result["worst"] = worst
     totals, _ = CLIENT.stats()
-    for key in ("removed", "restored", "stored", "storedkb", "culled", "overbudget"):
+    for key in ("removed", "restored", "stored", "storedkb", "culled", "overbudget", "coarser"):
         result[key] = totals.get(key)
     print(
         f"{label}: {result['samples']} samples, {result['expected']} expected, "
@@ -214,7 +214,7 @@ def sample(seconds: float, label: str) -> dict:
         + " ".join(
             f"{k}={result[k]}" for k in ("removed", "restored", "stored", "storedkb")
         )
-        + f" culled={result['culled']} overbudget={result['overbudget']}",
+        + f" culled={result['culled']} overbudget={result['overbudget']} coarser={result['coarser']}",
         flush=True,
     )
     return result

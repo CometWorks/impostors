@@ -122,6 +122,7 @@ namespace Impostors
         private int restoredCount;
         private int culled;
         private int overBudget;
+        private int coarser;
 
         public override void LoadData()
         {
@@ -368,6 +369,8 @@ namespace Impostors
                     + culled
                     + " overbudget="
                     + overBudget
+                    + " coarser="
+                    + coarser
                     + " noshape="
                     + NoShape()
                     + " waiting="
@@ -659,19 +662,28 @@ namespace Impostors
             if (tick - frameBudgetTick <= BudgetTicks)
                 budget = MathHelper.Clamp(frameBudget, 0, maxQuads);
 
-            // A large one over the budget leaves room for smaller ones behind it
+            // One over the budget is drawn at a coarser level we have, or left out, which leaves
+            // room for smaller ones behind it
             var quads = 0;
             var count = 0;
+            coarser = 0;
             for (var i = 0; i < visible.Count; i++)
             {
-                var cost = Cost(visible[i], eye);
+                var impostor = visible[i];
+                impostor.Drawn = impostor.Shape;
+                var cost = Cost(impostor, impostor.Shape, eye);
                 if (quads + cost > budget)
                 {
-                    overBudget++;
-                    continue;
+                    cost = Coarser(impostor, budget - quads, eye);
+                    if (cost < 0)
+                    {
+                        overBudget++;
+                        continue;
+                    }
+                    coarser++;
                 }
                 quads += cost;
-                visible[count++] = visible[i];
+                visible[count++] = impostor;
             }
 
             var sun = MyVisualScriptLogicProvider.GetSunDirection();
@@ -808,9 +820,30 @@ namespace Impostors
 
         // Quads an impostor draws: a shape the ones on the faces towards the camera, a safe
         // zone both of its halves
-        private int Cost(ClientImpostor impostor, Vector3D eye)
+        // The finest coarser level of the impostor in the store that fits into room: it becomes
+        // the one drawn this frame, and its cost is returned. -1 if none fits.
+        private int Coarser(ClientImpostor impostor, int room, Vector3D eye)
         {
             var shape = impostor.Shape;
+            if (shape.IsZone)
+                return -1;
+            for (var lod = shape.Lod / 2; lod >= 2; lod /= 2)
+            {
+                ClientShape stored;
+                if (!store.TryGet(impostor.State.Id, (byte)lod, shape.Version, out stored))
+                    continue;
+                var cost = Cost(impostor, stored, eye);
+                if (cost <= room)
+                {
+                    impostor.Drawn = stored;
+                    return cost;
+                }
+            }
+            return -1;
+        }
+
+        private int Cost(ClientImpostor impostor, ClientShape shape, Vector3D eye)
+        {
             if (shape.IsZone)
                 return ZoneQuads(impostor, eye).Length;
 
@@ -861,7 +894,7 @@ namespace Impostors
         private void DrawImpostor(ClientImpostor impostor, Vector3D eye, Vector3 sun)
         {
             var state = impostor.State;
-            var shape = impostor.Shape;
+            var shape = impostor.Drawn;
 
             Vector3D position;
             Matrix rotation;

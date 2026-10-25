@@ -29,6 +29,10 @@ public sealed class ImpostorService : IDisposable
     // A finer level sent for a zoomed view stays this long after the zoom ended, seconds
     private const double ZoomKeepSeconds = 30;
 
+    // The share of the client's quad budget the impostors inside a zoomed view may take with
+    // their finer levels, the rest is for everything else on screen
+    private const double ZoomQuadShare = 0.75;
+
     // A new impostor that comes while the player is out of shape credit gets a level of at most
     // this many bytes first, the finer one follows once the credit is paid off. Turning a zoomed
     // view over an asteroid ring brings dozens of new ones at once, at their finest levels
@@ -446,6 +450,7 @@ public sealed class ImpostorService : IDisposable
             config.ShapeBytesPerSecond
         );
         var now = MySession.Static.ElapsedPlayTime.TotalSeconds;
+        var zoomQuads = 0;
         foreach (var (entry, pixels, zoom, distance) in shown)
         {
             entry.Wanted = true;
@@ -471,6 +476,22 @@ public sealed class ImpostorService : IDisposable
                 index--;
             if (sent != null && now < sent.KeepUntil && sent.Version == entry.Version)
                 index = Math.Max(index, entry.ShapeIndex(sent.Lod));
+
+            // The zoomed ones share ZoomQuadShare of the client's quad budget, largest on
+            // screen first, about half of each shape's quads facing the camera. Over a ring
+            // two or three asteroids at level 64 took all of it, and the client dropped the
+            // rest of the view.
+            if (zoom > 1)
+            {
+                while (
+                    index > normal
+                    && zoomQuads + QuadCount(entry.Shapes[index]) / 2
+                        > config.MaxQuadsPerFrame * ZoomQuadShare
+                )
+                    index--;
+                zoomQuads += QuadCount(entry.Shapes[index]) / 2;
+                keep = index > normal;
+            }
 
             // A new impostor gets a level the client has, or a small one while the player is
             // in debt
