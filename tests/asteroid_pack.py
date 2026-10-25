@@ -175,7 +175,9 @@ def run(with_pack: bool) -> dict:
             float(c)
             for c in re.findall(r"Impostor build: .*kind=Voxel .* cpu=([0-9.]+)", text)
         ]
-        client_log = CLIENT.log.read_text(errors="replace") if CLIENT.log.exists() else ""
+        client_log = (
+            CLIENT.log.read_text(errors="replace") if CLIENT.log.exists() else ""
+        )
         index = re.search(r"asteroid pack of mod .* index read in (\d+) ms", client_log)
         reused = re.findall(r"the reused ones took (\d+) ms CPU", text)
         result.update(
