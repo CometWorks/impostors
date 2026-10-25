@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Sandbox.Game.Entities;
 using Shared.Logging;
@@ -41,6 +42,9 @@ public sealed class ImpostorRegistry
     private int built;
     private int cached;
     private int unchanged;
+
+    // CPU time of the builds that reused shapes (the content hash), microseconds
+    private long reusedCpu;
 
     public ImpostorRegistry(IPluginLogger log, IShapeCache cache)
     {
@@ -85,9 +89,9 @@ public sealed class ImpostorRegistry
         entries.Remove(id);
     }
 
-    public (int built, int cached, int unchanged) TakeCounts()
+    public (int built, int cached, int unchanged, double reusedCpuMs) TakeCounts()
     {
-        var counts = (built, cached, unchanged);
+        var counts = (built, cached, unchanged, Interlocked.Exchange(ref reusedCpu, 0) / 1000.0);
         built = cached = unchanged = 0;
         return counts;
     }
@@ -191,9 +195,12 @@ public sealed class ImpostorRegistry
                 {
                     log.Error(e, $"Failed to build impostor {entry.Id}");
                 }
+                var cpu = timing.CpuMs;
                 BuildTiming.Stop();
 
                 var reused = build.Unchanged || build.Cached;
+                if (reused && !double.IsNaN(cpu))
+                    Interlocked.Add(ref reusedCpu, (long)(cpu * 1000));
                 if (shapes != null && !entry.Source.Remote && !reused)
                 {
                     // One line per build for tests/build_times.py

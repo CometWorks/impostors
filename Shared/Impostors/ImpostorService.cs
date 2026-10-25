@@ -336,11 +336,12 @@ public sealed class ImpostorService : IDisposable
             foreach (var viewer in viewers.Values)
                 LogViewer(viewer);
 
-            var (built, cached, unchanged) = registry.TakeCounts();
+            var (built, cached, unchanged, reusedCpuMs) = registry.TakeCounts();
             var packed = pack?.TakeHits() ?? 0;
             if (built + cached + unchanged > 0)
                 log.Info(
-                    $"Impostor shapes in the last minute: {built} built, {cached - packed} from the cache, {packed} from the asteroid pack, {unchanged} unchanged"
+                    $"Impostor shapes in the last minute: {built} built, {cached - packed} from the cache, {packed} from the asteroid pack, {unchanged} unchanged; "
+                        + $"the reused ones took {reusedCpuMs:0} ms CPU"
                 );
         }
     }

@@ -52,6 +52,9 @@ the whitelist, loading the mod in the game does.
   joins and must build nothing the second time, with the versions kept (the client's cache
   then sends no shapes either). It also checks retention and the size cap, and that turning
   asteroid occlusion off rebuilds the asteroids only.
+- `tests/asteroid_pack.py` writes the asteroid pack of the "Octahedron - Seed 2" world
+  (`write`), then joins above its asteroid ring with empty shape caches without and with the
+  pack (`measure`) and compares the asteroid builds and the shape bytes. See its docstring.
 - `tests/cluster_scenario.py` checks far view across a cluster on the cluster's scenario
   bench.
 - `tests/build_times.py` makes a table of the build times from the `Impostor build:` lines of

@@ -22,6 +22,10 @@ The file is read only when the server starts, so changes take effect after a res
 | `ReplicationMargin` | 500 | Impostors arrive this far inside the sync distance already |
 | `CacheMegabytes` | 256 | Disk space for built shapes, so a restart builds only what changed; 0 turns the cache off |
 | `CacheDays` | 30 | Cached shapes unused this long are dropped |
+| `AsteroidPack` | true | Takes asteroid shapes from the world's asteroid pack mod, see [Asteroid pack](AsteroidPack.md) |
+| `AsteroidPackMod` | 0 | Workshop id of the mod with the asteroid pack, 0 for any of the world's mods that has one |
+| `WriteAsteroidPack` | false | Builds every asteroid of the world and writes its asteroid pack mod, once per start |
+| `AsteroidPackMaxLevel` | 64 | Finest level written into the pack; a lower one makes it smaller but serves only clients |
 
 Notes:
 
@@ -49,6 +53,9 @@ Notes:
 - The cache is the `ImpostorsCache` folder in the server's data folder, see
   [Design](Design.md#server). On a cluster only the World Authority's counts, the nodes use
   it. The WA also saves its index of the cluster's grids there.
+- The client plugin reads `AsteroidPack` and `AsteroidPackMod` too, for the impostors it
+  draws on servers whose world has no Impostors mod and for its own builds offline and on a
+  lobby host. The Impostors mod always uses the world's pack.
 - A larger shape than `ShapeBytesPerSecond` still goes out; the following ones wait until the
   player's next seconds have paid it off. New impostors never wait, but while the player is in
   debt they start with a small level. Levels the client got earlier in the session cost no
