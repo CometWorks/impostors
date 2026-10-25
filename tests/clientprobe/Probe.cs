@@ -2,7 +2,9 @@ using System;
 using System.Globalization;
 using System.IO;
 using HarmonyLib;
+using Sandbox.Engine.Utils;
 using Sandbox.Game.World;
+using VRage;
 using VRage.FileSystem;
 using VRage.Game;
 using VRage.Game.Components;
@@ -19,6 +21,7 @@ namespace ImpostorsClientProbe;
 // - billboards.txt ("postpp N ldr M pulse T") draws N PostPP and M LDR billboards per frame,
 //   on for T ticks and off for T, always with T = 0. billboard-stats.txt then says every
 //   second what the game drew of the frames' billboards, see BillboardCheck.
+// - camera.txt ("x y z yaw pitch yawrate vx vy vz") flies the spectator camera, see CameraPath.
 public class Probe : IPlugin
 {
     private int tick;
@@ -40,7 +43,8 @@ public class Probe : IPlugin
 
     public void Update()
     {
-        if (++tick % 30 != 0)
+        CameraPath.Update(++tick);
+        if (tick % 30 != 0)
             return;
 
         BillboardStress.Read();
@@ -208,5 +212,66 @@ public static class BillboardCheck
         frames = over = full = maxTotal = maxDrawn = cutOthers = cutPostPP = cutImpostors = 0;
         maxImpostorsDrawn = 0;
         minImpostorsDrawn = int.MaxValue;
+    }
+}
+
+// Flies the spectator camera on a path given by camera.txt, set again every tick: from x y z
+// (meters) at velocity vx vy vz (m/s), looking at yaw and pitch (degrees, yaw 0 along -Z,
+// 90 along +X, pitch up) and turning at yawrate (degrees per second). A changed file starts
+// the path again; without the file the camera goes back to the controlled entity.
+public static class CameraPath
+{
+    private static string current;
+    private static int start;
+    private static double[] values;
+
+    public static void Update(int tick)
+    {
+        if (tick % 10 == 0)
+            Read(tick);
+        if (values == null || MySession.Static == null)
+            return;
+
+        var t = (tick - start) / 60.0;
+        var position =
+            new Vector3D(values[0], values[1], values[2])
+            + new Vector3D(values[6], values[7], values[8]) * t;
+        var yaw = MathHelper.ToRadians(values[3] + values[5] * t);
+        var pitch = MathHelper.ToRadians(values[4]);
+        var forward = new Vector3D(
+            Math.Cos(pitch) * Math.Sin(yaw),
+            Math.Sin(pitch),
+            -Math.Cos(pitch) * Math.Cos(yaw)
+        );
+
+        if (MySession.Static.CameraController != MySpectatorCameraController.Static)
+            MySession.Static.SetCameraController(MyCameraControllerEnum.Spectator, null, position);
+        MySpectator.Static.SpectatorCameraMovement = MySpectatorCameraMovementEnum.UserControlled;
+        MySpectator.Static.Position = position;
+        MySpectator.Static.SetTarget(position + forward, Vector3D.Up);
+    }
+
+    private static void Read(int tick)
+    {
+        var file = Path.Combine(MyFileSystem.UserDataPath, "camera.txt");
+        var text = File.Exists(file) ? File.ReadAllText(file).Trim() : null;
+        if (text == current)
+            return;
+        current = text;
+        start = tick;
+        if (text == null)
+        {
+            if (values != null && MySession.Static?.ControlledEntity != null)
+                MySession.Static.SetCameraController(
+                    MyCameraControllerEnum.Entity,
+                    MySession.Static.ControlledEntity.Entity
+                );
+            values = null;
+            return;
+        }
+        var words = text.Split((char[])null, StringSplitOptions.RemoveEmptyEntries);
+        values = new double[9];
+        for (var i = 0; i < 9 && i < words.Length; i++)
+            values[i] = double.Parse(words[i], CultureInfo.InvariantCulture);
     }
 }

@@ -12,9 +12,11 @@ namespace Impostors
         public const ushort Channel = 47213;
         public const byte Version = 7;
 
-        // Client to server: byte version. Sent when the session is ready and then every
-        // HelloInterval seconds, so a server that starts later or a cluster node the client
-        // was moved to learns that this client draws impostors.
+        // Client to server: byte version, byte 1 while the client has no impostors and no
+        // shapes from the server yet (no Welcome), 0 after. Sent when the session is ready and
+        // then every HelloInterval seconds, so a server that starts later or a cluster node the
+        // client was moved to learns that this client draws impostors. A server that knew the
+        // client already starts over with it on a 1.
         public const byte Hello = 1;
 
         // Server to client: byte version, long server instance id, int most impostor quads the
@@ -22,21 +24,27 @@ namespace Impostors
         // server (process or cluster node): the client drops every impostor it has.
         public const byte Welcome = 2;
 
-        // Server to client: ushort count, then count states (see ImpostorState).
+        // Server to client: ushort count, then count states (see ImpostorState). A state whose
+        // level and version the client has in its ShapeStore switches the impostor to that
+        // shape, no ShapeData follows. A state may also name a level that is on its way, or
+        // waits for the player's shape credit; the client draws the shape it has until then.
         public const byte States = 3;
 
-        // Server to client: ushort count, then count long ids of impostors to drop.
+        // Server to client: ushort count, then count long ids of impostors to drop. Their
+        // shapes stay in the ShapeStore.
         public const byte Remove = 4;
 
         // Server to client: ushort count, then count times long id, int version and a shape
-        // (see Shape, or ZoneShape for a safe zone). Small shapes share a message.
+        // (see Shape, or ZoneShape for a safe zone). Small shapes share a message. The client
+        // adds each to its ShapeStore.
         public const byte ShapeData = 5;
 
         // Client to server: float vertical field of view with zoom (radians), ushort viewport
-        // width and height, float forward x, y, z of the camera. Sent while the view is zoomed
-        // (see Zoom), when it zoomed or turned noticeably, and once more after leaving the zoom.
-        // The server sends finer levels for the impostors inside the view. Older servers
-        // ignore it.
+        // width and height, float forward x, y, z of the camera, byte 1 for a spectator camera
+        // and its double position x, y, z. Sent while the view is zoomed (see Zoom) or a
+        // spectator camera, when it zoomed, turned or moved noticeably, and once more after
+        // that ended. The server sends finer levels for the impostors inside a zoomed view, and
+        // picks for the spectator camera's position when the player may spectate.
         public const byte View = 6;
 
         // Client to server: ushort count, then count long ids of impostors whose real entity
@@ -44,6 +52,9 @@ namespace Impostors
         // drawing. Inside the replication cube the server keeps sending an impostor until the
         // client reports its entity ready, so nothing is missing while a grid streams in.
         public const byte Ready = 7;
+
+        // A spectator camera that moved this far gets a new View message, meters
+        public const double ViewMoveMeters = 100;
 
         // Views at least this much larger than the server's default estimate count as zoomed
         public const double MinZoom = 1.5;

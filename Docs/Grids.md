@@ -50,7 +50,8 @@ by the sun.
 | 4 | 26 | 0.3 KB | level 16 |
 
 The server sends one level per impostor and player, about one cell per 2.5 pixels of the
-impostor's size on a 1080p screen. Grids keep level 16 down to half the size where other
+impostor's size on a 1080p screen, or coarser when a player's impostors would be over
+`MaxQuadsPerFrame` together. Grids keep level 16 down to half the size where other
 impostors switch, since their coarser levels lose the shape fast. Levels under 16 are
 downsampled from 16: a cell is filled when 2 of its 8 children are, with their average color.
 

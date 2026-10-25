@@ -35,7 +35,8 @@ Billboard facts this design depends on (decompiled game 1.210):
 - 32768 billboards per frame for everything, vanilla effects included. The overflow is
   dropped silently, the last blend types first (see [Billboard limit](#billboard-limit-se-664)).
   The renderer caps itself at `MaxQuadsPerFrame` quads (16000 by default), which the server
-  sends with its Welcome.
+  sends with its Welcome. It counts only the impostors in the camera's frustum, nearest
+  first, and skips one that doesn't fit while farther ones still may.
 - Billboards are depth tested against the scene but never write depth. The `Standard` blend
   is weighted blended OIT, so overlapping opaque quads mix and look see-through. The `LDR`
   blend draws in submission order with premultiplied alpha after tone mapping. Impostors use
@@ -72,6 +73,13 @@ greedily into rectangles of one color, so a flat painted side is a single quad.
   1080p screen with a 70° field of view: about one cell per 2.5 pixels. Grids keep level
   16 down to half that size, as their coarser levels lose the shape fast. A zoomed view
   gets finer levels inside it, see "Zoomed views" below.
+- The levels of a player's impostors together stay within `MaxQuadsPerFrame`, counting half
+  of each shape's quads as facing the camera. While the player zooms only those in the
+  zoomed view count; otherwise the server doesn't know the view direction and counts all. When the picks are over it, the server picks
+  them all again as if the screen were smaller, so the near ones lose detail instead of the
+  client dropping the far ones. Above the Octahedron asteroid ring (SE-666) the few
+  asteroids just outside the replication range took level 32, about 3600 quads each, and
+  the client drew 4 of 137 impostors.
 - Encoding (`Protocol.cs`): a 19 byte header (level, cell size, origin) and 10 bytes per quad
   (face, min cell, width, height, RGB565 color, normal).
 - Each quad carries the normal it is shaded with, octahedral with 6 bits per coordinate
@@ -111,16 +119,19 @@ Every second it:
 1. Scans the sources. Each source adds, updates and removes its entries (an id, a world
    matrix, a velocity, a world AABB and a cheap content signature).
 2. For each player whose client said hello, picks the candidates: not within the
-   replication cube (half side `SyncDistance - ReplicationMargin` around the player's
-   controlled entity) unless held there (see "Streaming in" below), within the view distance, at least `MinPixels` across on screen (3
-   by default, so nothing under 3x3 pixels; the size is that of the AABB's bounding
-   sphere). The largest `MaxImpostorsPerPlayer` win.
+   replication cube (half side `SyncDistance - ReplicationMargin` around where the game
+   replicates to the player, see "Moving views") unless held there (see "Streaming in"),
+   within the view distance, at least
+   `MinPixels` across on screen (3 by default, so nothing under 3x3 pixels; the size is
+   that of the AABB's bounding sphere). The largest `MaxImpostorsPerPlayer` win.
 3. Sends what changed for that player: removals, a state and a shape for new impostors or
-   ones with a new version or level, and a state for moved ones. Shapes average
-   `ShapeBytesPerSecond` per player: one goes out while the player has credit left, even
-   if it is larger than that (an asteroid's finest level is about 150 KB), and the next
-   ones wait until the following seconds have paid off the debt. New impostors don't wait.
-   The states go first, then the shapes, small ones sharing a message up to 16 KB.
+   ones with a new version or level, and a state for moved ones. A level whose shape the
+   client has already, from earlier in the session, costs a state only (see "Shape store").
+   Shapes average `ShapeBytesPerSecond` per player: one goes out while the player has credit
+   left, even if it is larger than that (an asteroid's finest level is about 150 KB), and the
+   next ones wait until the following seconds have paid off the debt. New impostors don't
+   wait, but while the player is in debt they get a level the client has or one of at most
+   2 KB first. The states go first, then the shapes, small ones sharing a message up to 16 KB.
 4. Starts background builds for the wanted entries that have no shapes yet, or whose content
    changed, at most two at a time. Each finished build logs an `Impostor build:` line with
    the snapshot time on the game thread and the wall clock time, thread CPU time and quads
@@ -176,12 +187,46 @@ second at most. For that player the server then:
   extra picks don't raise the bandwidth.
 - takes a zoomed level only while its shape has at most `MaxQuadsPerFrame` quads, about
   half of them facing the camera, so one zoomed impostor can't take the client's whole
-  budget.
-- keeps a level sent for the zoom for 30 seconds after it was last wanted, so looking
-  through the zoom again soon costs nothing.
+  budget; with the others they fit the budget together (see "Billboard limit").
+- puts the normal level back when the zoom ends. The client keeps the zoomed one in its
+  shape store, so looking through the zoom again costs a state only.
 
-The server's eye is still the player's controlled entity; the camera of a third person or
-cockpit view is close enough to it for impostors kilometers away.
+## Moving views (SE-671)
+
+Turning a zoomed view over an asteroid ring, or flying a spectator camera fast, left gaps:
+impostors that should be on screen and weren't drawn. `tests/view_gaps.py` measures them.
+What the server and the client do about it:
+
+- Shape store: the client keeps every shape the server sent, by impostor id, level and
+  version, up to 8 MB of encoded shapes (`ShapeStore`, about 40 MB once decoded). The server
+  keeps the same store for each player, without the shapes: both add the shapes in the order
+  of the ShapeData messages and drop the earliest ones first when over the limit, so they
+  agree on what the client has without telling each other. A level the client has costs a
+  state only: an impostor removed when it left a zoomed view and shown again, or the finer
+  level of a zoom when the view zooms in again. That replaced keeping a zoomed level for 30 s
+  after the zoom, which over a ring left the near rocks with so many quads that a wide view
+  after a zoom dropped most of the others.
+- Debt: a turning zoom brings dozens of new impostors at once. Sent at their finest levels,
+  that was megabytes of debt and no finer level for any other impostor for minutes; now new
+  ones start small while the player is in debt, and the finer level follows like any other.
+- Waiting: when a finer level waits for credit, the server sends a state naming it once. The
+  client keeps drawing the shape it has; `stats.txt` counts these (`waiting`).
+- Quad budget: the levels fit `MaxQuadsPerFrame` together (SE-666, see "Billboard limit").
+  Over a ring two or three asteroids at zoomed level 64 took the whole budget before. On the
+  client an impostor that doesn't fit is drawn at the finest coarser level it has in its
+  shape store that fits, or left out without stopping the ones behind it.
+- The zoomed cone the server uses is a quarter of the field of view wider than the view,
+  which covers the eighth of a turn before the client reports the view again, plus what a
+  turning view turns in half a second (up to a field of view), estimated from the last two
+  `View` messages.
+- Eye: the server picks from where the game replicates to the player (`MyClientState`): the
+  controlled entity, or the spectator camera of a player with creative rights. A spectator
+  camera also goes into the `View` message, with its position, every 100 m it moves, and
+  the server sizes the impostors from there when the player may spectate (`EnableSpectator`
+  or spectator rights). The replication cube stays where the game replicates.
+
+A third person or cockpit camera is close enough to the controlled entity for impostors
+kilometers away.
 
 Motion: a state is resent when the impostor moved more than about a pixel compared to where
 the client extrapolates it, turned by more than about 1.6° or changed its velocity. The
@@ -193,17 +238,19 @@ Mod networking on channel 47213, reliable messages up to 16 KB:
 
 | Message | Direction | Content |
 |---|---|---|
-| Hello | client to server | protocol version; at load and every 30 s |
+| Hello | client to server | protocol version, whether the client has nothing from the server yet; at load and every 30 s |
 | Welcome | server to client | protocol version, server instance id, `MaxQuadsPerFrame` |
-| States | server to client | impostor states: id, kind (grid, voxel or safe zone), version, level, radius, position, orientation, velocity, safe zone tint (74 bytes each) |
+| States | server to client | impostor states: id, kind (grid, voxel or safe zone), version, level, radius, position, orientation, velocity, safe zone tint (74 bytes each); a level from the shape store switches the impostor to it |
 | Remove | server to client | impostor ids |
 | ShapeData | server to client | count, then id, version and shape per impostor |
-| View | client to server | field of view with zoom, viewport width and height, view direction; while zoomed |
+| View | client to server | field of view with zoom, viewport width and height, view direction, spectator camera and its position; while zoomed or spectating |
 | Ready | client to server | ids of impostors whose real entity started drawing, then those whose entity stopped |
 
 The repeated hello means the server needs no state about clients across restarts, and a
 cluster node a player was moved to learns about the client within 30 s. A different server
-instance id makes the client drop everything it has.
+instance id makes the client drop everything it has, shape store included. A hello from a
+client without a Welcome yet makes the server start over with that player, so a quick rejoin
+can't leave the server's copy of the store out of step.
 
 ## Client
 

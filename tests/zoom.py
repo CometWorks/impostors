@@ -167,30 +167,29 @@ def run(api):
     _, impostors = CLIENT.stats()
     check("ship still drawn", drawn(impostors, ship), impostors.get(ship.entity_id))
 
-    # Leaving the zoom keeps the finer levels for a while. The station stays at 32
-    # anyway: level 16 is within the hysteresis of 32 (PickLod).
+    # Leaving the zoom puts the normal level back at once, from the client's shape store
     totals = zoomed(api, False)
     check("wide view again", float(totals.get("fov", 0)) > 60, totals)
     check("mod reports the end of the zoom", totals.get("zoomed") == "0", totals)
-    time.sleep(5)
-    _, impostors = CLIENT.stats()
+    _, impostors = wait_stats(lambda i: lod(i, rock.entity_id) == rock_lod, 5)
     check(
-        "asteroid finer level kept after the zoom",
-        lod(impostors, rock.entity_id) > rock_lod,
-        impostors.get(rock.entity_id),
-    )
-    print(
-        "screenshot",
-        sight_shot(api, "zoom-RockFar-wide-kept", rock.entity_id, rock.center),
-    )
-
-    # ... and the normal level comes back after ZoomKeepSeconds (30)
-    _, impostors = wait_stats(lambda i: lod(i, rock.entity_id) == rock_lod, 45)
-    check(
-        "asteroid normal level after the keep time",
+        "asteroid normal level after the zoom",
         lod(impostors, rock.entity_id) == rock_lod,
         impostors.get(rock.entity_id),
     )
+
+    # Zooming in again switches back to the finer level with a state only: the client has
+    # the shape, no new one arrives
+    shape_tick = impostors.get(rock.entity_id, {}).get("shapetick")
+    zoomed(api, True)
+    _, impostors = wait_stats(lambda i: lod(i, rock.entity_id) > rock_lod, 5)
+    i = impostors.get(rock.entity_id, {})
+    check(
+        "asteroid finer level again from the store",
+        lod(impostors, rock.entity_id) > rock_lod and i.get("shapetick") == shape_tick,
+        i,
+    )
+    zoomed(api, False)
 
 
 def sheet() -> Path:

@@ -123,5 +123,9 @@ namespace Impostors
 
         // The real entity draws: the impostor is hidden and the server was told so
         public bool Ready;
+
+        // The shape drawn this frame: Shape, or a coarser one from the store when Shape didn't
+        // fit into the quad budget
+        public ClientShape Drawn;
     }
 }
