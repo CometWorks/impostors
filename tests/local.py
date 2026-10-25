@@ -59,13 +59,19 @@ def wait(predicate, timeout: float, interval: float = 3.0):
         time.sleep(interval)
 
 
+def has_shape(impostors: dict, entity_id: int) -> bool:
+    """The renderer has the impostor with a shape. Whether it draws it also depends on
+    where the camera looks, as it culls what is outside the view."""
+    return impostors.get(entity_id, {}).get("shape", "none") != "none"
+
+
 def shown(client: rig.Client, ids, timeout: float = 180) -> dict:
-    """Waits until the client's renderer draws every id; its stats per id"""
+    """Waits until the client's renderer has a shape for every id; its stats per id"""
     ids = set(ids)
 
     def drawn():
         _, impostors = client.stats()
-        ok = all(impostors.get(i, {}).get("drawn") == "1" for i in ids)
+        ok = all(has_shape(impostors, i) for i in ids)
         return impostors if ok else None
 
     return wait(drawn, timeout) or client.stats()[1]
@@ -105,8 +111,8 @@ def run_offline() -> None:
     impostors = shown(HOST, (BEYOND.entity_id, ROCK_BEYOND.entity_id))
     for thing in (BEYOND, ROCK_BEYOND):
         check(
-            f"{thing.name} drawn",
-            impostors.get(thing.entity_id, {}).get("drawn") == "1",
+            f"{thing.name} shown",
+            has_shape(impostors, thing.entity_id),
         )
     within = [g.name for g in world.GRIDS + world.ASTEROIDS if g.entity_id in impostors]
     check("nothing within the view distance", not within, within)
@@ -122,8 +128,8 @@ def run_lobby(host_api) -> None:
     impostors = shown(HOST, (t.entity_id for t in far))
     for thing in far:
         check(
-            f"host draws {thing.name}",
-            impostors.get(thing.entity_id, {}).get("drawn") == "1",
+            f"host shows {thing.name}",
+            has_shape(impostors, thing.entity_id),
         )
     check("host has no impostor of Near", world.NEAR.entity_id not in impostors)
 
@@ -144,9 +150,7 @@ def run_lobby(host_api) -> None:
     )
     impostors = shown(JOINER, (g.entity_id for g in NEAR_GRIDS))
     for g in NEAR_GRIDS:
-        check(
-            f"joiner draws {g.name}", impostors.get(g.entity_id, {}).get("drawn") == "1"
-        )
+        check(f"joiner shows {g.name}", has_shape(impostors, g.entity_id))
 
 
 def main():
