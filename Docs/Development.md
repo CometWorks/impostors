@@ -35,6 +35,11 @@ the whitelist, loading the mod in the game does.
   billboards until a frame is over 32768 and reports which billboards the game cuts. With
   the mod only the impostors keep within `MaxQuadsPerFrame` (and the game still cuts other
   billboards); with `IMP_PLUGIN=1` only impostor quads go. See its docstring.
+- `tests/streaming.py` checks the hand-over when the player arrives fast: it jumps from 5 km
+  to next to the station, a safe zone and an asteroid, deep into the replication cube, and
+  checks that the impostor stays and is drawn at its level from afar until the real entity
+  draws, then hides and goes. `IMP_WITH_PLUGIN=1` also runs the client plugin, which tells
+  the mod when an asteroid's meshes show. See its docstring.
 - `tests/ring.py` flies over the asteroid ring of the "Octahedron - Seed 2" world with its
   Workshop mods (built by `worlds/octahedron/build_world.py --seed 2`) and prints, per height,
   the voxel maps the client has, the impostors it got and drew, their quads and the frame's

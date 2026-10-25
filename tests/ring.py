@@ -202,8 +202,8 @@ def main() -> int:
             eye = base + normal * (height + 300)
             api.character_teleport(*eye)
             time.sleep(5)
-            # Down at the ring and ahead, so the near and the far asteroids show
-            target = base + side * (height + 5000)
+            # Down at the ring and ahead along it, so the near and the far asteroids show
+            target = base + tangent * (height + 5000)
             api.character_look_at(*target, tolerance=2)
             CLIENT.set_fov(None)
             time.sleep(SETTLE)
@@ -230,12 +230,14 @@ def main() -> int:
             )
             time.sleep(5)
             measure(api, name + "-along")
-            api.character_look_at(*target, tolerance=2)
+            # 30 km ahead on the ring, past the real asteroids, then across the band
+            far = base + tangent * (height + 30000)
+            api.character_look_at(*far, tolerance=1)
             CLIENT.set_fov(ZOOM_FOV)
             time.sleep(10)
             measure(api, name + "-zoom")
             for step in range(1, 7):
-                api.character_look_at(*(target + tangent * step * 2000), tolerance=1)
+                api.character_look_at(*(far + side * (step - 3.5) * 3000), tolerance=1)
                 time.sleep(1)
                 measure(api, f"{name}-sweep{step}", shot=step == 6)
             CLIENT.set_fov(None)

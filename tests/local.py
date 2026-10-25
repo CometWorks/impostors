@@ -59,16 +59,41 @@ def wait(predicate, timeout: float, interval: float = 3.0):
         time.sleep(interval)
 
 
+def has_shape(impostors: dict, entity_id: int) -> bool:
+    """The renderer has the impostor with a shape. Whether it draws it also depends on
+    where the camera looks, as it culls what is outside the view."""
+    return impostors.get(entity_id, {}).get("shape", "none") != "none"
+
+
 def shown(client: rig.Client, ids, timeout: float = 180) -> dict:
-    """Waits until the client's renderer draws every id; its stats per id"""
+    """Waits until the client's renderer has a shape for every id; its stats per id"""
     ids = set(ids)
 
     def drawn():
         _, impostors = client.stats()
-        ok = all(impostors.get(i, {}).get("drawn") == "1" for i in ids)
+        ok = all(has_shape(impostors, i) for i in ids)
         return impostors if ok else None
 
     return wait(drawn, timeout) or client.stats()[1]
+
+
+def past_questions(api) -> bool:
+    """Answers the game's question about a world saved without its binary files;
+    True once the respawn screen or the world is up"""
+    try:
+        screens = api.list_screens()
+        for screen in screens:
+            if screen.get("type") == "MyGuiScreenMessageBox":
+                for button in ("Yes", "OK"):
+                    try:
+                        api.control_click(text=button, screen=screen["index"])
+                        break
+                    except Exception:  # noqa: BLE001 -- not this button
+                        continue
+        types = [screen.get("type", "") for screen in screens]
+        return any("Medical" in t for t in types) or api.get_state().get("ready", False)
+    except Exception:  # noqa: BLE001 -- the API times out while a world loads
+        return False
 
 
 def start_host() -> rig.RemoteAPI:
@@ -89,8 +114,11 @@ def start_host() -> rig.RemoteAPI:
     HOST.launch(0)
     api = HOST.wait_api()
     api.load(str(WORLD), online_mode="FRIENDS" if LOBBY else "OFFLINE")
-    rig.wait_world(api)
+    # Offline the game asks whether to load a world saved without its binary files, and
+    # the session is not ready before the player spawns
+    wait(lambda: past_questions(api), 600, 2)
     rig.ensure_character(api)
+    rig.wait_world(api)
     rig.focus_gameplay(api)
     api.character_teleport(*world.HOME)
     return api
@@ -105,8 +133,8 @@ def run_offline() -> None:
     impostors = shown(HOST, (BEYOND.entity_id, ROCK_BEYOND.entity_id))
     for thing in (BEYOND, ROCK_BEYOND):
         check(
-            f"{thing.name} drawn",
-            impostors.get(thing.entity_id, {}).get("drawn") == "1",
+            f"{thing.name} shown",
+            has_shape(impostors, thing.entity_id),
         )
     within = [g.name for g in world.GRIDS + world.ASTEROIDS if g.entity_id in impostors]
     check("nothing within the view distance", not within, within)
@@ -122,8 +150,8 @@ def run_lobby(host_api) -> None:
     impostors = shown(HOST, (t.entity_id for t in far))
     for thing in far:
         check(
-            f"host draws {thing.name}",
-            impostors.get(thing.entity_id, {}).get("drawn") == "1",
+            f"host shows {thing.name}",
+            has_shape(impostors, thing.entity_id),
         )
     check("host has no impostor of Near", world.NEAR.entity_id not in impostors)
 
@@ -144,9 +172,7 @@ def run_lobby(host_api) -> None:
     )
     impostors = shown(JOINER, (g.entity_id for g in NEAR_GRIDS))
     for g in NEAR_GRIDS:
-        check(
-            f"joiner draws {g.name}", impostors.get(g.entity_id, {}).get("drawn") == "1"
-        )
+        check(f"joiner shows {g.name}", has_shape(impostors, g.entity_id))
 
 
 def main():

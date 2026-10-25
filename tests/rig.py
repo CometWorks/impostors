@@ -488,10 +488,10 @@ class Client:
         (self.mod_storage / "stats.txt").unlink(missing_ok=True)
         # compare.py's last mode would carry over into the next run of any test
         (self.mod_storage / "mode").unlink(missing_ok=True)
+        (self.plugin_storage / "Impostors.stats.txt").unlink(missing_ok=True)
+        (self.plugin_storage / "Impostors.mode").unlink(missing_ok=True)
         if self.plugin:
             (self.plugin_storage / "Impostors.debug").write_text("")
-            (self.plugin_storage / "Impostors.stats.txt").unlink(missing_ok=True)
-            (self.plugin_storage / "Impostors.mode").unlink(missing_ok=True)
         self.set_fov(None)
         self.appdata.mkdir(parents=True, exist_ok=True)
         (self.appdata / "Remote.cfg").write_text(

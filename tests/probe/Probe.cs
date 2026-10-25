@@ -118,9 +118,14 @@ public sealed class ProbeCommands : CommandModule
             .Values.Cast<object>()
             .Select(v =>
                 $"{Get(v, "SteamId")}:{string.Join(",", ((IDictionary)Get(v, "Sent")).Keys.Cast<long>().OrderBy(i => i))}"
+                + $" ready={string.Join(",", ((IEnumerable)Get(v, "Ready")).Cast<long>().OrderBy(i => i))}"
+                + $" held={string.Join(",", Held((IDictionary)Get(v, "Sent")))}"
             );
         return $"Probe stats: entries={string.Join(" ", entries)} viewers={string.Join(" ", viewers)}";
     }
+
+    private static IEnumerable<long> Held(IDictionary sent) =>
+        sent.Keys.Cast<long>().Where(id => (bool)Get(sent[id], "Held")).OrderBy(id => id);
 
     [Command("place", "Puts a grid at a position, at rest.")]
     [Permission(MyPromoteLevel.Admin)]

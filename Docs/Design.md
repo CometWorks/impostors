@@ -140,7 +140,8 @@ Every second it:
    matrix, a velocity, a world AABB and a cheap content signature).
 2. For each player whose client said hello, picks the candidates: not within the
    replication cube (half side `SyncDistance - ReplicationMargin` around where the game
-   replicates to the player, see "Moving views"), within the view distance, at least
+   replicates to the player, see "Moving views") unless held there (see "Streaming in"),
+   within the view distance, at least
    `MinPixels` across on screen (3 by default, so nothing under 3x3 pixels; the size is
    that of the AABB's bounding sphere). The largest `MaxImpostorsPerPlayer` win.
 3. Sends what changed for that player: removals, a state and a shape for new impostors or
@@ -165,6 +166,31 @@ Changes the signature misses, like paint, are caught by rebuilding entries in vi
 The replication margin makes the hand-off seamless: the client has the impostor while the
 real grid is still replicated (and hides it), so there is no gap when the grid leaves the
 replication range.
+
+Streaming in (SE-672): arriving fast, a grid crosses the 500 m margin in a fraction of a
+second (0.05 s at 10 km/s), long before the server has streamed it to the client and the
+client has built its render cells. So an impostor the client already has is held inside the
+replication cube instead of removed:
+
+- The server keeps it at the level it was sent at, the finest one from the approach, and
+  sends no new shapes for it, only states when it moves. Held impostors sort right after the
+  safe zones, so `MaxImpostorsPerPlayer` doesn't drop them.
+- The client tells the server with a `Ready` message when the real entity draws itself: in
+  the scene with render objects (`IMyEntity.Render.RenderObjectIDs`; a grid has them once its
+  render cells are built, a safe zone once its model is) for a second, the longest the game
+  fades new entities in. It checks every 10 ticks, and reports an entity that stops drawing
+  too. The client hides the impostor from then on.
+- An asteroid has its render object (the clipmap) at once, but draws nothing until the
+  clipmap's first meshing pass is done, then fades its cells in over a second. The mod can't
+  see that pass, so it keeps an asteroid's impostor for 5 seconds. The client plugin
+  subscribes to the clipmap's `Loaded` event and sends the asteroid's id to the renderer as
+  a mod message when the pass is done; the impostor then hides within 10 ticks. With a
+  subscriber the game shows that pass's cells at once instead of fading them in, as on its
+  load screen.
+- The server removes a held impostor once the client reported it ready, or after 60 s.
+
+A grid group's impostor waits for the group's largest grid only; its subgrids stream on
+their own and may show a moment later.
 
 Zoomed views (SE-659): a rifle's iron sight, a spectator or camera zoom or a telescope mod
 narrows the field of view, and the impostors in view show larger than the default estimate.
@@ -278,6 +304,7 @@ Mod networking on channel 47213, reliable messages up to 16 KB:
 | Remove | server to client | impostor ids |
 | ShapeData | server to client | count, then id, version and shape per impostor; or a 1 and the level for a shape in the client's disk cache |
 | View | client to server | field of view with zoom, viewport width and height, view direction, spectator camera and its position; while zoomed or spectating |
+| Ready | client to server | ids of impostors whose real entity started drawing, then those whose entity stopped |
 | Inventory | client to server | whether more follow, count, then id, version and level mask per impostor in the client's disk cache; after each Welcome of a new server instance |
 
 The repeated hello means the server needs no state about clients across restarts, and a
@@ -291,8 +318,9 @@ can't leave the server's copy of the store out of step.
 `ImpostorRenderer` is a session component of the mod. It runs on multiplayer clients only.
 Each frame it:
 
-- skips impostors whose real entity exists on the client (`EntityExists` by id): within the
-  replication range the real grid draws itself,
+- skips impostors whose real entity draws on the client (see "Streaming in" above): within
+  the replication range the real grid draws itself, but while it streams in the impostor
+  stands in for it,
 - keeps the nearest impostors within the quad budget, counting the quads each one really
   draws: those on the faces towards the camera, all of a safe zone's,
 - draws them far to near, each with its back faces culled and its quads sorted back to front
