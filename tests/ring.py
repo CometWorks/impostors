@@ -9,8 +9,11 @@ save (se1/worlds/octahedron/build_world.py --seed 2) and its Workshop mods downl
     IMP_MOD_FOLDER=<path>     # the mod to stage instead of this working copy's
     IMP_TAG=<name>            # names the run in the output and the screenshots
 
-Prints one line per height: the replicated voxel maps the client has near and far, the
-impostors it got, drew and the quads, and the billboards the game drew or cut. Screenshots
+Prints one line per height with the replicated voxel maps the client has near and far, then
+one PASS or FAIL line per view: looking down at the ring, along it, zoomed in on it and
+while sweeping the zoomed view across it. A view passes when the client draws every impostor
+in its view; the line also has the quads and the billboards the game drew or cut. Exits
+with the number of failures. Screenshots
 go to ~/.se-test/<task>-shots.
 """
 
@@ -50,6 +53,9 @@ WORLD_NAME = "Octahedron - Seed 2"
 SHOTS = rig.TEST_ROOT / f"{rig.TASK}-shots"
 STATS = None  # the client's billboard-stats.txt
 rig.SERVER_GIB = 8.0
+# Vertical field of view of the zoomed checks, in degrees
+ZOOM_FOV = 10
+failures = 0
 
 SERVER = rig.Server()
 SERVER.world = SERVER.data / "Saves" / WORLD_NAME
@@ -132,6 +138,28 @@ def probe_stats() -> dict:
         return {}
 
 
+def measure(api, name: str, shot: bool = True) -> None:
+    """One line of the mod's and the probe's numbers, a screenshot and the stats"""
+    global failures
+    totals, impostors = CLIENT.stats()
+    real = sum(1 for i in impostors.values() if i.get("real") == "1")
+    b = probe_stats()
+    inview, drawn = int(totals.get("inview", -1)), int(totals.get("drawn", -1))
+    ok = drawn == inview
+    failures += not ok
+    print(
+        f"{'PASS' if ok else 'FAIL'} {name} impostors={totals.get('impostors')} "
+        f"inview={inview} drawn={drawn} realskip={real} "
+        f"quads={totals.get('quads')} maxquads={totals.get('maxquads')} "
+        f"bb_maxtotal={b.get('maxtotal')} cutothers={b.get('cutothers')} "
+        f"cutimpostors={b.get('cutimpostors')}",
+        flush=True,
+    )
+    if shot:
+        (SHOTS / f"{name}.png").write_bytes(api.screenshot_bytes(ignore_sprites=True))
+        shutil.copy(CLIENT.mod_storage / "stats.txt", SHOTS / f"{name}-stats.txt")
+
+
 def main() -> int:
     ids = copy_world(SERVER.world)
     center, normal, side, points = ring_geometry(SERVER.world)
@@ -166,6 +194,7 @@ def main() -> int:
             api.key("V")
         SHOTS.mkdir(parents=True, exist_ok=True)
         base = center + side * 120000
+        tangent = np.cross(normal, side)
         tag = (
             os.environ.get("IMP_TAG") or ("plugin" if PLUGIN else "mod") + "-" + QUALITY
         )
@@ -176,6 +205,7 @@ def main() -> int:
             # Down at the ring and ahead, so the near and the far asteroids show
             target = base + side * (height + 5000)
             api.character_look_at(*target, tolerance=2)
+            CLIENT.set_fov(None)
             time.sleep(SETTLE)
             # Replicated voxel maps the client has, and how far
             rel = points - eye
@@ -188,28 +218,32 @@ def main() -> int:
             near = sum(
                 np.linalg.norm(np.array(m["center"]) - eye) < 15000 for m in maps
             )
-            totals, impostors = CLIENT.stats()
-            real = sum(1 for i in impostors.values() if i.get("real") == "1")
-            b = probe_stats()
             print(
-                f"{tag} h={height/1000:.0f}km box={box} clientmaps={len(maps)} within15km={near} "
-                f"impostors={totals.get('impostors')} drawn={totals.get('drawn')} realskip={real} "
-                f"quads={totals.get('quads')} maxquads={totals.get('maxquads')} "
-                f"bb_maxtotal={b.get('maxtotal')} bb_maxdrawn={b.get('maxdrawn')} "
-                f"cutothers={b.get('cutothers')} cutimpostors={b.get('cutimpostors')}",
+                f"{tag} h={height/1000:.0f}km box={box} clientmaps={len(maps)} within15km={near}",
                 flush=True,
             )
-            (SHOTS / f"{tag}-{height/1000:.0f}km.png").write_bytes(
-                api.screenshot_bytes(ignore_sprites=True)
+            name = f"{tag}-{height/1000:.0f}km"
+            measure(api, name + "-down")
+            # Along the ring, then zoomed in on it and swept across it
+            api.character_look_at(
+                *(eye + tangent * 20000 - normal * (height + 300)), tolerance=2
             )
-            shutil.copy(
-                CLIENT.mod_storage / "stats.txt",
-                SHOTS / f"{tag}-{height/1000:.0f}km-stats.txt",
-            )
+            time.sleep(5)
+            measure(api, name + "-along")
+            api.character_look_at(*target, tolerance=2)
+            CLIENT.set_fov(ZOOM_FOV)
+            time.sleep(10)
+            measure(api, name + "-zoom")
+            for step in range(1, 7):
+                api.character_look_at(*(target + tangent * step * 2000), tolerance=1)
+                time.sleep(1)
+                measure(api, f"{name}-sweep{step}", shot=step == 6)
+            CLIENT.set_fov(None)
+            time.sleep(2)
     finally:
         CLIENT.stop()
         SERVER.stop()
-    return 0
+    return failures
 
 
 if __name__ == "__main__":
