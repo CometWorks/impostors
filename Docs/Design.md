@@ -184,8 +184,11 @@ a number to bump whenever a change to the building gives other shapes for the sa
 - Content with the same hash as the entry's last build keeps its shapes: a refresh of an
   unpainted grid costs the snapshot only.
 - Otherwise the build looks in the disk cache, one file per entity id with its newest build,
-  in `ImpostorsCache` of the server's data folder (the game's user data folder for the client
-  plugin). The same hash gives the cached shapes; a restart builds only what changed. The
+  in a subfolder named after the first 2 hex digits of the id (`01/012baf749a4ba168.shapes`),
+  in `Storage/Impostors/Cache` of the server's data folder (the game's user data folder for
+  the client plugin). Versions before SE-700 used `ImpostorsCache`, which the first start moves
+  there, or leaves with a log hint to delete it when the new folder already exists. Files of the
+  older flat layout move into their subfolders on start. The same hash gives the cached shapes; a restart builds only what changed. The
   version is the hash of the shapes as before, so an unchanged impostor keeps its version
   across a restart, and the clients' disk caches (see "Disk cache") keep working.
 - Every new build replaces the file of its entity. An entity gone from the scan for a minute
@@ -325,6 +328,72 @@ kilometers away.
 Motion: a state is resent when the impostor moved more than about a pixel compared to where
 the client extrapolates it, turned by more than about 1.6° or changed its velocity. The
 client extrapolates with the velocity for up to 10 seconds.
+
+## Cache gains and consistency (SE-662)
+
+Measured on 2026-10-25 on Linux, after the client cache (SE-647) and the server cache (SE-648)
+were merged. SE-661's runs never happened, so the baseline is a cold start: both caches
+empty, which is what a server without the caches does on every start.
+
+Single server, `tests/cache_gains.py` on factory@ai (AMD Ryzen AI MAX+ 395): the scenario
+world (six grids of 240 to 7544 blocks, two safe zones, a 512 m asteroid with occlusion), one
+client with only the mod, three joins per state, medians. CPU is the build thread's CPU time;
+the snapshot runs on the game thread before it.
+
+| State | Server work | CPU ms | Game thread ms | Client got | First sight |
+|---|---|---:|---:|---|---:|
+| Cold (no caches) | 9 built | 112 | 8.6 | 9 shapes, 36 KB | 2.2 s |
+| Server cache warm | 9 from the cache | 18 | 9.2 | 9 shapes, 36 KB | 2.2 s |
+| Both caches warm | 9 from the cache | 17 | 9.7 | 9 from its cache, 0 KB | 2.2 s |
+| Client cache warm | 9 built | 107 | 8.9 | 9 from its cache, 0 KB | 2.2 s |
+
+Per kind, cold build against cache hit: the six grids 18.8 against 2.9 ms, the asteroid 92 against
+13.7 ms, the two zones 1.3 against 1.7 ms. A hit still hashes its input, which for an asteroid
+means reading every voxel level it is built from, about 15 % of the build. Most of the
+asteroid's build is its finest level (L64, 15454 quads, 79 ms). Cache hits don't touch the
+game thread's snapshot.
+
+- First sight is the time from the session being ready until every far impostor has a shape.
+  It is the same in all states: the hello every 30 s, the Welcome and the first view pick
+  dominate it, a build of this world takes 0.1 s. The first join of every run took 66 s,
+  also when its shapes all came from the cache: it is the client's first session after the
+  rig started, not the builds. The table leaves it out of the cold medians.
+- The client cache saves all the shape bytes of the impostors it saw before, whatever the
+  server's cache. Builds are deterministic, so a server that lost its cache still builds the
+  versions the clients have.
+- The caches pay most on servers with many or large grids and asteroids: a server restart with
+  a warm cache skips every unchanged build, about 85 % of the CPU here.
+
+Cluster, `tests/cluster_scenario.py` on factory@polaris (AMD Ryzen 9 5950X, cluster 0.1.21):
+WA, two nodes, two stations of 3760 blocks and a 512 m asteroid. One run with
+`IMP_CACHE_MB=0`, three with the caches.
+
+| Event | Caches off | Caches on |
+|---|---|---|
+| A station's partition loads on a node (node change) | built, 4.2 ms CPU, 0.13 s wall | from the WA, 1.4 ms CPU, 1.5 s wall |
+| WA restart, its own asteroid | built, 120 ms CPU | from its cache, 23 ms CPU |
+| WA restart, offline stations | shown from the saved index | the same |
+| First sight for a joining client | 0.2 s | 0.2 s |
+
+A cache hit on a node saves CPU but not time: `cache-get` asks for one level per round trip,
+six in a row through the WA's game thread, about 0.25 s each. For a grid this small building
+it is faster; it pays for large grids and asteroids (and see SE-704 for those).
+
+Before SE-662 the WA opened its store only once its world was ready, so its own asteroid build
+a few seconds earlier was never stored, and after a restart it built it again. It opens the
+store on first use now. Each node still builds the asteroid itself: a shape level over the
+SDK's 64 KiB payload can't cross the cluster, see SE-704.
+
+Consistency, `tests/cache_consistency.py` on factory@ai, two runs of four rounds: every change
+reached both clients within its limit, in 2 to 11 s for block changes (limit RebuildSeconds
+plus 20 s) and 9 to 31 s for repaints, which show at the next refresh (RefreshSeconds 30 in
+the rig). A layer built and ground off again gave the station its first input and version
+back. After a client was killed while saving its cache and after the server was killed
+during rebuilds, the clients, the server's entries and the cache files agreed on every
+version. A start with the cache wiped built the same inputs and versions the cache had
+served. No duplicated impostors, no leftover temporary files, no cache errors in the logs.
+One race was found and fixed: the client's save at the end of a session could write the cache
+file while the background save was still writing it; both now take the same lock.
 
 ## Protocol
 
@@ -526,7 +595,7 @@ Magnetar Plugin SDK (`PluginSdk.Clustering`); the client side is unchanged.
   other nodes may need them.
 - The reply to a report carries the WA's instance id. A new one (a WA restart) makes the nodes
   report everything again.
-- The WA saves its index (`ImpostorsCache/index.bin` in its data folder, at most once a minute
+- The WA saves its index (`Storage/Impostors/Cache/index.bin` in its data folder, at most once a minute
   after a change) and loads it when its world is loaded, if the file is of the same world.
   The loaded records are offline until a node reports them, which keeps the grids of offline
   partitions visible across a WA restart. Reports carry each record's partition. A node whose

@@ -200,6 +200,13 @@ public sealed class ImpostorRegistry
                     if (build.Input != 0)
                         cache?.Put(entry.Id, entry.Kind, build.Input, shapes);
                 }
+                else if (shapes != null && build.Cached)
+                {
+                    // What a cache hit costs: the snapshot, the input hash and the read
+                    log.Info(
+                        $"Impostor from the cache: id={entry.Id} kind={entry.Kind} {size} snapshot={snapshotMs:0.00}{timing}"
+                    );
+                }
                 finished.Enqueue((entry, shapes, build));
             });
         }
