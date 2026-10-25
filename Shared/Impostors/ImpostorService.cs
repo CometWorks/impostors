@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using Impostors;
 using Sandbox.Engine.Multiplayer;
+using Sandbox.Game.Entities;
 using Sandbox.Game.Multiplayer;
 using Sandbox.Game.World;
 using Sandbox.ModAPI;
@@ -186,7 +187,7 @@ public sealed class ImpostorService : IDisposable
         if (config.Grids)
             sources.Add(new GridSource(config));
         if (config.Asteroids)
-            sources.Add(new VoxelSource(config));
+            sources.Add(new VoxelSource(config, asteroids, log));
         if (config.SafeZones)
             sources.Add(new SafeZoneSource());
         foreach (var factory in ExtraSources)
@@ -224,6 +225,8 @@ public sealed class ImpostorService : IDisposable
     public void Dispose()
     {
         MyAPIGateway.Multiplayer?.UnregisterSecureMessageHandler(Protocol.Channel, OnMessage);
+        foreach (var source in sources)
+            (source as IDisposable)?.Dispose();
         log.Info("Impostors service stopped");
     }
 
@@ -374,7 +377,10 @@ public sealed class ImpostorService : IDisposable
             var bytes = AsteroidPackCache.Write(
                 path,
                 world,
-                asteroids.Select(e => (e.Id, e.Input, e.Shapes)),
+                sources.OfType<VoxelSource>().FirstOrDefault()?.Settings ?? 0,
+                asteroids.Select(e =>
+                    (e.Id, e.Input, e.Shapes, e.Tag is MyVoxelMap { ContentChanged: false })
+                ),
                 (byte)config.AsteroidPackMaxLevel
             );
             log.Info(

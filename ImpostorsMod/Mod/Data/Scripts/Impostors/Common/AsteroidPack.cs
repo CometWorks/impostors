@@ -13,21 +13,24 @@ namespace Impostors
     // instead of over the network. A mined asteroid hashes differently and is built as before;
     // reset to its original voxels it hits the pack again.
     //
-    // File: magic, format, world name, count, then per asteroid long id, long content hash,
-    // int version, byte complete, byte level count, byte level and int length per level, and
-    // after the index the shapes in the same order. "Complete" is 0 when levels were left out
-    // of the pack: only clients can use such an entry, the server builds those asteroids.
+    // File: magic, format, world name, long settings (VoxelSource.Settings: what else the
+    // shapes depend on, like the occlusion setting), count, then per asteroid long id, long content hash,
+    // int version, byte flags, byte level count, byte level and int length per level, and
+    // after the index the shapes in the same order. Flags: 1 when the entry has every level
+    // (without, only clients can use it, the server builds those asteroids), 2 when the
+    // asteroid was never edited (ContentChanged false) when the pack was built.
     public class AsteroidPack
     {
         public const string FileName = "ImpostorsAsteroidPack.bin";
         public const int Magic = 0x50414d49; // "IMAP"
-        public const byte Format = 1;
+        public const byte Format = 2;
 
         private class Entry
         {
             public long Input;
             public int Version;
             public bool Complete;
+            public bool Original;
             public byte[] Lods;
             public long[] Offsets;
             public int[] Lengths;
@@ -43,6 +46,7 @@ namespace Impostors
         private byte[] data;
 
         public string World { get; private set; }
+        public long Settings { get; private set; }
         public ulong ModId
         {
             get { return mod.PublishedFileId; }
@@ -86,6 +90,7 @@ namespace Impostors
                 if (reader.ReadInt32() != Magic || reader.ReadByte() != Format)
                     throw new FormatException("not an asteroid pack of this version");
                 World = reader.ReadString();
+                Settings = reader.ReadInt64();
                 var count = reader.ReadInt32();
                 long offset = 0;
                 for (var i = 0; i < count; i++)
@@ -95,8 +100,10 @@ namespace Impostors
                     {
                         Input = reader.ReadInt64(),
                         Version = reader.ReadInt32(),
-                        Complete = reader.ReadByte() == 1,
                     };
+                    var flags = reader.ReadByte();
+                    entry.Complete = (flags & 1) != 0;
+                    entry.Original = (flags & 2) != 0;
                     var levels = reader.ReadByte();
                     entry.Lods = new byte[levels];
                     entry.Offsets = new long[levels];
@@ -143,6 +150,18 @@ namespace Impostors
             if (k < 0)
                 return null;
             return Read(entry, k, k)[0];
+        }
+
+        // Server: the content hash of an asteroid the pack has from before anybody edited it, so
+        // an asteroid that was never edited needs no voxel reads to find its entry
+        public bool TryGetOriginal(long id, out long input)
+        {
+            Entry entry;
+            input = 0;
+            if (!entries.TryGetValue(id, out entry) || !entry.Original || !entry.Complete)
+                return false;
+            input = entry.Input;
+            return true;
         }
 
         // Server: every level of the asteroid built from this content, coarsest first, or null

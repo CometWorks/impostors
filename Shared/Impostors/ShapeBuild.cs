@@ -29,9 +29,12 @@ public sealed class ShapeBuild
     }
 
     // The shapes built from this content before, or null to build them
-    public byte[][] Reuse(InputHash input)
+    public byte[][] Reuse(InputHash input) => Reuse(input.Value);
+
+    // The same for a content hash known from before, see VoxelSource
+    public byte[][] Reuse(long input)
     {
-        Input = input.Value == 0 ? 1 : input.Value;
+        Input = input == 0 ? 1 : input;
         if (Input == lastInput && lastShapes != null)
         {
             Unchanged = true;

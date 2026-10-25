@@ -6,9 +6,15 @@ tests/ring.py.
     IMP_TASK=imp701 uv run --no-project --with httpx --with pillow --with numpy \
         python tests/asteroid_pack.py write      # the pack, into ~/.se-test/<task>-pack
     ... python tests/asteroid_pack.py measure    # a join without the pack, then with it
+    ... python tests/asteroid_pack.py reset      # mine an asteroid, restart, reset it
     IMP_PACK_LEVEL=32 ...                        # write: finest level in the pack (64)
     IMP_HEIGHT=10000 IMP_SETTLE=240 ...          # measure: meters above the ring, seconds
     IMP_RUNS=pack ...                            # measure: only the run with the pack
+
+`reset` follows one asteroid the client sees: unedited it has the pack's version, cut it
+has a new one, after a server restart (the known hashes saved with the world) it keeps that
+without a build, and after a voxel reset it has the pack's version again without a build. A
+PASS/FAIL line per step.
 
 `write` runs the server alone with WriteAsteroidPack, every asteroid is built, and prints the
 pack's size and how long it took. `measure` starts the server and the client with empty shape
@@ -25,6 +31,7 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import struct
 import sys
 import time
 from pathlib import Path
@@ -205,6 +212,186 @@ def run(with_pack: bool) -> dict:
     return result
 
 
+def command(api, text: str, timeout: float = 20.0) -> str:
+    """A chat command of the probe and its reply"""
+    seen = {
+        (m.get("text"), m.get("timestamp"))
+        for m in api.get_chat_messages().get("hud") or []
+    }
+    api.send_chat(text)
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        for m in api.get_chat_messages().get("hud") or []:
+            if (m.get("text"), m.get("timestamp")) not in seen and m.get("sender") in (
+                "iprobe",
+                "ImpostorsProbe",
+            ):
+                return m.get("text")
+        time.sleep(0.5)
+    raise TimeoutError(f"No reply to {text!r}")
+
+
+def pack_versions() -> dict[int, int]:
+    """Version per asteroid id from the pack's index"""
+    data = (PACK / "ImpostorsAsteroidPack.bin").open("rb")
+    magic, fmt = struct.unpack("<iB", data.read(5))
+    data.read(data.read(1)[0])  # the world name, shorter than 128 bytes
+    _settings, count = struct.unpack("<qi", data.read(12))
+    versions = {}
+    for _ in range(count):
+        asteroid, _input, version, _flags, levels = struct.unpack(
+            "<qqiBB", data.read(22)
+        )
+        data.read(5 * levels)
+        versions[asteroid] = version
+    return versions
+
+
+def entry(api, asteroid: int) -> tuple[int | None, bool, float]:
+    """The server's version of the asteroid's impostor, the game's ContentChanged and the
+    size of the voxel map"""
+    reply = command(api, f"!iprobe ventry {asteroid}")
+    m = re.search(r"version=(-?\d+) changed=(\w+) size=([0-9.]+)", reply)
+    return (
+        (int(m.group(1)), m.group(2) == "True", float(m.group(3)))
+        if m
+        else (None, False, 0.0)
+    )
+
+
+def join(ids, eye, target):
+    CLIENT.launch(SERVER.port)
+    stage(CLIENT.appdata / "Mods", ids)
+    api = CLIENT.wait_api()
+    rig.wait_world(api, timeout=2400)
+    rig.ensure_character(api)
+    rig.focus_gameplay(api)
+    api.character_teleport(*eye)
+    time.sleep(5)
+    api.character_look_at(*target, tolerance=2)
+    return api
+
+
+def check(ok: bool, text: str) -> bool:
+    print(f"{'PASS' if ok else 'FAIL'} {text}", flush=True)
+    return ok
+
+
+def wait_for(probe, timeout: float):
+    deadline = time.monotonic() + timeout
+    while True:
+        value = probe()
+        if value or time.monotonic() > deadline:
+            return value
+        time.sleep(5)
+
+
+def reset() -> int:
+    if not (PACK / "ImpostorsAsteroidPack.bin").exists():
+        raise SystemExit(f"No pack in {PACK}, run write first")
+    versions = pack_versions()
+    ids = setup_world(True)
+    (SERVER.world / "Impostors.asteroids").unlink(missing_ok=True)
+    SERVER.write_plugin_config(
+        rig.plugin_config(
+            MaxDistance=500000,
+            MaxImpostorsPerPlayer=4000,
+            MaxQuadsPerFrame=16000,
+            RebuildSeconds=10,
+        )
+    )
+    center, normal, side, _ = ring.ring_geometry(SERVER.world)
+    base = center + side * 120000
+    eye = base + normal * (HEIGHT + 300)
+    target = base + np.cross(normal, side) * (HEIGHT + 5000)
+    builds = lambda asteroid, text: re.findall(
+        rf"Impostor build: id={asteroid} kind=Voxel", text
+    )
+    ok = True
+    SERVER.start(timeout=3600)
+    for cache in CLIENT.mod_storage.glob("cache-*"):
+        cache.unlink()
+    try:
+        api = join(ids, eye, target)
+        time.sleep(120)
+        _, impostors = CLIENT.stats()
+        asteroid = max(
+            (i for i, f in impostors.items() if i in versions),
+            key=lambda i: int(impostors[i].get("lod", 0)),
+        )
+        version, changed, size = entry(api, asteroid)
+        ok &= check(
+            version == versions[asteroid]
+            and not changed
+            and not builds(asteroid, log_text()),
+            f"unedited {asteroid}: version {version}, pack {versions[asteroid]}, changed={changed}",
+        )
+        reused = re.findall(r"from the asteroid pack.*took (\d+) ms CPU", log_text())
+        print(
+            f"  pack hits took {sum(map(int, reused))} ms CPU in the whole minutes so far",
+            flush=True,
+        )
+
+        print(
+            "server:",
+            command(
+                api, f"!iprobe vcut {asteroid} {size * 0.25:.0f} {size * 0.25:.0f}"
+            ),
+            flush=True,
+        )
+        mined = wait_for(
+            lambda: (v := entry(api, asteroid))[0] not in (None, versions[asteroid])
+            and v,
+            120,
+        )
+        ok &= check(
+            bool(mined) and mined[1] and len(builds(asteroid, log_text())) == 1,
+            f"cut {asteroid}: version {mined and mined[0]}, built {len(builds(asteroid, log_text()))} times",
+        )
+        CLIENT.stop()
+        SERVER.stop()
+
+        SERVER.start(timeout=3600)
+        api = join(ids, eye, target)
+        time.sleep(60)
+        text = log_text()
+        known = re.search(r"Asteroid hashes: (\d+) known from the last save", text)
+        version, changed, _ = entry(api, asteroid)
+        ok &= check(
+            bool(known)
+            and mined
+            and version == mined[0]
+            and not builds(asteroid, text),
+            f"after the restart: {known and known.group(1)} hashes loaded, {asteroid} version {version}, "
+            f"built {len(builds(asteroid, text))} times, asteroid builds {len(re.findall(r'Impostor build: .*kind=Voxel', text))}",
+        )
+        reused = re.findall(r"took (\d+) ms CPU", text)
+        print(
+            f"  reused builds took {sum(map(int, reused))} ms CPU in the whole minutes so far",
+            flush=True,
+        )
+
+        packed_before = int(CLIENT.stats()[0].get("packed", 0))
+        print("server:", command(api, f"!iprobe vreset {asteroid}"), flush=True)
+        back = wait_for(lambda: entry(api, asteroid)[0] == versions[asteroid], 120)
+        time.sleep(5)
+        totals, impostors = CLIENT.stats()
+        text = log_text()
+        ok &= check(
+            back
+            and not builds(asteroid, text)
+            and int(impostors.get(asteroid, {}).get("version", 0))
+            == versions[asteroid],
+            f"reset {asteroid}: back to the pack's version {versions[asteroid]}: {bool(back)}, "
+            f"built {len(builds(asteroid, text))} times, client version "
+            f"{impostors.get(asteroid, {}).get('version')}, client pack shapes {packed_before} -> {totals.get('packed')}",
+        )
+    finally:
+        CLIENT.stop()
+        SERVER.stop()
+    return 0 if ok else 1
+
+
 def measure() -> int:
     if not (PACK / "ImpostorsAsteroidPack.bin").exists():
         raise SystemExit(f"No pack in {PACK}, run write first")
@@ -223,6 +410,7 @@ def measure() -> int:
 
 if __name__ == "__main__":
     mode = sys.argv[1] if len(sys.argv) > 1 else ""
-    if mode not in ("write", "measure"):
+    modes = {"write": write, "measure": measure, "reset": reset}
+    if mode not in modes:
         raise SystemExit(__doc__)
-    sys.exit(write() if mode == "write" else measure())
+    sys.exit(modes[mode]())
