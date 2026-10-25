@@ -756,8 +756,15 @@ namespace Impostors
                 return;
             if (!cache.Loaded)
                 cache.Load(MyAPIGateway.Session.Name);
-            cache.Inventory(writer, SendToServer);
+            var versions = cache.Inventory(writer, SendToServer);
             caching = true;
+            MyLog.Default.WriteLineAndConsole(
+                "Impostors: "
+                    + versions
+                    + " impostor versions, "
+                    + cache.Bytes / 1024
+                    + " KB in the shape cache"
+            );
         }
 
         // The server counts on shapes we don't have: forget its impostors and ask it to start

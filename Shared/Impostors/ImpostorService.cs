@@ -382,6 +382,7 @@ public sealed class ImpostorService : IDisposable
             viewer.OnDisk.TryGetValue(key, out var known);
             viewer.OnDisk[key] = (byte)(known | mask);
         }
+        log.Info($"Player {sender} has {viewer.OnDisk.Count} impostor versions in its disk cache");
     }
 
     private void OnView(ByteReader r, int length, ulong sender)
