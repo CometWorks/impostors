@@ -76,7 +76,9 @@ def ring() -> list[Rock]:
             distance = rng.uniform(lo, hi)
             yaw = math.radians(rng.uniform(-60, 60))
             # The far band within the zoomed pans' view, which turn at pitch -7
-            pitch = math.radians(rng.uniform(-12, -3) if i == 0 else rng.uniform(-8.5, -5.5))
+            pitch = math.radians(
+                rng.uniform(-12, -3) if i == 0 else rng.uniform(-8.5, -5.5)
+            )
             large = i == 1 or k % 2 == 0
             size = 512.0 if large else 256.0
             file = rng.choice(files if large else small)
@@ -124,7 +126,9 @@ def expected(totals: dict) -> set[int]:
         if distance - rock.radius > MAX_DISTANCE:
             continue
         cos = sum(a * b for a, b in zip(d, forward)) / distance
-        angle = math.acos(max(-1, min(1, cos))) - math.asin(min(1, rock.radius / distance))
+        angle = math.acos(max(-1, min(1, cos))) - math.asin(
+            min(1, rock.radius / distance)
+        )
         # A margin inside the edge: the stats' camera is up to a frame off the drawn one
         if angle > half * 0.9:
             continue
@@ -187,7 +191,9 @@ def sample(seconds: float, label: str) -> dict:
         f"gap {result['gap']:.3f} (worst second {worst:.3f}): absent {result['absent']}, "
         f"no shape {result['noshape']}, not drawn {result['undrawn']}, "
         f"drawn at a coarser level waiting for credit {result['waiting']}; client totals "
-        + " ".join(f"{k}={result[k]}" for k in ("removed", "restored", "stored", "storedkb"))
+        + " ".join(
+            f"{k}={result[k]}" for k in ("removed", "restored", "stored", "storedkb")
+        )
         + f" culled={result['culled']} overbudget={result['overbudget']}",
         flush=True,
     )
@@ -199,7 +205,8 @@ def server_minutes() -> list[str]:
     if log is None:
         return []
     return re.findall(
-        r"Impostors of player \d+ in the last minute: .*", log.read_text(errors="replace")
+        r"Impostors of player \d+ in the last minute: .*",
+        log.read_text(errors="replace"),
     )
 
 
@@ -266,8 +273,11 @@ def run() -> None:
         for direction in (1, -1):
             fly(pan(-60 if direction > 0 else 60, rate * direction))
             time.sleep(2)
-            results[f"zoomed pan {rate} deg/s {'+' if direction > 0 else '-'}"] = sample(
-                120 / rate - 3, f"zoomed pan {rate} deg/s {'right' if direction > 0 else 'left'}"
+            results[f"zoomed pan {rate} deg/s {'+' if direction > 0 else '-'}"] = (
+                sample(
+                    120 / rate - 3,
+                    f"zoomed pan {rate} deg/s {'right' if direction > 0 else 'left'}",
+                )
             )
     fly(None)
     CLIENT.set_fov(None)
