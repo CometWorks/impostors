@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using Impostors;
 using Shared.Logging;
 
 namespace Shared.Impostors;
@@ -15,7 +16,7 @@ public interface IShapeCache
     byte[][] Get(long id, long input);
 
     // Background thread: replaces what the cache had of this id
-    void Put(long id, long input, byte[][] shapes);
+    void Put(long id, ImpostorKind kind, long input, byte[][] shapes);
 
     // Game thread: the entity is gone
     void Forget(long id);
@@ -143,7 +144,7 @@ public sealed class DiskShapeCache : IShapeCache
         }
     }
 
-    public void Put(long id, long input, byte[][] shapes) =>
+    public void Put(long id, ImpostorKind kind, long input, byte[][] shapes) =>
         Put(id, input, ImpostorEntry.Hash(shapes), shapes);
 
     public void Put(long id, long input, int version, byte[][] shapes)

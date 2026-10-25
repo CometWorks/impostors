@@ -194,7 +194,7 @@ public sealed class ImpostorRegistry
                         $"Impostor build: id={entry.Id} kind={entry.Kind} {size} snapshot={snapshotMs:0.00}{timing}"
                     );
                     if (build.Input != 0)
-                        cache?.Put(entry.Id, build.Input, shapes);
+                        cache?.Put(entry.Id, entry.Kind, build.Input, shapes);
                 }
                 finished.Enqueue((entry, shapes, build));
             });

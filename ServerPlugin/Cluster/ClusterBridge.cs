@@ -279,24 +279,7 @@ public sealed class ClusterBridge : IShapeCache
         // Shapes first, so the WA has them by the time other nodes learn about the versions
         foreach (var (id, version, input, entryShapes) in newShapes)
         {
-            var ok = true;
-            for (var i = 0; i < entryShapes.Length && ok; i++)
-            {
-                if (entryShapes[i] == null)
-                    break;
-                var w = new ByteWriter(entryShapes[i].Length + 32);
-                w.Long(id);
-                w.Int(version);
-                w.Long(input);
-                w.Byte((byte)i);
-                w.Byte((byte)entryShapes.Count(s => s != null));
-                w.Bytes(entryShapes[i]);
-                var result = await cluster
-                    .RequestAsync(WorldAuthority, TopicShape, w.ToArray(), Guid.NewGuid(), Timeout)
-                    .ConfigureAwait(false);
-                ok = result.Code == PluginResultCode.Success;
-            }
-            if (ok)
+            if (await PushShapes(id, version, input, entryShapes).ConfigureAwait(false))
                 gameThread.Enqueue(() => pushed.Add((id, version)));
         }
 
@@ -363,6 +346,29 @@ public sealed class ClusterBridge : IShapeCache
                 }
             });
         }
+    }
+
+    // Sends the shapes of an entry to the WA, one message per level
+    private async Task<bool> PushShapes(long id, int version, long input, byte[][] entryShapes)
+    {
+        for (var i = 0; i < entryShapes.Length; i++)
+        {
+            if (entryShapes[i] == null)
+                break;
+            var w = new ByteWriter(entryShapes[i].Length + 32);
+            w.Long(id);
+            w.Int(version);
+            w.Long(input);
+            w.Byte((byte)i);
+            w.Byte((byte)entryShapes.Count(s => s != null));
+            w.Bytes(entryShapes[i]);
+            var result = await cluster
+                .RequestAsync(WorldAuthority, TopicShape, w.ToArray(), Guid.NewGuid(), Timeout)
+                .ConfigureAwait(false);
+            if (result.Code != PluginResultCode.Success)
+                return false;
+        }
+        return true;
     }
 
     private Task<byte[]> OnIndex(PluginMessage message)
@@ -521,11 +527,14 @@ public sealed class ClusterBridge : IShapeCache
         return cached;
     }
 
-    // A node's builds reach the WA with its report, and its deletions too
-    public void Put(long id, long input, byte[][] built)
+    // A node's grids reach the WA with its report. Asteroids and admin safe zones are on every
+    // node and never reported, their shapes go to the WA here, so the next node finds them.
+    public void Put(long id, ImpostorKind kind, long input, byte[][] built)
     {
         if (IsWorldAuthority)
-            store?.Put(id, input, built);
+            store?.Put(id, kind, input, built);
+        else if (kind != ImpostorKind.Grid)
+            PushShapes(id, ImpostorEntry.Hash(built), input, built).GetAwaiter().GetResult();
     }
 
     public void Forget(long id)
