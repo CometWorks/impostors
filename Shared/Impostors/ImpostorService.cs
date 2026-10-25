@@ -15,7 +15,9 @@ using VRageMath;
 namespace Shared.Impostors;
 
 // Runs where the world is simulated (dedicated server or lobby host): picks the impostors
-// each player with the Impostors mod should see and sends them over mod networking.
+// each player with the Impostors mod should see and sends them over mod networking. With the
+// client plugin it also runs in offline games and serves the local player too, straight to
+// the plugin's renderer (LocalClient).
 public sealed class ImpostorService : IDisposable
 {
     private const double PixelsPerRadian = Protocol.PixelsPerRadian;
@@ -55,6 +57,9 @@ public sealed class ImpostorService : IDisposable
     private sealed class Viewer
     {
         public readonly ulong SteamId;
+
+        // The player of this game, served through LocalClient
+        public readonly bool Local;
         public readonly Dictionary<long, Sent> Sent = new();
 
         // Impostors whose real entity draws on the client, from its Ready messages
@@ -103,9 +108,10 @@ public sealed class ImpostorService : IDisposable
         // A View message arrived, the impostors are picked again on the next tick
         public bool Dirty;
 
-        public Viewer(ulong steamId)
+        public Viewer(ulong steamId, bool local)
         {
             SteamId = steamId;
+            Local = local;
         }
     }
 
@@ -135,6 +141,10 @@ public sealed class ImpostorService : IDisposable
 
     // Builds every entry, not only the ones this server's players see
     public static bool BuildAll;
+
+    // The client plugin's renderer in this process, which gets the local player's messages
+    // without mod networking. Null on a dedicated server.
+    public static Action<byte[]> LocalClient;
 
     public static ImpostorService Instance => instance;
 
@@ -180,16 +190,23 @@ public sealed class ImpostorService : IDisposable
             }
         }
 
-        // Only a multiplayer server has someone to send impostors to
+        // A multiplayer server has players to send impostors to, the client plugin has the
+        // local player in an offline game too
         if (
             instance == null
             && config.Enabled
             && Sync.IsServer
-            && Sandbox.Engine.Multiplayer.MyMultiplayer.Static != null
+            && (Sandbox.Engine.Multiplayer.MyMultiplayer.Static != null || LocalClient != null)
         )
             instance = new ImpostorService(config, log);
 
         instance?.Update();
+    }
+
+    // A message of the client plugin's renderer for the service in this process
+    public static void FromLocalClient(byte[] message)
+    {
+        instance?.Receive(message, Sync.MyId, true);
     }
 
     public static void Stop()
@@ -232,7 +249,10 @@ public sealed class ImpostorService : IDisposable
 
         foreach (var steamId in viewers.Keys.ToList())
         {
-            if (!MySession.Static.Players.TryGetPlayerBySteamId(steamId, out _))
+            if (
+                !viewers[steamId].Local
+                && !MySession.Static.Players.TryGetPlayerBySteamId(steamId, out _)
+            )
             {
                 viewers.Remove(steamId);
                 continue;
@@ -296,7 +316,13 @@ public sealed class ImpostorService : IDisposable
 
     private void OnMessage(ushort channel, byte[] message, ulong sender, bool fromServer)
     {
-        if (message.Length < 2 || sender == Sync.MyId)
+        if (sender != Sync.MyId)
+            Receive(message, sender, false);
+    }
+
+    private void Receive(byte[] message, ulong sender, bool local)
+    {
+        if (message.Length < 2)
             return;
 
         if (message[0] == Protocol.View)
@@ -328,8 +354,10 @@ public sealed class ImpostorService : IDisposable
         if (!viewers.ContainsKey(sender) || fresh)
         {
             if (!viewers.ContainsKey(sender))
-                log.Info($"Player {sender} draws impostors");
-            viewers[sender] = new Viewer(sender);
+                log.Info(
+                    local ? "The local player draws impostors" : $"Player {sender} draws impostors"
+                );
+            viewers[sender] = new Viewer(sender, local);
         }
 
         writer.Clear();
@@ -413,14 +441,30 @@ public sealed class ImpostorService : IDisposable
     private void UpdateViewer(Viewer viewer)
     {
         viewer.Dirty = false;
-        if (!MySession.Static.Players.TryGetPlayerBySteamId(viewer.SteamId, out var player))
-            return;
+        Vector3D? center;
+        double drawn = 0;
+        if (viewer.Local)
+        {
+            // This game draws every entity within its camera's far plane: the view distance
+            // offline, the sync distance on a lobby host (MySector.LoadData)
+            var camera = MySector.MainCamera;
+            if (camera == null)
+                return;
+            center = viewer.Eye = camera.Position;
+            drawn = camera.FarPlaneDistance;
+        }
+        else
+        {
+            if (!MySession.Static.Players.TryGetPlayerBySteamId(viewer.SteamId, out var player))
+                return;
 
-        // The game replicates around this point, the impostors are sized for the camera
-        var center = ReplicationCenter(player);
-        if (center == null)
-            return;
-        viewer.Eye = viewer.Camera ?? center.Value;
+            // The game replicates around this point, the impostors are sized for the camera
+            center = ReplicationCenter(player);
+            if (center == null)
+                return;
+            viewer.Eye = viewer.Camera ?? center.Value;
+        }
+
         var settings = MySession.Static.Settings;
         var range = config.MaxDistance > 0 ? config.MaxDistance : settings.ViewDistance;
         var half = Math.Max(0, settings.SyncDistance - config.ReplicationMargin);
@@ -448,7 +492,20 @@ public sealed class ImpostorService : IDisposable
             // The client has the real entity, or will have it soon. Another node's entities are
             // never replicated to this node's players. One the client already has stays until
             // the client says its real entity draws: a grid arriving fast is still streaming.
-            if (
+            // The local player has every entity, the game draws the ones within the far plane.
+            if (viewer.Local)
+            {
+                var aabb = entry.WorldAabb;
+                if (
+                    Vector3D.DistanceSquared(
+                        Vector3D.Clamp(viewer.Eye, aabb.Min, aabb.Max),
+                        viewer.Eye
+                    )
+                    <= drawn * drawn
+                )
+                    continue;
+            }
+            else if (
                 !entry.Source.Remote
                 && entry.WorldAabb.Intersects(
                     entry.Kind == ImpostorKind.Voxel ? voxelReplicated : replicated
@@ -517,6 +574,10 @@ public sealed class ImpostorService : IDisposable
             viewer.ShapeCredit + config.ShapeBytesPerSecond * elapsed / 60,
             config.ShapeBytesPerSecond
         );
+
+        // The local player's shapes don't go over the network, they never wait
+        if (viewer.Local)
+            viewer.ShapeCredit = int.MaxValue;
         var fit = FitLevels(viewer, shown, zones);
         for (var i = 0; i < shown.Count; i++)
         {
@@ -877,6 +938,9 @@ public sealed class ImpostorService : IDisposable
 
     private void Send(ulong steamId)
     {
-        MyAPIGateway.Multiplayer.SendMessageTo(Protocol.Channel, writer.ToArray(), steamId);
+        if (steamId == Sync.MyId && LocalClient != null)
+            LocalClient(writer.ToArray());
+        else
+            MyAPIGateway.Multiplayer.SendMessageTo(Protocol.Channel, writer.ToArray(), steamId);
     }
 }

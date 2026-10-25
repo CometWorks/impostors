@@ -18,7 +18,8 @@ the two disagree.
   (Pulsar), shared code, and the Impostors mod.
 - The mod draws the impostors on vanilla clients connected to a server running the plugin.
   Players need no plugin.
-- The client plugin is the server part (for lobby hosts) plus the mod's renderer.
+- The client plugin is the server part (for lobby hosts and offline games) plus the mod's
+  renderer.
 - Cluster compatible.
 
 ## What the client can draw
@@ -110,9 +111,28 @@ asteroids, see the SE-383 section.
 
 ## Server
 
-`ImpostorService` (in `Shared`) runs where the world is simulated and has remote players:
-on the dedicated server, or on a lobby host. Single player has nothing to do, every entity
-is real there.
+`ImpostorService` (in `Shared`) runs where the world is simulated: on the dedicated server,
+or with the client plugin on a lobby host and in an offline game. The mod can't run it.
+
+Every entity is real where the world is simulated, but the game draws only those within
+its camera's far plane, which `MySector.LoadData` sets to the view distance (50 km at most)
+offline and to the sync distance on a lobby host. The voxel clipmaps stop there too
+(`MyRenderVoxelActor`). So the client plugin's service serves the local player as well
+(SE-668): offline the far grids and asteroids (an asteroid ring 135 to 231 km away showed
+nothing at all before), and on a lobby host everything beyond the sync distance, as the
+players who joined get it.
+
+- The local player is a viewer of its own. The plugin's renderer copy and the service
+  exchange the same messages, Hello and View included, as byte arrays in the same process
+  (`ImpostorService.LocalClient`, `ImpostorRenderer.ToLocalServer`), in the order they are
+  sent, so the picking, the levels, the zoom and the shape store work the same without mod
+  networking.
+- Its eye is the camera, not the controlled entity, and it gets no impostor for an entry
+  whose AABB reaches into the far plane's sphere, where the game draws the real one. Its
+  renderer shows every impostor it gets, as every entity exists locally.
+- Its shapes don't wait for the shape credit, there is no network to protect.
+- A player with only the mod is unchanged: the mod's renderer stands down on a server, and
+  without the plugin nothing runs the service there.
 
 Every second it:
 
@@ -269,8 +289,16 @@ Each frame it:
   1080p screen it brightens grids (up to 1.35 times under 13 pixels) and dims asteroids (down
   to 0.82), where the real ones carry more or less light than their impostors.
 
-The client plugin compiles the same files. That copy has no mod context; it stands down when
-a session mod contains the renderer, so it only draws on servers whose world lacks the mod.
+The client plugin compiles the same files. That copy has no mod context; on a multiplayer
+client it stands down when a session mod contains the renderer, so it only draws on servers
+whose world lacks the mod. In an offline game or on a lobby host it is the only copy that
+draws, for the local player (see "Server"). The plugin updates that copy itself: the game
+keeps the session components to update in a set ordered by priority and type name
+(`MySession.ComponentComparer`), where the plugin's copy and the mod's compare equal, so
+with the mod in the world the game updated only the mod's copy. Its debug files are `Impostors.debug`,
+`Impostors.stats.txt` and `Impostors.mode` in the global storage (`<appdata>/Storage`), since
+Pulsar compiles the plugin under a random assembly name, which the local storage folder
+would take.
 
 ## Billboard limit (SE-664)
 
@@ -443,6 +471,9 @@ one message under the SDK's 64 KiB payload limit.
 Typical shapes, measured on the test grids: see the test results in the ticket.
 
 ## Testing
+
+`tests/local.py` checks the client plugin's service for the local player, offline and on a
+lobby host with a joiner (`IMP_MODE=lobby`, over DirectTransport).
 
 `tests/scenario.py` starts an isolated Magnetar server with the plugin and a probe plugin
 (`tests/probe`), and a headless client without the Impostors plugin that gets the mod from

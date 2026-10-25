@@ -2,6 +2,8 @@
 using System.IO;
 using System.Threading;
 using HarmonyLib;
+using Impostors;
+using Sandbox;
 using Shared.Config;
 using Shared.Impostors;
 using Shared.Logging;
@@ -64,6 +66,11 @@ public class Plugin : IPlugin, ICommonPlugin
         }
         BillboardPriority.Patch(harmony, Log);
 
+        // Offline and on a lobby host the service serves the local player too, straight to
+        // the renderer
+        ImpostorService.LocalClient = ImpostorRenderer.FromLocalServer;
+        ImpostorRenderer.ToLocalServer = ImpostorService.FromLocalClient;
+
         Log.Debug("Successfully loaded");
     }
 
@@ -109,7 +116,10 @@ public class Plugin : IPlugin, ICommonPlugin
         BillboardPriority.Update();
         VoxelReadiness.Update();
 
-        // Serves the players who joined when this client hosts a lobby
+        // Serves the local player in an offline game, and on a lobby host the players who
+        // joined as well
         ImpostorService.UpdateStatic(Config, Log);
+        if (!MySandboxGame.IsPaused)
+            ImpostorRenderer.UpdateLocal();
     }
 }

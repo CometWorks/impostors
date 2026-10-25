@@ -13,6 +13,9 @@ the whitelist, loading the mod in the game does.
 - `tests/scenario.py` checks it all in game: an isolated Magnetar server with the plugin and
   a headless client that has only the mod. `IMP_ONLY=zones` runs only the safe zone checks.
   See its docstring.
+- `tests/local.py` checks the client plugin's service for the local player: the test world
+  offline, or with `IMP_MODE=lobby` hosted as a lobby game over DirectTransport with a second
+  client joining. See its docstring.
 - `tests/compare.py` shoots a grid (from a blueprint), an asteroid or a safe zone next to its
   impostor from the 8 cube corners at a list of distances and puts the shots into one sheet,
   like the ones on the [Grids](Grids.md), [Asteroids](Asteroids.md) and

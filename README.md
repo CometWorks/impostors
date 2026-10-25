@@ -1,6 +1,6 @@
 # Impostors
 
-Far view for Space Engineers 1 multiplayer. The server doesn't send grids beyond the sync
+Far view for Space Engineers 1 multiplayer, and offline with the client plugin. The server doesn't send grids beyond the sync
 distance (3 km by default) to the players, and edited asteroids only to about 8.7 km, so
 players see empty space where a station or a fleet is. Impostors shows them as coarse, sun
 shaded models, built on the server from block and voxel data.
@@ -11,7 +11,8 @@ Safe zones show from afar too, as translucent bubbles in their color.
 - **Impostors mod**: draws them on the clients. Players need no plugin, only the mod in the
   world's mod list.
 - **Client plugin** (Pulsar): draws them on servers whose world doesn't have the mod, and
-  serves the players who joined when you host a lobby.
+  builds them for yourself in offline games and when you host a lobby, where it also
+  serves the players who joined.
 
 ## Server setup
 
