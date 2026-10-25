@@ -131,11 +131,12 @@ def candidates():
 
 
 def expected(totals: dict) -> set[int]:
-    """The asteroids the camera of these stats should show: in the view cone around the
-    diagonal, beyond the replication of saved voxels, at least MIN_PIXELS across"""
+    """The asteroids the camera of these stats should show: in the cone inside the screen,
+    beyond the replication of saved voxels, at least MIN_PIXELS across"""
     camera, forward = vec(totals["camera"]), vec(totals["forward"])
     fov = math.radians(float(totals["fov"]))
-    half = math.atan(math.tan(fov / 2) * math.hypot(1, WIDTH / HEIGHT))
+    # The cone inside the screen's rectangle: everything in it is on screen
+    half = fov / 2
     pixels_per_radian = HEIGHT / 2 / math.tan(fov / 2)
     ids = set()
     for id, center, radius in candidates():
