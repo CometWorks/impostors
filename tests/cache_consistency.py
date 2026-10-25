@@ -30,7 +30,6 @@ from __future__ import annotations
 
 import os
 import re
-import shutil
 import signal
 import struct
 import sys
@@ -478,7 +477,7 @@ def final(n: int) -> None:
     warm = server_entries(api)
     leave(CLIENT, api)
     SERVER.stop()
-    shutil.rmtree(CACHE)
+    rig.clear_cache(SERVER.data)
     SERVER.start()
     join(CLIENT)
     api = settle(CLIENT)
@@ -510,8 +509,7 @@ def main():
     )
     SERVER.prepare([c.steam_id for c in CLIENTS])
     SERVER.write_plugin_config(config())
-    if CACHE.exists():
-        shutil.rmtree(CACHE)
+    rig.clear_cache(SERVER.data)
     for c in CLIENTS:
         c.mod_storage.mkdir(parents=True, exist_ok=True)
         for f in c.mod_storage.glob("cache-*"):

@@ -72,8 +72,7 @@ def clear_client_cache() -> None:
 
 
 def clear_server_cache() -> None:
-    if CACHE.exists():
-        shutil.rmtree(CACHE)
+    rig.clear_cache(SERVER.data)
 
 
 def join() -> dict:

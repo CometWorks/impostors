@@ -249,6 +249,12 @@ def cache_folder(data: Path) -> Path:
     return data / CACHE_FOLDER
 
 
+def clear_cache(data: Path) -> None:
+    """Wipes the shape cache, and the folder before SE-700, which a start would move in"""
+    shutil.rmtree(cache_folder(data), ignore_errors=True)
+    shutil.rmtree(data / "ImpostorsCache", ignore_errors=True)
+
+
 def write_build_times(server, target: Path) -> Path | None:
     """The server's build times as a Markdown table (tests/build_times.py)"""
     log = server.game_log()
