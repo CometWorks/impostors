@@ -16,7 +16,9 @@ namespace Impostors
         // shapes from the server yet (no Welcome), 0 after. Sent when the session is ready and
         // then every HelloInterval seconds, so a server that starts later or a cluster node the
         // client was moved to learns that this client draws impostors. A server that knew the
-        // client already starts over with it on a 1.
+        // client already starts over with it on a 1. Then byte 1 when the client has a disk
+        // cache: a server that starts over with it holds its impostors back until the
+        // Inventory arrived, InventoryWait at most.
         public const byte Hello = 1;
 
         // Server to client: byte version, long server instance id, int most impostor quads the
@@ -48,13 +50,17 @@ namespace Impostors
         // picks for the spectator camera's position when the player may spectate.
         public const byte View = 6;
 
-        // Client to server: ushort count, then count times long id, int version and byte level
-        // mask (see LodBit) of the shapes in the client's disk cache for this world. Sent after
-        // every Welcome of a new server instance, an empty one too. From then on the server
-        // counts every shape it sends as cached as well, the client keeps all of them until the
-        // session ends. A server without the disk cache ignores the message, an older client
-        // never sends it, so the protocol version stays.
+        // Client to server: byte 1 when more Inventory messages follow, 0 in the last one, ushort
+        // count, then count times long id, int version and byte level mask (see LodBit) of the
+        // shapes in the client's disk cache for this world. Sent after every Welcome of a new
+        // server instance, an empty one too. From then on the server counts every shape it
+        // sends as cached as well, the client keeps all of them until the session ends. A
+        // server without the disk cache ignores the message and the Hello's last byte, an older
+        // client never sends them, so the protocol version stays.
         public const byte Inventory = 8;
+
+        // Most seconds a server waits for an announced Inventory
+        public const int InventoryWait = 10;
 
         // Marks a ShapeData entry the client has in its disk cache, no shape level is 1
         public const byte FromCache = 1;
@@ -357,6 +363,11 @@ namespace Impostors
             Ensure(value.Length);
             Buffer.BlockCopy(value, 0, buffer, length, value.Length);
             length += value.Length;
+        }
+
+        public void ByteAt(int position, byte value)
+        {
+            buffer[position] = value;
         }
 
         // Overwrites a ushort written earlier, used for counts known only at the end

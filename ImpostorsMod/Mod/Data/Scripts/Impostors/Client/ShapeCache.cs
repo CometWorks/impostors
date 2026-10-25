@@ -129,6 +129,7 @@ namespace Impostors
             {
                 writer.Clear();
                 writer.Byte(Protocol.Inventory);
+                writer.Byte(1);
                 countPosition = writer.Length;
                 writer.UShort(0);
                 count = 0;
@@ -152,6 +153,7 @@ namespace Impostors
                 }
             }
             writer.UShortAt(countPosition, (ushort)count);
+            writer.ByteAt(1, 0);
             send();
             return total;
         }

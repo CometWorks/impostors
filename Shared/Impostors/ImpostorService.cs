@@ -65,6 +65,9 @@ public sealed class ImpostorService : IDisposable
         // Inventory and every shape sent since; null for a client without the cache
         public Dictionary<(long id, int version), byte> OnDisk;
 
+        // The tick until which the player's impostors wait for an Inventory the Hello announced
+        public int InventoryDue;
+
         // Where the server picked for this player last
         public Vector3D Eye;
 
@@ -294,6 +297,10 @@ public sealed class ImpostorService : IDisposable
 
     private void TryUpdateViewer(Viewer viewer)
     {
+        // Shapes sent before the Inventory would be sent for nothing
+        if (viewer.InventoryDue > tick)
+            return;
+
         var start = Stopwatch.GetTimestamp();
         try
         {
@@ -353,6 +360,8 @@ public sealed class ImpostorService : IDisposable
                     local ? "The local player draws impostors" : $"Player {sender} draws impostors"
                 );
             viewers[sender] = new Viewer(sender, local);
+            if (message.Length > 3 && message[3] == 1)
+                viewers[sender].InventoryDue = tick + Protocol.InventoryWait * 60;
         }
 
         writer.Clear();
@@ -369,11 +378,14 @@ public sealed class ImpostorService : IDisposable
     // The client's disk cache, in one or more messages after each Welcome of a new instance
     private void OnInventory(ByteReader r, int length, ulong sender)
     {
-        if (length < 3 || !viewers.TryGetValue(sender, out var viewer) || viewer.Local)
+        if (length < 4 || !viewers.TryGetValue(sender, out var viewer) || viewer.Local)
             return;
+        var more = r.Byte() == 1;
         var count = r.UShort();
-        if (length < 3 + count * 13)
+        if (length < 4 + count * 13)
             return;
+        if (!more)
+            viewer.InventoryDue = 0;
         viewer.OnDisk ??= new Dictionary<(long, int), byte>();
         for (var i = 0; i < count && viewer.OnDisk.Count < MaxOnDisk; i++)
         {
@@ -382,7 +394,10 @@ public sealed class ImpostorService : IDisposable
             viewer.OnDisk.TryGetValue(key, out var known);
             viewer.OnDisk[key] = (byte)(known | mask);
         }
-        log.Info($"Player {sender} has {viewer.OnDisk.Count} impostor versions in its disk cache");
+        if (!more)
+            log.Info(
+                $"Player {sender} has {viewer.OnDisk.Count} impostor versions in its disk cache"
+            );
     }
 
     private void OnView(ByteReader r, int length, ulong sender)
