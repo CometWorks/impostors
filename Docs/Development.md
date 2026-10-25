@@ -23,6 +23,10 @@ the whitelist, loading the mod in the game does.
 - `tests/zoom.py` checks the finer levels of a zoomed view: the client aims down the rifle's
   iron sight (70° to 40°) on a 1920x1080 screen, and it measures how soon the finer shapes
   arrive, in client ticks.
+- `tests/billboards.py` checks the billboard limit: the client test probe adds PostPP and LDR
+  billboards until a frame is over 32768 and reports which billboards the game cuts. With
+  the mod only the impostors keep within `MaxQuadsPerFrame` (and the game still cuts other
+  billboards); with `IMP_PLUGIN=1` only impostor quads go. See its docstring.
 - `tests/cluster_scenario.py` checks far view across a cluster on the cluster's scenario
   bench.
 - `tests/build_times.py` makes a table of the build times from the `Impostor build:` lines of

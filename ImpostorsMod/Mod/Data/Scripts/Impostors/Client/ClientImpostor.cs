@@ -23,6 +23,9 @@ namespace Impostors
         public Vector3[] Colors;
         public Vector3[] Shading;
 
+        // Quads per face, the camera sees the faces whose normals point towards it
+        public readonly int[] FaceCounts = new int[6];
+
         // Quad indices sorted back to front for the local view direction SortedFor
         public int[] Order;
         public Vector3 SortedFor;
@@ -85,6 +88,7 @@ namespace Impostors
 
                 shape.Centers[i] = origin + center * size;
                 shape.Faces[i] = face;
+                shape.FaceCounts[face]++;
                 shape.HalfSizes[i] = new Vector2(width * 0.5f * size, height * 0.5f * size);
                 shape.Colors[i] = Shape.FromRgb565(color);
                 shape.Shading[i] = Shape.DecodeNormal(r.UShort());
