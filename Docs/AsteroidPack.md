@@ -79,8 +79,9 @@ until nothing changed for 2 minutes (1479 impostors):
 | Shapes the client read from the pack | 0 | 2276 |
 | Impostors on the client after 10 / 60 / 90 s | 743 / 1341 / 1479 | 757 / 1355 / 1479 |
 
-- A pack hit still reads the asteroid's voxels to hash them, about 14 ms against 35 ms for a
-  whole build.
+- The first start reads every asteroid's voxels once to hash them, about 14 ms against 35 ms
+  for a whole build. After a restart with the hashes saved with the world, the same pack hits
+  took 16 ms CPU together, for 1562 asteroids.
 - The impostors arrive just as fast with the pack: the server starts at most two builds every
   10 ticks, pack hits included, so the pace is that of the build queue, not of the building.
 - The client read the pack's index in 4 to 5 ms when the world loaded.

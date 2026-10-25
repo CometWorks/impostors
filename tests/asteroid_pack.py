@@ -20,7 +20,8 @@ PASS/FAIL line per step.
 
 `offline` loads the world offline in a client with the client plugin, whose service serves
 the local player, and compares the same numbers from the client's log and stats, without the
-pack and with it (AsteroidPackMod 0, then the pack's id).
+pack and with it (AsteroidPackMod 0, then the pack's id). The run with the pack saves the
+world, and a load of that save must know the asteroids' hashes and read no voxels.
 
 `write` runs the server alone with WriteAsteroidPack, every asteroid is built, and prints the
 pack's size and how long it took. `measure` starts the server and the client with empty shape
@@ -406,25 +407,42 @@ def reset() -> int:
     return 0 if ok else 1
 
 
-def offline_run(tag: str, with_pack: bool, pack_mod: int = 0) -> dict:
-    """The world offline in a client with the client plugin and no Impostors mod"""
+def offline_run(
+    tag: str,
+    with_pack: bool,
+    pack_mod: int = 0,
+    again: bool = False,
+    save: bool = False,
+) -> dict:
+    """The world offline in a client with the client plugin and no Impostors mod. With
+    again the world saved by the last run with save, as it is."""
     import local
 
     client = rig.Client(2, "Viktor", plugin=True)
     world_dir = client.appdata / "Saves" / ring.WORLD_NAME
     ring.PLUGIN = True  # no Impostors mod in the world, the plugin draws
-    ids = ring.copy_world(world_dir)
-    for name in ("Sandbox.sbc", "Sandbox_config.sbc"):
-        f = world_dir / name
-        f.write_text(
-            f.read_text(encoding="utf-8").replace(
-                "<OnlineMode>PUBLIC</OnlineMode>", "<OnlineMode>OFFLINE</OnlineMode>"
-            ),
-            encoding="utf-8",
-        )
-    if with_pack:
-        add_pack(world_dir)
-        ids.append(PACK_ID)
+    if again:
+        ids = [
+            int(i)
+            for i in re.findall(
+                r"<PublishedFileId>(\d+)</PublishedFileId>",
+                (world_dir / "Sandbox_config.sbc").read_text(encoding="utf-8"),
+            )
+        ]
+    else:
+        ids = ring.copy_world(world_dir)
+        for name in ("Sandbox.sbc", "Sandbox_config.sbc"):
+            f = world_dir / name
+            f.write_text(
+                f.read_text(encoding="utf-8").replace(
+                    "<OnlineMode>PUBLIC</OnlineMode>",
+                    "<OnlineMode>OFFLINE</OnlineMode>",
+                ),
+                encoding="utf-8",
+            )
+        if with_pack:
+            add_pack(world_dir)
+            ids.append(PACK_ID)
     center, normal, side, _ = ring.ring_geometry(world_dir)
     client.appdata.mkdir(parents=True, exist_ok=True)
     (client.appdata / "Impostors.cfg").write_text(
@@ -468,7 +486,17 @@ def offline_run(tag: str, with_pack: bool, pack_mod: int = 0) -> dict:
                 f"shaped={shaped}",
                 flush=True,
             )
+        hashes = world_dir / "Storage" / "Impostors.asteroids"
+        if save:
+            api.save()
+            local.wait(lambda: hashes.exists(), 120, 2)
+            time.sleep(10)
+            result["saved"] = (
+                len(hashes.read_text().splitlines()) - 2 if hashes.exists() else None
+            )
         text = log()
+        known = re.search(r"Asteroid hashes: (\d+) known", text)
+        result["known"] = int(known.group(1)) if known else 0
         cpus = [
             float(c)
             for c in re.findall(r"Impostor build: .*kind=Voxel .* cpu=([0-9.]+)", text)
@@ -489,7 +517,8 @@ def offline_run(tag: str, with_pack: bool, pack_mod: int = 0) -> dict:
     print(
         f"{tag}: {result.get('impostors')} impostors, {result.get('builds')} asteroid builds "
         f"({result.get('build_cpu_s', 0):.1f} s CPU), {result.get('packed')} from the pack "
-        f"(reused builds {result.get('reused_cpu_s', 0):.1f} s CPU, whole minutes); {result.get('pack')}",
+        f"(reused builds {result.get('reused_cpu_s', 0):.1f} s CPU, whole minutes), "
+        f"{result.get('known')} hashes known at load, {result.get('saved')} saved; {result.get('pack')}",
         flush=True,
     )
     return result
@@ -498,12 +527,14 @@ def offline_run(tag: str, with_pack: bool, pack_mod: int = 0) -> dict:
 def offline() -> int:
     if not (PACK / "ImpostorsAsteroidPack.bin").exists():
         raise SystemExit(f"No pack in {PACK}, run write first")
-    runs = os.environ.get("IMP_RUNS", "nopack,pack,packid").split(",")
+    runs = os.environ.get("IMP_RUNS", "nopack,pack,again,packid").split(",")
     results = {}
     if "nopack" in runs:
         results["nopack"] = offline_run("offline-nopack", False)
     if "pack" in runs:
-        results["pack"] = offline_run("offline-pack", True)
+        results["pack"] = offline_run("offline-pack", True, save="again" in runs)
+    if "again" in runs:
+        results["again"] = offline_run("offline-again", True, again=True)
     if "packid" in runs:
         results["packid"] = offline_run("offline-packid", True, PACK_ID)
     ok = all(
@@ -515,6 +546,15 @@ def offline() -> int:
         f"{'PASS' if ok else 'FAIL'} offline with the pack: no asteroid builds, pack hits",
         flush=True,
     )
+    if "again" in results:
+        again = results["again"]
+        warm = again.get("known", 0) > 0 and again.get("reused_cpu_s", 1) < 1
+        ok &= warm
+        print(
+            f"{'PASS' if warm else 'FAIL'} offline again after a save: {again.get('known')} "
+            f"hashes known, the pack hits took {again.get('reused_cpu_s')} s CPU",
+            flush=True,
+        )
     return 0 if ok else 1
 
 
