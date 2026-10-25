@@ -269,8 +269,10 @@ Versions are content hashes of all levels, so (id, version, level) names a shape
   files of the worlds used least recently go while all of them are over 64 MB together. A
   session that grew the cache over 128 MB prunes it and starts over with the server, as does
   a client asked for a shape its cache doesn't have.
-- Saving: every 10 minutes when something new came in, on a background thread, and at the
-  end of the session. The file has a checksum; a damaged one is dropped.
+- Saving: on a background thread 30 s after the last new shape, every 10 minutes while they
+  keep coming, and at the end of the session. A game that quits without unloading the
+  session, or crashes, loses only the last seconds. The file has a checksum; a damaged one
+  is dropped. The files of other worlds are trimmed when a world's file is loaded, too.
 - Compatibility: a server without the cache ignores the Inventory, an older client never
   sends one, so the cache needs no new protocol version.
 

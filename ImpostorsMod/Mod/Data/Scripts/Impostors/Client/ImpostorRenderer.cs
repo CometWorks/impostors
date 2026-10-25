@@ -270,7 +270,7 @@ namespace Impostors
             }
 
             if (cache != null)
-                cache.Update(tick);
+                cache.Update();
 
             // A few View messages per second at most
             if (tick % 10 == 0)
