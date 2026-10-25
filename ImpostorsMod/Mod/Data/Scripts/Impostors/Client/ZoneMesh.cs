@@ -33,8 +33,9 @@ namespace Impostors
         {
             if (isBox)
                 return box ?? (box = BuildBox());
+            // The last level takes any size, double.MaxValue for a camera inside the zone too
             var i = 0;
-            while (pixels > SpherePixels[i])
+            while (i < SpherePixels.Length - 1 && pixels > SpherePixels[i])
                 i++;
             return spheres[i] ?? (spheres[i] = BuildSphere(SphereSegments[i]));
         }

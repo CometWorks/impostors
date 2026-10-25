@@ -57,6 +57,8 @@ the whitelist, loading the mod in the game does.
 - `tests/build_times.py` makes a table of the build times from the `Impostor build:` lines of
   server logs, per object and level. Any run that builds impostors writes them;
   `scenario.py` and `compare.py` save the table as `build-times.md` next to their shots.
+- `tests/zone_mesh.py` checks the safe zone meshes offline, without a game running: the
+  sphere for each size on screen, up to a camera inside the zone, infinity and NaN.
 
 ## Plugin version
 
