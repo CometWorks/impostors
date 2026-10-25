@@ -101,7 +101,13 @@ def session(name: str) -> dict:
         key = (totals.get("shapes"), totals.get("cached"))
         still = still + 5 if key == last else 0
         last = key
-    print(f"{name}:", {k: totals.get(k) for k in ("shapes", "shapekb", "cached", "cachekb", "stored", "restored")})
+    print(
+        f"{name}:",
+        {
+            k: totals.get(k)
+            for k in ("shapes", "shapekb", "cached", "cachekb", "stored", "restored")
+        },
+    )
     try:
         api.exit_game()
     except Exception:  # noqa: BLE001 -- the connection drops while exiting
@@ -128,7 +134,10 @@ def seed(own: Path) -> dict:
     write_pack(own, old + superseded + big + real)
 
     other = own.with_name(f"{prefix()}cache-00000000deadbeef.bin")
-    write_pack(other, [(junk_id + 5000 + i, 3, 64, d - 2, os.urandom(64 * 1024)) for i in range(160)])
+    write_pack(
+        other,
+        [(junk_id + 5000 + i, 3, 64, d - 2, os.urandom(64 * 1024)) for i in range(160)],
+    )
     index = storage() / f"{prefix()}cache-index.txt"
     lines = [l for l in index.read_text().splitlines() if "deadbeef" not in l]
     lines.insert(0, f"cache-00000000deadbeef.bin {160 * 64 * 1024} {d - 2}")
@@ -175,13 +184,24 @@ def main():
             int(second.get("shapes", -1)) == 0,
             f"{second.get('shapes')} shapes, {second.get('shapekb')} KB; first join {first.get('shapekb')} KB",
         )
-        check("rejoin: shapes from the cache", int(second.get("cached", 0)) > 0, second.get("cached"))
+        check(
+            "rejoin: shapes from the cache",
+            int(second.get("cached", 0)) > 0,
+            second.get("cached"),
+        )
 
         entries = read_pack(own)
         data = sum(len(e[4]) for e in entries)
         size = sum(f.stat().st_size for f in cache_files())
-        check("cache under its cap", data <= MAX_BYTES, f"{data / 1048576:.1f} MB of shapes, {size / 1048576:.1f} MB on disk")
-        check("month old entries dropped", all(e[3] >= today() - MAX_DAYS for e in entries))
+        check(
+            "cache under its cap",
+            data <= MAX_BYTES,
+            f"{data / 1048576:.1f} MB of shapes, {size / 1048576:.1f} MB on disk",
+        )
+        check(
+            "month old entries dropped",
+            all(e[3] >= today() - MAX_DAYS for e in entries),
+        )
         versions = {}
         for e in entries:
             versions.setdefault(e[0], set()).add(e[1])
@@ -190,9 +210,15 @@ def main():
     finally:
         CLIENT.stop()
         SERVER.stop()
-        lines = [l for l in SERVER.game_log().read_text(errors="replace").splitlines() if "disk cache" in l]
+        lines = [
+            l
+            for l in SERVER.game_log().read_text(errors="replace").splitlines()
+            if "disk cache" in l
+        ]
         print("server:", *lines[-3:], sep="\n  ")
-    print(f"{'PASSED' if rig_failures() == 0 else 'FAILED'}: {rig_failures()} failure(s)")
+    print(
+        f"{'PASSED' if rig_failures() == 0 else 'FAILED'}: {rig_failures()} failure(s)"
+    )
     sys.exit(rig_failures())
 
 
