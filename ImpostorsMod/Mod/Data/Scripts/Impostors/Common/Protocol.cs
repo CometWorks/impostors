@@ -36,7 +36,8 @@ namespace Impostors
 
         // Server to client: ushort count, then count times long id, int version and a shape
         // (see Shape, or ZoneShape for a safe zone). Small shapes share a message. The client
-        // adds each to its ShapeStore.
+        // adds each to its ShapeStore. In place of a shape, byte FromCache and the byte level
+        // tell the client to take that shape from its disk cache (see Inventory).
         public const byte ShapeData = 5;
 
         // Client to server: float vertical field of view with zoom (radians), ushort viewport
@@ -46,6 +47,17 @@ namespace Impostors
         // that ended. The server sends finer levels for the impostors inside a zoomed view, and
         // picks for the spectator camera's position when the player may spectate.
         public const byte View = 6;
+
+        // Client to server: ushort count, then count times long id, int version and byte level
+        // mask (see LodBit) of the shapes in the client's disk cache for this world. Sent after
+        // every Welcome of a new server instance, an empty one too. From then on the server
+        // counts every shape it sends as cached as well, the client keeps all of them until the
+        // session ends. A server without the disk cache ignores the message, an older client
+        // never sends it, so the protocol version stays.
+        public const byte Inventory = 7;
+
+        // Marks a ShapeData entry the client has in its disk cache, no shape level is 1
+        public const byte FromCache = 1;
 
         // A spectator camera that moved this far gets a new View message, meters
         public const double ViewMoveMeters = 100;
@@ -64,6 +76,19 @@ namespace Impostors
         // Pixels per radian near the screen center the server assumes: a 1080p screen with a
         // 70 degree vertical field of view
         public const double PixelsPerRadian = 540 / 0.7002075382097097;
+
+        // The bit of a level in an Inventory mask: bit 0 for level 0 (a safe zone), bit k for
+        // level 2^k
+        public static byte LodBit(byte lod)
+        {
+            var bit = 0;
+            while (lod > 1)
+            {
+                lod >>= 1;
+                bit++;
+            }
+            return (byte)(1 << bit);
+        }
 
         // How many times larger a view shows things than the server's default estimate
         public static double Zoom(double fov, double height)
@@ -356,6 +381,24 @@ namespace Impostors
         public int Remaining
         {
             get { return buffer.Length - position; }
+        }
+
+        public int Position
+        {
+            get { return position; }
+        }
+
+        public byte Peek()
+        {
+            return buffer[position];
+        }
+
+        // A copy of bytes read already, from start to the current position
+        public byte[] Since(int start)
+        {
+            var result = new byte[position - start];
+            Buffer.BlockCopy(buffer, start, result, 0, result.Length);
+            return result;
         }
 
         public byte Byte()

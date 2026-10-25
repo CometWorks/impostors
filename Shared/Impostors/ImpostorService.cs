@@ -61,6 +61,10 @@ public sealed class ImpostorService : IDisposable
         // The shapes this player's client has, by id, level and version
         public readonly ShapeStore<bool> Store = new();
 
+        // The level masks of the shapes in the client's disk cache by id and version, from its
+        // Inventory and every shape sent since; null for a client without the cache
+        public Dictionary<(long id, int version), byte> OnDisk;
+
         // Where the server picked for this player last
         public Vector3D Eye;
 
@@ -76,6 +80,7 @@ public sealed class ImpostorService : IDisposable
         public int States;
         public int Removed;
         public int Restored;
+        public int FromDisk;
         public int MaxWaiting;
 
         // Shape bytes this player may still get, negative after a shape larger than what was
@@ -271,7 +276,7 @@ public sealed class ImpostorService : IDisposable
             $"Impostors of player {viewer.SteamId} in the last minute: {viewer.Picks} picks, "
                 + $"{viewer.PickTicks * ms / viewer.Picks:0.00} ms average, {viewer.MaxPickTicks * ms:0.00} ms most, "
                 + $"{viewer.Shapes} shapes ({viewer.ShapeBytes / 1024} KB), {viewer.States} states, "
-                + $"{viewer.Removed} removed, {viewer.Restored} from the client's store "
+                + $"{viewer.Removed} removed, {viewer.Restored} from the client's store, {viewer.FromDisk} from its disk cache "
                 + $"({viewer.Store.Count} stored, {viewer.Store.Bytes / 1024} KB), {viewer.MaxWaiting} waiting at most, "
                 + $"{viewer.Sent.Count} shown"
         );
@@ -283,6 +288,7 @@ public sealed class ImpostorService : IDisposable
         viewer.States = 0;
         viewer.Removed = 0;
         viewer.Restored = 0;
+        viewer.FromDisk = 0;
         viewer.MaxWaiting = 0;
     }
 
@@ -320,6 +326,12 @@ public sealed class ImpostorService : IDisposable
             return;
         }
 
+        if (message[0] == Protocol.Inventory)
+        {
+            OnInventory(new ByteReader(message, 1), message.Length, sender);
+            return;
+        }
+
         if (message[0] != Protocol.Hello)
             return;
 
@@ -349,6 +361,27 @@ public sealed class ImpostorService : IDisposable
         writer.Long(instanceId);
         writer.Int(config.MaxQuadsPerFrame);
         Send(sender);
+    }
+
+    // Bounds what a client can make us keep, far more than a 64 MB cache holds
+    private const int MaxOnDisk = 1 << 18;
+
+    // The client's disk cache, in one or more messages after each Welcome of a new instance
+    private void OnInventory(ByteReader r, int length, ulong sender)
+    {
+        if (length < 3 || !viewers.TryGetValue(sender, out var viewer) || viewer.Local)
+            return;
+        var count = r.UShort();
+        if (length < 3 + count * 13)
+            return;
+        viewer.OnDisk ??= new Dictionary<(long, int), byte>();
+        for (var i = 0; i < count && viewer.OnDisk.Count < MaxOnDisk; i++)
+        {
+            var key = (r.Long(), r.Int());
+            var mask = r.Byte();
+            viewer.OnDisk.TryGetValue(key, out var known);
+            viewer.OnDisk[key] = (byte)(known | mask);
+        }
     }
 
     private void OnView(ByteReader r, int length, ulong sender)
@@ -508,7 +541,7 @@ public sealed class ImpostorService : IDisposable
         viewer.Waiting = 0;
 
         var states = new List<ImpostorState>();
-        var shapes = new List<(ImpostorEntry entry, byte[] shape)>();
+        var shapes = new List<(ImpostorEntry entry, byte[] shape, bool cached)>();
         // Paid by the time since the last update, which is shorter after a View message
         var elapsed = viewer.LastTick == 0 ? 60 : Math.Min(tick - viewer.LastTick, 60);
         viewer.LastTick = tick;
@@ -533,13 +566,13 @@ public sealed class ImpostorService : IDisposable
             var (index, picked, tint) = fit[i];
             // A new impostor gets a level the client has, or a small one while the player is
             // in debt
-            if (sent == null && viewer.ShapeCredit <= 0 && !Stored(viewer, entry, index))
+            if (sent == null && viewer.ShapeCredit <= 0 && !Has(viewer, entry, index))
             {
                 var small = index;
                 while (small > 0 && entry.Shapes[small].Length > DebtShapeBytes)
                     small--;
                 var stored = index;
-                while (stored > small && !Stored(viewer, entry, stored))
+                while (stored > small && !Has(viewer, entry, stored))
                     stored--;
                 index = stored;
             }
@@ -556,6 +589,12 @@ public sealed class ImpostorService : IDisposable
                 {
                     // The client has this shape already, the state switches to it
                     viewer.Restored++;
+                }
+                else if (OnDisk(viewer, entry, index))
+                {
+                    // The client loads it from its disk cache, a few bytes and no credit
+                    viewer.FromDisk++;
+                    shapes.Add((entry, shape, true));
                 }
                 else if (viewer.ShapeCredit <= 0 && sent != null)
                 {
@@ -581,7 +620,7 @@ public sealed class ImpostorService : IDisposable
                     viewer.ShapeCredit -= shape.Length;
                     viewer.Shapes++;
                     viewer.ShapeBytes += shape.Length;
-                    shapes.Add((entry, shape));
+                    shapes.Add((entry, shape, false));
                 }
 
                 // The states go first, so the client knows the version a shape belongs to
@@ -609,8 +648,18 @@ public sealed class ImpostorService : IDisposable
 
         // After the lookups above and in the order of the ShapeData messages, as the client
         // adds them
-        foreach (var (entry, shape) in shapes)
+        foreach (var (entry, shape, cached) in shapes)
+        {
             viewer.Store.Add(entry.Id, shape[0], entry.Version, shape.Length, true);
+
+            // The client caches every shape it gets once it sent its inventory
+            if (!cached && viewer.OnDisk != null && viewer.OnDisk.Count < MaxOnDisk)
+            {
+                var key = (entry.Id, entry.Version);
+                viewer.OnDisk.TryGetValue(key, out var mask);
+                viewer.OnDisk[key] = (byte)(mask | Protocol.LodBit(shape[0]));
+            }
+        }
 
         viewer.States += states.Count;
         viewer.MaxWaiting = Math.Max(viewer.MaxWaiting, viewer.Waiting);
@@ -622,6 +671,20 @@ public sealed class ImpostorService : IDisposable
     private static bool Stored(Viewer viewer, ImpostorEntry entry, int index)
     {
         return viewer.Store.TryGet(entry.Id, entry.Shapes[index][0], entry.Version, out _);
+    }
+
+    // The client's disk cache has this level of the entry's current version
+    private static bool OnDisk(Viewer viewer, ImpostorEntry entry, int index)
+    {
+        return viewer.OnDisk != null
+            && viewer.OnDisk.TryGetValue((entry.Id, entry.Version), out var mask)
+            && (mask & Protocol.LodBit(entry.Shapes[index][0])) != 0;
+    }
+
+    // In the client's store or in its disk cache
+    private static bool Has(Viewer viewer, ImpostorEntry entry, int index)
+    {
+        return Stored(viewer, entry, index) || OnDisk(viewer, entry, index);
     }
 
     // Where the game replicates entities to the player: its controlled entity, or the spectator
@@ -828,7 +891,10 @@ public sealed class ImpostorService : IDisposable
 
     // Small shapes share a message up to MaxMessageSize: hundreds of far asteroids at levels 2
     // and 4 take a few dozen bytes each. A larger shape goes alone.
-    private void SendShapes(ulong steamId, List<(ImpostorEntry entry, byte[] shape)> shapes)
+    private void SendShapes(
+        ulong steamId,
+        List<(ImpostorEntry entry, byte[] shape, bool cached)> shapes
+    )
     {
         var start = 0;
         while (start < shapes.Count)
@@ -842,15 +908,23 @@ public sealed class ImpostorService : IDisposable
                 start + count < shapes.Count
                 && (
                     count == 0
-                    || writer.Length + 12 + shapes[start + count].shape.Length
+                    || writer.Length + 12 + Encoded(shapes[start + count])
                         <= Protocol.MaxMessageSize
                 )
             )
             {
-                var (entry, shape) = shapes[start + count];
+                var (entry, shape, cached) = shapes[start + count];
                 writer.Long(entry.Id);
                 writer.Int(entry.Version);
-                writer.Bytes(shape);
+                if (cached)
+                {
+                    writer.Byte(Protocol.FromCache);
+                    writer.Byte(shape[0]);
+                }
+                else
+                {
+                    writer.Bytes(shape);
+                }
                 count++;
             }
             writer.UShortAt(countPosition, (ushort)count);
@@ -858,6 +932,9 @@ public sealed class ImpostorService : IDisposable
             start += count;
         }
     }
+
+    private static int Encoded((ImpostorEntry entry, byte[] shape, bool cached) item) =>
+        item.cached ? 2 : item.shape.Length;
 
     private void Send(ulong steamId)
     {

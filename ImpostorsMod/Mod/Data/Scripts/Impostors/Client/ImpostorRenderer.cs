@@ -85,6 +85,11 @@ namespace Impostors
         // again with a state only
         private readonly ShapeStore<ClientShape> store = new ShapeStore<ClientShape>();
 
+        // The shapes of earlier sessions on disk, null for the local player; caching what it
+        // gets once the Inventory went out
+        private ShapeCache cache;
+        private bool caching;
+
         // In the camera's view in the last frame, before the budget (stats)
         private int inView;
         private readonly List<DrawPart> parts = new List<DrawPart>();
@@ -130,6 +135,11 @@ namespace Impostors
         // outside the view and those over the budget in the last frame
         private int removedCount;
         private int restoredCount;
+
+        // Shapes received and their bytes, and the shapes taken from the disk cache
+        private int shapeCount;
+        private long shapeBytes;
+        private int cachedCount;
         private int culled;
         private int overBudget;
         private int coarser;
@@ -154,7 +164,10 @@ namespace Impostors
             }
 
             if (!local)
+            {
                 MyAPIGateway.Multiplayer.RegisterSecureMessageHandler(Protocol.Channel, OnMessage);
+                cache = new ShapeCache(ModContext != null);
+            }
             MyAPIGateway.Utilities.RegisterMessageHandler(BudgetMessage, OnBudget);
             active = true;
 
@@ -211,6 +224,13 @@ namespace Impostors
             active = false;
             impostors.Clear();
             store.Clear();
+            if (cache != null)
+            {
+                cache.Save();
+                cache.Clear();
+                cache = null;
+                caching = false;
+            }
         }
 
         private static bool ModLoaded()
@@ -248,6 +268,9 @@ namespace Impostors
                 writer.Byte((byte)(serverInstance == 0 ? 1 : 0));
                 SendToServer();
             }
+
+            if (cache != null)
+                cache.Update(tick);
 
             // A few View messages per second at most
             if (tick % 10 == 0)
@@ -458,6 +481,14 @@ namespace Impostors
                     + removedCount
                     + " restored="
                     + restoredCount
+                    + " shapes="
+                    + shapeCount
+                    + " shapekb="
+                    + shapeBytes / 1024
+                    + " cached="
+                    + cachedCount
+                    + " cachekb="
+                    + (cache != null ? cache.Bytes / 1024 : 0)
                     + " stored="
                     + store.Count
                     + " storedkb="
@@ -590,6 +621,10 @@ namespace Impostors
 
         private void Receive(ByteReader r, byte type)
         {
+            // After a Restart, what the server sent before it got the Hello
+            if (serverInstance == 0 && type != Protocol.Welcome)
+                return;
+
             switch (type)
             {
                 case Protocol.Welcome:
@@ -607,6 +642,7 @@ namespace Impostors
                         // A new server knows nothing of the view yet
                         viewZoomed = false;
                         viewReported = false;
+                        SendInventory();
                     }
                     break;
                 }
@@ -658,16 +694,87 @@ namespace Impostors
                     {
                         var id = r.Long();
                         var version = r.Int();
+                        byte[] data;
+                        ClientShape shape;
+                        if (r.Peek() == Protocol.FromCache)
+                        {
+                            r.Byte();
+                            var lod = r.Byte();
+                            data = cache != null && caching ? cache.Get(id, version, lod) : null;
+                            if (data == null)
+                            {
+                                // Not where the server counted on it: start over with it
+                                MyLog.Default.WriteLineAndConsole(
+                                    "Impostors: shape "
+                                        + id
+                                        + " level "
+                                        + lod
+                                        + " is not in the cache"
+                                );
+                                Restart();
+                                return;
+                            }
+                            shape = ClientShape.Read(new ByteReader(data), version);
+                            cachedCount++;
+                        }
+                        else
+                        {
+                            var start = r.Position;
+                            shape = ClientShape.Read(r, version);
+                            data = r.Since(start);
+                            shapeCount++;
+                            shapeBytes += data.Length;
+                        }
+
                         var impostor = Get(id);
-                        var start = r.Remaining;
-                        var shape = ClientShape.Read(r, version);
                         impostor.Shape = shape;
                         impostor.ShapeTick = tick;
-                        store.Add(id, shape.Lod, version, start - r.Remaining, shape);
+                        store.Add(id, shape.Lod, version, data.Length, shape);
+                        if (caching)
+                            cache.Add(id, version, shape.Lod, data);
+                    }
+
+                    if (caching && cache.TooLarge)
+                    {
+                        MyLog.Default.WriteLineAndConsole(
+                            "Impostors: the shape cache grew over "
+                                + ShapeCache.SessionMaxBytes / 1048576
+                                + " MB this session, pruning it"
+                        );
+                        Restart();
                     }
                     break;
                 }
             }
+        }
+
+        // Loads the world's shapes from the disk cache once and tells the server what it has, from
+        // then on the cache keeps everything the server sends
+        private void SendInventory()
+        {
+            if (cache == null)
+                return;
+            if (!cache.Loaded)
+                cache.Load(MyAPIGateway.Session.Name);
+            cache.Inventory(writer, SendToServer);
+            caching = true;
+        }
+
+        // The server counts on shapes we don't have: forget its impostors and ask it to start
+        // over, the next Welcome sends the inventory of the pruned cache
+        private void Restart()
+        {
+            impostors.Clear();
+            store.Clear();
+            serverInstance = 0;
+            caching = false;
+            if (cache != null)
+                cache.Prune();
+            writer.Clear();
+            writer.Byte(Protocol.Hello);
+            writer.Byte(Protocol.Version);
+            writer.Byte(1);
+            SendToServer();
         }
 
         private ClientImpostor Get(long id)
