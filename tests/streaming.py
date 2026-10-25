@@ -2,7 +2,7 @@
 in (SE-672): the player jumps from far away to next to it, deep inside the
 replication cube, like a ship arriving at 10 km/s. The impostor must stay and be
 drawn until the real entity draws itself, at the level it had from afar, then
-hide and go. Same rig as scenario.py. Prints one PASS or FAIL line per check and
+hide and go. Last the player jumps into the safe zone (SE-703). Same rig as scenario.py. Prints one PASS or FAIL line per check and
 the timings, and exits with the number of failures.
 
     uv run --no-project --with httpx --with pillow python tests/streaming.py
@@ -45,7 +45,8 @@ TARGETS = (
     (
         ZONE,
         (ZONE.position[0], ZONE.position[1] + 5500, ZONE.position[2]),
-        (ZONE.position[0], ZONE.position[1] + 700, ZONE.position[2]),
+        # Outside its bounding sphere, 866 m: from inside the impostor isn't drawn
+        (ZONE.position[0], ZONE.position[1] + 950, ZONE.position[2]),
     ),
     # Saved asteroids replicate to 8.66 km per axis: from HOME it is 11 km away
     (ROCK, world.HOME, (ROCK.center[0] + 1000, ROCK.center[1], ROCK.center[2])),
@@ -137,7 +138,31 @@ def run(api):
         )
         if target is ROCK and PLUGIN:
             check("RockFar meshes reported by the client plugin", loaded, log)
+    inside_zone(api)
     print("server:", command(api, "!iprobe stats"))
+
+
+def inside_zone(api):
+    """SE-703: the player arrives inside a spherical zone while its impostor stands in. With
+    the camera inside its bounding sphere the impostor isn't drawn, and the client keeps
+    running."""
+    far = (ZONE.position[0], ZONE.position[1] + 5500, ZONE.position[2])
+    inside = (ZONE.position[0], ZONE.position[1] + 200, ZONE.position[2])
+    lod, samples = arrive(api, ZONE, far, inside)
+    if not samples:
+        return
+    # Only stats written after the jump: a client that crashed leaves its last ones
+    tick = lambda s: int(s[2].get("tick", 0))
+    fresh = [s[1] for s in samples if tick(s) > tick(samples[0])]
+    check(
+        "Zone impostor not drawn with the camera inside",
+        bool(fresh) and all(i is None or i.get("drawn") != "1" for i in fresh),
+        [i.get("drawn") if i else "removed" for i in fresh],
+    )
+    now = lambda: int(CLIENT.stats()[0].get("tick", 0))
+    before = now()
+    time.sleep(3)
+    check("client still drawing after the zone streamed in", now() > before)
 
 
 def main():
