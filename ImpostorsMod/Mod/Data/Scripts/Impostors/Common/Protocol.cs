@@ -54,7 +54,7 @@ namespace Impostors
         // counts every shape it sends as cached as well, the client keeps all of them until the
         // session ends. A server without the disk cache ignores the message, an older client
         // never sends it, so the protocol version stays.
-        public const byte Inventory = 7;
+        public const byte Inventory = 8;
 
         // Marks a ShapeData entry the client has in its disk cache, no shape level is 1
         public const byte FromCache = 1;
