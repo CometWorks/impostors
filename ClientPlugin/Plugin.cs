@@ -107,6 +107,7 @@ public class Plugin : IPlugin, ICommonPlugin
     {
         PatchHelpers.PatchUpdates();
         BillboardPriority.Update();
+        VoxelReadiness.Update();
 
         // Serves the players who joined when this client hosts a lobby
         ImpostorService.UpdateStatic(Config, Log);

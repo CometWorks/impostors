@@ -10,7 +10,7 @@ namespace Impostors
     public static class Protocol
     {
         public const ushort Channel = 47213;
-        public const byte Version = 5;
+        public const byte Version = 7;
 
         // Client to server: byte version. Sent when the session is ready and then every
         // HelloInterval seconds, so a server that starts later or a cluster node the client
@@ -38,6 +38,12 @@ namespace Impostors
         // The server sends finer levels for the impostors inside the view. Older servers
         // ignore it.
         public const byte View = 6;
+
+        // Client to server: ushort count, then count long ids of impostors whose real entity
+        // now draws on the client; then the same for the ones whose real entity stopped
+        // drawing. Inside the replication cube the server keeps sending an impostor until the
+        // client reports its entity ready, so nothing is missing while a grid streams in.
+        public const byte Ready = 7;
 
         // Views at least this much larger than the server's default estimate count as zoomed
         public const double MinZoom = 1.5;
