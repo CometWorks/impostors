@@ -155,6 +155,15 @@ def seed(own: Path) -> dict:
 
 
 def main():
+    try:
+        run()
+    finally:
+        failures = rig_failures()
+        print(f"{'PASSED' if failures == 0 else 'FAILED'}: {failures} failure(s)")
+    sys.exit(rig_failures())
+
+
+def run():
     world.prepare(
         SERVER.world,
         CLIENT.steam_id,
@@ -225,10 +234,6 @@ def main():
             if "disk cache" in l
         ]
         print("server:", *lines[-3:], sep="\n  ")
-    print(
-        f"{'PASSED' if rig_failures() == 0 else 'FAILED'}: {rig_failures()} failure(s)"
-    )
-    sys.exit(rig_failures())
 
 
 def rig_failures() -> int:
