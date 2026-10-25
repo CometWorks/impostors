@@ -18,6 +18,10 @@ hashes as it did before anybody mined it, and gets the pack's original shapes ba
 remembered hashes are saved with the world (`Storage/Impostors.asteroids` in the save's
 folder).
 
+Offline and on a lobby host the client plugin runs the same service for the local player,
+so the pack works there the same way: with the pack mod in the world, the asteroids come from
+the pack instead of being built, and the hashes are saved with the offline world.
+
 It pays off on worlds with many saved asteroids, like an asteroid ring. Asteroids that
 nobody edited and that the world doesn't save get no impostors anyway (see
 [Asteroids](Asteroids.md)), so they need no pack.
@@ -85,3 +89,15 @@ until nothing changed for 2 minutes (1479 impostors):
 - The impostors arrive just as fast with the pack: the server starts at most two builds every
   10 ticks, pack hits included, so the pace is that of the build queue, not of the building.
 - The client read the pack's index in 4 to 5 ms when the world loaded.
+
+Offline with the client plugin, the same place over the ring, empty shape cache (1442
+impostors):
+
+| | Without the pack | With the pack |
+|---|---:|---:|
+| Asteroid builds | 1439, 48.8 s CPU | 0 |
+| Asteroids taken from the pack | 0 | 1439, 20.6 s CPU |
+| Impostors after 10 / 60 / 120 s | 186 / 786 / 1442 | 186 / 798 / 1442 |
+
+Saved and loaded again, the offline world knew the hashes of all 1442 asteroids, and their
+pack hits took 0.08 s CPU together instead of 22 s.
