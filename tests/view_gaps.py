@@ -324,7 +324,7 @@ def run() -> None:
         check(f"{name} gap under {MAX_GAP}", r["gap"] <= MAX_GAP, f"{r['gap']:.3f}")
     time.sleep(61)
     for line in server_minutes()[-4:]:
-        print("server:", line)
+        print("server:", line, flush=True)
 
 
 def main() -> int:
