@@ -1,11 +1,14 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using Impostors;
 using PluginSdk.Clustering;
 using Sandbox.Game.Entities;
+using Sandbox.Game.World;
+using Shared.Config;
 using Shared.Impostors;
 using Shared.Logging;
 
@@ -22,7 +25,12 @@ namespace ServerPlugin.Cluster;
 // nodes report everything again and reload the index.
 //
 // Asteroids are not reported: saved voxel maps are replicas on every node already.
-public sealed class ClusterBridge
+//
+// The WA's shape cache is the cluster's only one: it keeps the shapes on disk, and nodes ask it
+// for shapes of unchanged content before building them (the bridge is the service's
+// IShapeCache). The WA also saves its index, so the records of offline partitions' grids
+// survive a WA restart.
+public sealed class ClusterBridge : IShapeCache
 {
     // The plugin's loader id, the manifest Id
     private const string PluginId = "66AA3D09-1732-445D-A2B6-A377B31AE76C";
@@ -38,6 +46,11 @@ public sealed class ClusterBridge
     private const string TopicShapeGet = "shape-get";
     private const string TopicIndex = "index";
     private const string TopicSnapshot = "snapshot";
+    private const string TopicCacheGet = "cache-get";
+
+    // The WA saves its index at most this often, seconds
+    private const int IndexSaveSeconds = 60;
+    private const int IndexMagic = 0x31584449; // "IDX1"
 
     private static readonly PluginTarget WorldAuthority = new()
     {
@@ -47,6 +60,7 @@ public sealed class ClusterBridge
     public static ClusterBridge Instance { get; private set; }
 
     private readonly IPluginLogger log;
+    private readonly IPluginConfig config;
     private readonly PluginClusterClient cluster;
     private readonly ConcurrentQueue<Action> gameThread = new();
     private readonly List<IDisposable> handlers = new();
@@ -59,21 +73,38 @@ public sealed class ClusterBridge
     private readonly HashSet<(long, int)> pushed = new();
     private long knownWaInstance;
 
+    // Node: since when (tick) it owns each partition. A partition owned for less than
+    // SettledTicks may still be loading its grids, its report isn't complete.
+    private readonly Dictionary<ulong, int> ownedSince = new();
+    private const int SettledTicks = 30 * 60;
+
     // Node: the index as last published by the WA, id to (record, owner node; null when offline)
     public readonly Dictionary<long, (ClusterRecord record, string node)> Index = new();
     private long indexInstance;
     private long indexRevision;
 
-    // WA: the merged index, the changes since the last publication and the shape cache
+    // WA: the merged index with each record's partition, the changes since the last
+    // publication and the shape cache, in memory and on disk (store, null when disabled)
     private readonly long instance = DateTime.UtcNow.Ticks ^ Environment.TickCount;
     private long revision;
-    private readonly Dictionary<long, (ClusterRecord record, string node)> merged = new();
+    private readonly Dictionary<long, (ClusterRecord record, string node, ulong partition)> merged =
+        new();
     private readonly HashSet<long> changed = new();
     private readonly HashSet<long> removed = new();
-    private readonly Dictionary<long, (int version, byte[][] shapes)> shapes = new();
+    private readonly Dictionary<long, (int version, long input, byte[][] shapes)> shapes = new();
+    private DiskShapeCache store;
 
-    private ClusterBridge(IPluginLogger log)
+    // WA: records loaded from the saved index that no node has reported since, and the index
+    // saving state
+    private readonly HashSet<long> unconfirmed = new();
+    private bool indexLoaded;
+    private bool indexDirty;
+    private int lastIndexSave;
+    private Task indexSave;
+
+    private ClusterBridge(IPluginConfig config, IPluginLogger log)
     {
+        this.config = config;
         this.log = log;
         cluster = PluginCluster.ForPlugin(PluginId);
     }
@@ -83,14 +114,14 @@ public sealed class ClusterBridge
     private bool IsWorldAuthority => cluster.Context?.Role == "WorldAuthority";
 
     // Called from Init: does nothing outside a cluster
-    public static void Start(IPluginLogger log)
+    public static void Start(IPluginConfig config, IPluginLogger log)
     {
         if (!PluginCluster.IsClusterProcess)
             return;
 
         try
         {
-            Instance = new ClusterBridge(log);
+            Instance = new ClusterBridge(config, log);
         }
         catch (Exception e)
         {
@@ -100,6 +131,7 @@ public sealed class ClusterBridge
         }
 
         ImpostorService.BuildAll = true;
+        ImpostorService.Cache = Instance;
         ImpostorService.ExtraSources.Add(() => new RemoteSource(Instance));
         log.Info("cluster bridge started");
     }
@@ -122,7 +154,11 @@ public sealed class ClusterBridge
         try
         {
             if (IsWorldAuthority)
+            {
+                LoadIndex();
                 Publish();
+                SaveIndex();
+            }
             else if (indexInstance == 0)
                 busy = LoadSnapshot(); // A node that started after the last publication
             else
@@ -143,6 +179,7 @@ public sealed class ClusterBridge
             handlers.Add(cluster.RegisterHandler(TopicShapeGet, OnShapeGet));
             handlers.Add(cluster.RegisterHandler(TopicSnapshot, OnSnapshot));
             handlers.Add(cluster.RegisterHandler(TopicIndex, OnIndex));
+            handlers.Add(cluster.RegisterHandler(TopicCacheGet, OnCacheGet));
         }
         catch (Exception e)
         {
@@ -164,9 +201,10 @@ public sealed class ClusterBridge
             return;
 
         var current = new Dictionary<long, ImpostorEntry>();
+        var unbuilt = 0;
         foreach (var entry in service.Entries)
         {
-            if (entry.Source.Remote || entry.Version == 0)
+            if (entry.Source.Remote)
                 continue;
 
             // Grids, and the safe zones of blocks, which move between nodes with the block's
@@ -178,6 +216,11 @@ public sealed class ClusterBridge
                 continue;
             if (located == 0)
                 continue;
+            if (entry.Version == 0)
+            {
+                unbuilt++;
+                continue;
+            }
 
             current[entry.Id] = entry;
             var partition = cluster.LocateEntity(located)?.Partition ?? 0;
@@ -190,9 +233,13 @@ public sealed class ClusterBridge
             .Where(r => !acked.TryGetValue(r.Id, out var a) || a.Differs(r))
             .ToList();
 
+        var owned = cluster.Context?.OwnedPartitions ?? new Dictionary<ulong, long>();
+        foreach (var partition in ownedSince.Keys.Where(p => !owned.ContainsKey(p)).ToList())
+            ownedSince.Remove(partition);
+        foreach (var partition in owned.Keys.Where(p => !ownedSince.ContainsKey(p)).ToList())
+            ownedSince[partition] = tick;
         // Gone from this node: released when its partition left the node (handover or offline),
         // so the WA keeps the record, deleted otherwise
-        var owned = cluster.Context?.OwnedPartitions ?? new Dictionary<ulong, long>();
         var gone = acked
             .Keys.Where(id => !current.ContainsKey(id))
             .Select(id =>
@@ -202,23 +249,35 @@ public sealed class ClusterBridge
 
         var newShapes = current
             .Values.Where(e => !pushed.Contains((e.Id, e.Version)))
-            .Select(e => (e.Id, e.Version, e.Shapes))
+            .Select(e => (e.Id, e.Version, e.Input, e.Shapes))
             .ToList();
 
         if (upserts.Count == 0 && gone.Count == 0 && newShapes.Count == 0)
             return;
 
-        busy = SendReport(upserts, gone, newShapes);
+        // With everything built and a WA that has all the rest, this report leaves the WA
+        // with every record of the partitions this node owns: it drops the ones of its saved
+        // index that are not among them, grids deleted while it was down
+        var complete =
+            knownWaInstance != 0 && unbuilt == 0
+                ? ownedSince.Where(o => tick - o.Value >= SettledTicks).Select(o => o.Key).ToList()
+                : null;
+        var upsertPartitions = upserts
+            .Select(r => partitions.TryGetValue(r.Id, out var p) ? p : 0)
+            .ToList();
+        busy = SendReport(upserts, upsertPartitions, gone, complete, newShapes);
     }
 
     private async Task SendReport(
         List<ClusterRecord> upserts,
+        List<ulong> located,
         List<(long id, bool released)> gone,
-        List<(long id, int version, byte[][] shapes)> newShapes
+        List<ulong> complete,
+        List<(long id, int version, long input, byte[][] shapes)> newShapes
     )
     {
         // Shapes first, so the WA has them by the time other nodes learn about the versions
-        foreach (var (id, version, entryShapes) in newShapes)
+        foreach (var (id, version, input, entryShapes) in newShapes)
         {
             var ok = true;
             for (var i = 0; i < entryShapes.Length && ok; i++)
@@ -228,6 +287,7 @@ public sealed class ClusterBridge
                 var w = new ByteWriter(entryShapes[i].Length + 32);
                 w.Long(id);
                 w.Int(version);
+                w.Long(input);
                 w.Byte((byte)i);
                 w.Byte((byte)entryShapes.Count(s => s != null));
                 w.Bytes(entryShapes[i]);
@@ -246,16 +306,32 @@ public sealed class ClusterBridge
             var last = start + RecordsPerMessage >= upserts.Count;
             var batchGone = last ? gone : new List<(long, bool)>();
 
-            var w = new ByteWriter(batch.Count * ClusterRecord.Size + batchGone.Count * 9 + 32);
+            var w = new ByteWriter(
+                batch.Count * (ClusterRecord.Size + 8) + batchGone.Count * 9 + 64
+            );
             w.Long(knownWaInstance);
             w.UShort((ushort)batch.Count);
-            foreach (var r in batch)
-                r.Write(w);
+            for (var i = 0; i < batch.Count; i++)
+            {
+                batch[i].Write(w);
+                w.Long((long)located[start + i]);
+            }
             w.UShort((ushort)batchGone.Count);
             foreach (var (id, released) in batchGone)
             {
                 w.Long(id);
                 w.Byte(released ? (byte)1 : (byte)0);
+            }
+            if (last && complete != null)
+            {
+                w.Byte(1);
+                w.UShort((ushort)complete.Count);
+                foreach (var partition in complete)
+                    w.Long((long)partition);
+            }
+            else
+            {
+                w.Byte(0);
             }
 
             var result = await cluster
@@ -407,6 +483,57 @@ public sealed class ClusterBridge
         return shapes;
     }
 
+    // Background thread: the shapes the WA has of this id built from this input, all levels or
+    // none. The WA answers its own builds from its store directly.
+    public byte[][] Get(long id, long input)
+    {
+        if (IsWorldAuthority)
+            return store?.Get(id, input);
+
+        var result = new List<byte[]>();
+        for (var i = 0; i < ImpostorEntry.Lods.Length; i++)
+        {
+            var w = new ByteWriter(24);
+            w.Long(id);
+            w.Long(input);
+            w.Byte((byte)i);
+            var reply = cluster
+                .RequestAsync(WorldAuthority, TopicCacheGet, w.ToArray(), Guid.NewGuid(), Timeout)
+                .GetAwaiter()
+                .GetResult();
+            if (
+                reply.Code != PluginResultCode.Success
+                || reply.Payload == null
+                || reply.Payload.Length < 2
+            )
+                return null;
+
+            var r = new ByteReader(reply.Payload);
+            var levels = r.Byte();
+            result.Add(r.Bytes(r.Remaining));
+            if (result.Count >= levels)
+                break;
+        }
+
+        var cached = new byte[ImpostorEntry.Lods.Length][];
+        for (var i = 0; i < result.Count; i++)
+            cached[i] = result[i];
+        return cached;
+    }
+
+    // A node's builds reach the WA with its report, and its deletions too
+    public void Put(long id, long input, byte[][] built)
+    {
+        if (IsWorldAuthority)
+            store?.Put(id, input, built);
+    }
+
+    public void Forget(long id)
+    {
+        if (IsWorldAuthority)
+            store?.Forget(id);
+    }
+
     // ---------------------------------------------------------------------------------------
     // World Authority side
     // ---------------------------------------------------------------------------------------
@@ -415,15 +542,17 @@ public sealed class ClusterBridge
     {
         var node = message.Source;
         var r = new ByteReader(message.Payload);
-        r.Long(); // The WA instance the node knows, a mismatch is answered by our instance below
+        var known = r.Long(); // The WA instance the node knows, a mismatch is answered by ours below
 
         var count = r.UShort();
         for (var i = 0; i < count; i++)
         {
             var record = ClusterRecord.Read(r);
-            merged[record.Id] = (record, node);
+            var partition = (ulong)r.Long();
+            merged[record.Id] = (record, node, partition);
             changed.Add(record.Id);
             removed.Remove(record.Id);
+            unconfirmed.Remove(record.Id);
         }
 
         count = r.UShort();
@@ -436,16 +565,24 @@ public sealed class ClusterBridge
 
             if (released)
             {
-                merged[id] = (current.record, null);
+                merged[id] = (current.record, null, current.partition);
                 changed.Add(id);
             }
             else
             {
-                merged.Remove(id);
-                shapes.Remove(id);
-                changed.Remove(id);
-                removed.Add(id);
+                Delete(id, true);
             }
+        }
+
+        // The node's partitions, when it reported every record of them
+        if (r.Remaining > 0 && r.Byte() == 1)
+        {
+            var owned = new HashSet<ulong>();
+            count = r.UShort();
+            for (var i = 0; i < count; i++)
+                owned.Add((ulong)r.Long());
+            if (known == instance)
+                DropUnconfirmed(owned);
         }
 
         var w = new ByteWriter(8);
@@ -453,19 +590,66 @@ public sealed class ClusterBridge
         return Task.FromResult(w.ToArray());
     }
 
+    // A deleted grid: gone from the index, and from the shape cache when a node said so
+    private void Delete(long id, bool forgetShapes)
+    {
+        merged.Remove(id);
+        shapes.Remove(id);
+        if (forgetShapes)
+            store?.Forget(id);
+        changed.Remove(id);
+        unconfirmed.Remove(id);
+        removed.Add(id);
+    }
+
+    // Records of the saved index in these partitions that their node didn't report
+    private void DropUnconfirmed(HashSet<ulong> owned)
+    {
+        var drop = unconfirmed
+            .Where(id => merged.TryGetValue(id, out var e) && owned.Contains(e.partition))
+            .ToList();
+        foreach (var id in drop)
+            Delete(id, false);
+        if (drop.Count > 0)
+            log.Info($"cluster index: dropped {drop.Count} saved records no node has any more");
+    }
+
     private Task<byte[]> OnShape(PluginMessage message)
     {
         var r = new ByteReader(message.Payload);
         var id = r.Long();
         var version = r.Int();
+        var input = r.Long();
         var level = r.Byte();
         var levels = r.Byte();
         if (!shapes.TryGetValue(id, out var cached) || cached.version != version)
-            cached = (version, new byte[levels][]);
-        if (level < cached.shapes.Length)
+            cached = (version, input, new byte[levels][]);
+        if (level < cached.shapes.Length && cached.shapes[level] == null)
+        {
             cached.shapes[level] = r.Bytes(r.Remaining);
+            if (store != null && cached.shapes.All(s => s != null))
+            {
+                var complete = cached;
+                Task.Run(() => store.Put(id, complete.input, complete.version, complete.shapes));
+            }
+        }
         shapes[id] = cached;
         return Task.FromResult(new byte[] { 1 });
+    }
+
+    // The shapes of this id in memory, or loaded from the store when they match
+    private (int version, long input, byte[][] shapes)? Cached(
+        long id,
+        Func<(int version, long input), bool> match
+    )
+    {
+        if (shapes.TryGetValue(id, out var cached) && match((cached.version, cached.input)))
+            return cached;
+        if (store?.Read(id) is not { } stored || !match((stored.version, stored.input)))
+            return null;
+        cached = (stored.version, stored.input, stored.shapes);
+        shapes[id] = cached;
+        return cached;
     }
 
     // Reply: byte level count, then the shape; empty when the WA doesn't have it
@@ -475,18 +659,28 @@ public sealed class ClusterBridge
         var id = r.Long();
         var version = r.Int();
         var level = r.Byte();
-        if (
-            !shapes.TryGetValue(id, out var cached)
-            || cached.version != version
-            || level >= cached.shapes.Length
-            || cached.shapes[level] == null
-        )
-            return Task.FromResult(Array.Empty<byte>());
+        return Task.FromResult(ShapeReply(Cached(id, c => c.version == version), level));
+    }
 
-        var w = new ByteWriter(cached.shapes[level].Length + 1);
-        w.Byte((byte)cached.shapes.Length);
-        w.Bytes(cached.shapes[level]);
-        return Task.FromResult(w.ToArray());
+    // The same by input, for a node about to build the shapes
+    private Task<byte[]> OnCacheGet(PluginMessage message)
+    {
+        var r = new ByteReader(message.Payload);
+        var id = r.Long();
+        var input = r.Long();
+        var level = r.Byte();
+        return Task.FromResult(ShapeReply(Cached(id, c => c.input == input), level));
+    }
+
+    private static byte[] ShapeReply((int version, long input, byte[][] shapes)? cached, int level)
+    {
+        if (cached is not { } c || level >= c.shapes.Length || c.shapes[level] == null)
+            return Array.Empty<byte>();
+
+        var w = new ByteWriter(c.shapes[level].Length + 1);
+        w.Byte((byte)c.shapes.Length);
+        w.Bytes(c.shapes[level]);
+        return w.ToArray();
     }
 
     private Task<byte[]> OnSnapshot(PluginMessage message)
@@ -502,13 +696,100 @@ public sealed class ClusterBridge
         w.Long(revision);
         w.Int(merged.Count);
         w.UShort((ushort)page.Count);
-        foreach (var (record, node) in page)
+        foreach (var (record, node, _) in page)
         {
             record.Write(w);
             w.String(node);
         }
         return Task.FromResult(w.ToArray());
     }
+
+    // The saved index, once the world is loaded: its records stay offline until a node
+    // reports them. Records nodes reported in the meantime are newer.
+    private void LoadIndex()
+    {
+        if (indexLoaded || MySession.Static is not { Ready: true } session)
+            return;
+        indexLoaded = true;
+
+        store = ImpostorService.OpenDiskCache(config, log);
+        var path = IndexPath;
+        if (!File.Exists(path))
+            return;
+
+        try
+        {
+            var r = new ByteReader(File.ReadAllBytes(path));
+            if (r.Int() != IndexMagic || r.String() != session.CurrentPath)
+            {
+                log.Info("cluster index: the saved one is of another world, not loaded");
+                return;
+            }
+
+            var count = r.Int();
+            var loaded = 0;
+            for (var i = 0; i < count; i++)
+            {
+                var record = ClusterRecord.Read(r);
+                var partition = (ulong)r.Long();
+                if (merged.ContainsKey(record.Id))
+                    continue;
+                merged[record.Id] = (record, null, partition);
+                changed.Add(record.Id);
+                unconfirmed.Add(record.Id);
+                loaded++;
+            }
+            log.Info($"cluster index: loaded {loaded} saved records");
+        }
+        catch (Exception e)
+        {
+            log.Error(e, $"cluster index: failed to load {path}");
+        }
+    }
+
+    // Writes the index on a background thread after it changed, at most every IndexSaveSeconds
+    private void SaveIndex()
+    {
+        if (
+            !indexDirty
+            || tick - lastIndexSave < IndexSaveSeconds * 60
+            || indexSave is { IsCompleted: false }
+            || MySession.Static is not { } session
+        )
+            return;
+        indexDirty = false;
+        lastIndexSave = tick;
+
+        var w = new ByteWriter(merged.Count * (ClusterRecord.Size + 8) + 1024);
+        w.Int(IndexMagic);
+        w.String(session.CurrentPath);
+        w.Int(merged.Count);
+        foreach (var (record, _, partition) in merged.Values)
+        {
+            record.Write(w);
+            w.Long((long)partition);
+        }
+
+        var path = IndexPath;
+        indexSave = Task.Run(() =>
+        {
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(path));
+                File.WriteAllBytes(path + ".tmp", w.ToArray());
+                if (File.Exists(path))
+                    File.Delete(path);
+                File.Move(path + ".tmp", path);
+            }
+            catch (Exception e)
+            {
+                gameThread.Enqueue(() => log.Warning(e, $"cluster index: failed to save {path}"));
+            }
+        });
+    }
+
+    private static string IndexPath =>
+        Path.Combine(VRage.FileSystem.MyFileSystem.UserDataPath, "ImpostorsCache", "index.bin");
 
     // Sends the changes since the last publication to every node, as consecutive revisions
     private void Publish()
@@ -520,6 +801,7 @@ public sealed class ClusterBridge
         var gone = removed.ToList();
         changed.Clear();
         removed.Clear();
+        indexDirty = true;
 
         var messages = new List<byte[]>();
         for (var start = 0; start == 0 || start < upserts.Count; start += RecordsPerMessage)
@@ -533,7 +815,7 @@ public sealed class ClusterBridge
             w.Long(revision);
             w.Long(++revision);
             w.UShort((ushort)batch.Count);
-            foreach (var (record, node) in batch)
+            foreach (var (record, node, _) in batch)
             {
                 record.Write(w);
                 w.String(node);

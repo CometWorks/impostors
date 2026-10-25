@@ -44,10 +44,10 @@ public sealed class RemoteSource : ImpostorSource
         }
     }
 
-    public override Func<byte[][]> PrepareBuild(ImpostorEntry entry)
+    public override Func<ShapeBuild, byte[][]> PrepareBuild(ImpostorEntry entry)
     {
         if (entry.Tag is not ClusterRecord record)
             return null;
-        return () => bridge.FetchShapes(record.Id, record.Version);
+        return _ => bridge.FetchShapes(record.Id, record.Version);
     }
 }

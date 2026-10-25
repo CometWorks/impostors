@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
+using Sandbox.Game.Entities;
 using Shared.Logging;
 
 namespace Shared.Impostors;
@@ -16,15 +17,32 @@ public sealed class ImpostorRegistry
     // A build that produced nothing is retried after this long, seconds
     private const double RetrySeconds = 5;
 
+    // An entry gone for this many scans whose entity no longer exists leaves the shape cache.
+    // Not at once: while a world unloads its grids leave the scan before they are closed.
+    private const int ForgetScans = 60;
+
     private readonly IPluginLogger log;
+    private readonly IShapeCache cache;
     private readonly Dictionary<long, ImpostorEntry> entries = new();
-    private readonly ConcurrentQueue<(ImpostorEntry entry, byte[][] shapes)> finished = new();
+    private readonly ConcurrentQueue<(
+        ImpostorEntry entry,
+        byte[][] shapes,
+        ShapeBuild build
+    )> finished = new();
+    private readonly Dictionary<long, int> gone = new();
     private int running;
     private int scan;
 
-    public ImpostorRegistry(IPluginLogger log)
+    // Builds since the last TakeCounts: shapes built, taken from the cache, and found unchanged
+    // by a refresh
+    private int built;
+    private int cached;
+    private int unchanged;
+
+    public ImpostorRegistry(IPluginLogger log, IShapeCache cache)
     {
         this.log = log;
+        this.cache = cache;
     }
 
     public IEnumerable<ImpostorEntry> Entries => entries.Values;
@@ -54,14 +72,39 @@ public sealed class ImpostorRegistry
                 .Select(e => e.Id)
                 .ToList()
         )
-            entries.Remove(id);
+            Remove(id);
     }
 
-    public void Remove(long id) => entries.Remove(id);
+    public void Remove(long id)
+    {
+        if (entries.TryGetValue(id, out var entry) && !entry.Source.Remote)
+            gone[id] = scan;
+        entries.Remove(id);
+    }
+
+    public (int built, int cached, int unchanged) TakeCounts()
+    {
+        var counts = (built, cached, unchanged);
+        built = cached = unchanged = 0;
+        return counts;
+    }
+
+    // Drops the cached shapes of deleted entities
+    private void ForgetDeleted()
+    {
+        foreach (var (id, since) in gone.Where(g => scan - g.Value >= ForgetScans).ToList())
+        {
+            gone.Remove(id);
+            if (!entries.ContainsKey(id) && !MyEntities.EntityExists(id))
+                cache?.Forget(id);
+        }
+    }
 
     // Game thread: applies finished builds and starts new ones for the wanted entries
     public void Update(double now, double rebuildSeconds, double refreshSeconds)
     {
+        ForgetDeleted();
+
         while (finished.TryDequeue(out var result))
         {
             var entry = result.entry;
@@ -70,6 +113,13 @@ public sealed class ImpostorRegistry
             if (result.shapes == null || !entries.ContainsKey(entry.Id))
                 continue;
 
+            if (result.build.Unchanged)
+                unchanged++;
+            else if (result.build.Cached)
+                cached++;
+            else
+                built++;
+            entry.Input = result.build.Input;
             var version = ImpostorEntry.Hash(result.shapes);
             if (version != entry.Version)
             {
@@ -102,11 +152,11 @@ public sealed class ImpostorRegistry
             entry.Stale = false;
             entry.LastBuild = now;
 
-            Func<byte[][]> build;
+            Func<ShapeBuild, byte[][]> work;
             var snapshot = Stopwatch.StartNew();
             try
             {
-                build = entry.Source.PrepareBuild(entry);
+                work = entry.Source.PrepareBuild(entry);
             }
             catch (Exception e)
             {
@@ -114,11 +164,12 @@ public sealed class ImpostorRegistry
                 continue;
             }
 
-            if (build == null)
+            if (work == null)
                 continue;
 
             var snapshotMs = snapshot.Elapsed.TotalMilliseconds;
             var size = entry.Source.Describe(entry);
+            var build = new ShapeBuild(entry, entry.Source.Remote ? null : cache);
             entry.Building = true;
             running++;
             Task.Run(() =>
@@ -127,7 +178,7 @@ public sealed class ImpostorRegistry
                 var timing = BuildTiming.Start();
                 try
                 {
-                    shapes = build();
+                    shapes = work(build);
                 }
                 catch (Exception e)
                 {
@@ -135,12 +186,17 @@ public sealed class ImpostorRegistry
                 }
                 BuildTiming.Stop();
 
-                // One line per build for tests/build_times.py
-                if (shapes != null && !entry.Source.Remote)
+                var reused = build.Unchanged || build.Cached;
+                if (shapes != null && !entry.Source.Remote && !reused)
+                {
+                    // One line per build for tests/build_times.py
                     log.Info(
                         $"Impostor build: id={entry.Id} kind={entry.Kind} {size} snapshot={snapshotMs:0.00}{timing}"
                     );
-                finished.Enqueue((entry, shapes));
+                    if (build.Input != 0)
+                        cache?.Put(entry.Id, build.Input, shapes);
+                }
+                finished.Enqueue((entry, shapes, build));
             });
         }
     }

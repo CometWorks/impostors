@@ -37,6 +37,8 @@ public class PluginConfig : IPluginConfig
     private int rebuildSeconds = 60;
     private int refreshSeconds = 600;
     private float replicationMargin = 500f;
+    private int cacheMegabytes = 256;
+    private int cacheDays = 30;
 
     public bool Enabled
     {
@@ -120,5 +122,17 @@ public class PluginConfig : IPluginConfig
     {
         get => replicationMargin;
         set => SetValue(ref replicationMargin, value);
+    }
+
+    public int CacheMegabytes
+    {
+        get => cacheMegabytes;
+        set => SetValue(ref cacheMegabytes, value);
+    }
+
+    public int CacheDays
+    {
+        get => cacheDays;
+        set => SetValue(ref cacheDays, value);
     }
 }

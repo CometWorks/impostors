@@ -42,7 +42,7 @@ public sealed class SafeZoneSource : ImpostorSource
         }
     }
 
-    public override Func<byte[][]> PrepareBuild(ImpostorEntry entry)
+    public override Func<ShapeBuild, byte[][]> PrepareBuild(ImpostorEntry entry)
     {
         if (entry.Tag is not MySafeZone zone || zone.Closed)
             return null;
@@ -50,7 +50,7 @@ public sealed class SafeZoneSource : ImpostorSource
         var writer = new ByteWriter(ZoneShape.Size);
         Shape(zone).Write(writer);
         var shapes = new[] { writer.ToArray() };
-        return () => shapes;
+        return _ => shapes;
     }
 
     // For the build time log

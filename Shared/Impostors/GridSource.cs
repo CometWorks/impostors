@@ -94,7 +94,7 @@ public sealed class GridSource : ImpostorSource
     public override string Describe(ImpostorEntry entry) =>
         entry.Tag is MyCubeGrid[] grids ? $"blocks={grids.Sum(g => g.BlocksCount)}" : "";
 
-    public override Func<byte[][]> PrepareBuild(ImpostorEntry entry)
+    public override Func<ShapeBuild, byte[][]> PrepareBuild(ImpostorEntry entry)
     {
         if (entry.Tag is not MyCubeGrid[] grids || grids.Length == 0 || grids.Any(g => g.Closed))
             return null;
@@ -128,7 +128,32 @@ public sealed class GridSource : ImpostorSource
             }
         }
 
-        return () => Build(samples, main.GridSize);
+        var lattice = main.GridSize;
+        return build => build.Reuse(Hash(samples, lattice)) ?? Build(samples, lattice);
+    }
+
+    // Everything the shapes are built from: a repaint changes it, unlike the signature. The
+    // blocks come in no stable order, and the centers carry float noise from the grid's pose,
+    // so they are hashed each on its own, at a sixteenth of a block, and summed.
+    private static InputHash Hash(List<Sample> samples, float lattice)
+    {
+        var hash = InputHash.Start((byte)ImpostorKind.Grid);
+        hash.Add(lattice);
+        long sum = 0;
+        foreach (var s in samples)
+        {
+            var one = InputHash.Start(0);
+            one.Add(Vector3I.Round(s.Center * (16 / lattice)));
+            one.Add((int)Math.Round(s.Size * 16 / lattice));
+            one.Add(s.Color);
+            one.Add(s.Angled);
+            unchecked
+            {
+                sum += one.Value;
+            }
+        }
+        hash.Add(sum);
+        return hash;
     }
 
     // Cells are a whole number of the main grid's blocks and sit on its block lattice, so at the
