@@ -16,8 +16,11 @@ namespace Impostors
     //
     // The client plugin compiles this file too, so Pulsar players get impostors on servers
     // whose world doesn't list the mod. That copy stands down when the mod is loaded. In an
-    // offline game or on a lobby host it draws for the local player, from the plugin's service
-    // in the same process (ToLocalServer, FromLocalServer).
+    // offline game or on a lobby host the plugin loads the mod even when the world doesn't list
+    // it, and the mod's copy draws for the local player, from the plugin's service in the same
+    // process through mod messages (ToLocalServerMessage, FromLocalServerMessage). Without the
+    // mod there the plugin's copy does, with the service's delegates (ToLocalServer,
+    // FromLocalServer).
     [MySessionComponentDescriptor(MyUpdateOrder.BeforeSimulation)]
     public class ImpostorRenderer : MySessionComponentBase
     {
@@ -127,11 +130,20 @@ namespace Impostors
         private bool active;
         private bool debug;
 
-        // The client plugin's copy in an offline game or on a lobby host: messages go to and
-        // come from the service in this process, and every entity is real here
-        public static Action<byte[]> ToLocalServer;
-        private static ImpostorRenderer localInstance;
+        // The local player's copy in an offline game or on a lobby host: messages go to and
+        // come from the client plugin's service in this process, and every entity is real here
         private bool local;
+
+        // The mod's copy talks to the service through mod messages, as it can't see the plugin.
+        // Without the plugin nobody answers its Hello and it draws nothing.
+        public const long ToLocalServerMessage = 4721300003;
+        public const long FromLocalServerMessage = 4721300004;
+
+        // The plugin's copy calls the service, and draws only when the mod's copy doesn't: the
+        // plugin sets ModDrawsLocally while it loads a session with the mod
+        public static Action<byte[]> ToLocalServer;
+        public static bool ModDrawsLocally;
+        private static ImpostorRenderer localInstance;
 
         // Debug: draws the impostors in place of the real entities, which it hides
         private bool compare;
@@ -177,14 +189,24 @@ namespace Impostors
             if (MyAPIGateway.Utilities.IsDedicated)
                 return;
 
-            // The client plugin's copy has no mod context, only it can draw on a server
+            // On a server only the client plugin's service sends impostors, to the local player
             if (MyAPIGateway.Multiplayer.IsServer)
             {
-                if (ModContext != null || ToLocalServer == null)
+                if (ModContext == null && (ToLocalServer == null || ModDrawsLocally))
                     return;
                 local = true;
-                localInstance = this;
-                MyLog.Default.WriteLineAndConsole("Impostors: drawing for the local player");
+                if (ModContext != null)
+                    MyAPIGateway.Utilities.RegisterMessageHandler(
+                        FromLocalServerMessage,
+                        OnLocalMessage
+                    );
+                else
+                    localInstance = this;
+                MyLog.Default.WriteLineAndConsole(
+                    ModContext != null
+                        ? "Impostors: the mod draws for the local player"
+                        : "Impostors: the client plugin draws for the local player"
+                );
             }
             else if (ModContext == null && ModLoaded())
             {
@@ -245,7 +267,12 @@ namespace Impostors
             if (!active)
                 return;
 
-            if (local)
+            if (local && ModContext != null)
+                MyAPIGateway.Utilities.UnregisterMessageHandler(
+                    FromLocalServerMessage,
+                    OnLocalMessage
+                );
+            else if (local)
                 localInstance = null;
             else
                 MyAPIGateway.Multiplayer.UnregisterSecureMessageHandler(
@@ -278,13 +305,13 @@ namespace Impostors
 
         public override void UpdateBeforeSimulation()
         {
-            if (active && !local)
+            if (active && (!local || ModContext != null))
                 Update();
         }
 
         // The client plugin updates its local copy itself: the game keeps the session components
         // to update in a set ordered by priority and type name, where the plugin's copy and the
-        // mod's are the same, so with the mod in the world the plugin's copy never got updated
+        // mod's are the same, so with the mod loaded the game updates only the mod's copy
         public static void UpdateLocal()
         {
             if (localInstance != null)
@@ -385,7 +412,9 @@ namespace Impostors
 
         private void SendToServer()
         {
-            if (local)
+            if (local && ModContext != null)
+                MyAPIGateway.Utilities.SendModMessage(ToLocalServerMessage, writer.ToArray());
+            else if (local)
                 ToLocalServer(writer.ToArray());
             else
                 MyAPIGateway.Multiplayer.SendMessageToServer(Protocol.Channel, writer.ToArray());
@@ -396,6 +425,14 @@ namespace Impostors
         {
             if (localInstance != null)
                 localInstance.OnMessage(Protocol.Channel, message, 0, true);
+        }
+
+        // The same for the mod's copy, as a mod message
+        private void OnLocalMessage(object message)
+        {
+            var bytes = message as byte[];
+            if (bytes != null)
+                OnMessage(Protocol.Channel, bytes, 0, true);
         }
 
         // Tells the server which impostors' real entities started or stopped drawing. Inside

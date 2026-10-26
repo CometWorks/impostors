@@ -12,7 +12,8 @@ Safe zones show from afar too, as translucent bubbles in their color.
   world's mod list.
 - **Client plugin** (Pulsar): draws them on servers whose world doesn't have the mod, and
   builds them for yourself in offline games and when you host a lobby, where it also
-  serves the players who joined.
+  serves the players who joined. There it loads the mod itself if the world doesn't list
+  it, so the impostors show the same as on a server.
 
 ## Server setup
 
