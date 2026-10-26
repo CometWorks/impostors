@@ -14,7 +14,9 @@ next to a station, whose node loads its partition and takes the station's shapes
 the WA instead of building them (SE-648). IMP_RESTART=0 skips this part.
 
 An asteroid 12 km out is on every node: both nodes build it at once and push it to the WA,
-which must end up with it in its cache (SE-662). IMP_CACHE_MB sets CacheMegabytes on every
+which must end up with it in its cache (SE-662). The stations are painted in a checkerboard,
+so no two neighboring faces merge and their finest level is over the SDK's 64 KiB payload,
+like the asteroid's: shapes cross the cluster in chunks (SE-704). IMP_CACHE_MB sets CacheMegabytes on every
 process, 0 turns the caches off for a baseline; the cache checks are skipped then. The end
 prints the first-sight latency and every process's builds and cache hits with their CPU time.
 
@@ -59,7 +61,9 @@ STATIONS = {
     "StationEast": (130000000000000101, (12000.0, 0.0, 0.0), 0.6),
     "StationNorth": (130000000000000102, (0.0, 0.0, -12000.0), 0.0),
 }
-SIZE = (40, 12, 30)
+# Hollow boxes of 9224 blocks, 9728 faces: one quad each at level 64, 97 KB
+SIZE = (64, 16, 48)
+PAYLOAD_LIMIT = 64 * 1024
 ASTEROID = (130000000000000201, (-12256.0, -256.0, -256.0), "Asteroid512-001.vx2")
 VOXEL_MAPS = Path(
     os.environ.get(
@@ -75,6 +79,9 @@ CACHING = CACHE_MB != "0"
 WORK = re.compile(
     r"Impostor (build|from the cache): id=(\d+) kind=(\w+).*? cpu=([\d.]+)"
 )
+# A shape level is a header and 10 bytes per quad (Protocol.Shape)
+FINEST = re.compile(r" L64=[\d.]+/[\d.]+/(\d+)")
+WALL = re.compile(r" wall=([\d.]+)")
 
 
 def asteroid_xml() -> str:
@@ -92,10 +99,12 @@ def asteroid_xml() -> str:
 
 def station_xml(name: str, entity_id: int, position, hue: float) -> str:
     sx, sy, sz = SIZE
+    hues = (hue, (hue + 0.5) % 1)
     blocks = "".join(
         '<MyObjectBuilder_CubeBlock xsi:type="MyObjectBuilder_CubeBlock">'
         f'<SubtypeName>LargeBlockArmorBlock</SubtypeName><Min x="{x}" y="{y}" z="{z}" />'
-        f'<ColorMaskHSV x="{hue}" y="-0.3" z="0.45" /></MyObjectBuilder_CubeBlock>'
+        f'<ColorMaskHSV x="{hues[(x + y + z) % 2]}" y="-0.3" z="0.45" />'
+        "</MyObjectBuilder_CubeBlock>"
         for x in range(sx)
         for y in range(sy)
         for z in range(sz)
@@ -217,6 +226,43 @@ def new_lines(bench: Bench, before: dict[Path, int], pattern: str) -> list[str]:
     return lines
 
 
+def large_shape_checks(bench: Bench) -> None:
+    """Shapes over one plugin message crossed the cluster: levels over the payload limit were
+    built (by a node, or the WA for the asteroid), and the WA's cache has all of them"""
+    folder = bench.run_root / "wa-1-data" / CACHE_FOLDER
+    for name, entity_id in [
+        *((n, i) for n, (i, _, _) in STATIONS.items()),
+        ("asteroid", ASTEROID[0]),
+    ]:
+        built = [
+            l
+            for p in PROCESSES
+            for log in (bench.run_root / f"{p}-data").glob(
+                "SpaceEngineersDedicated_*.log"
+            )
+            for l in log.read_text(errors="replace").splitlines()
+            if f"Impostor build: id={entity_id} " in l
+        ]
+        finest = max(
+            (19 + 10 * int(m.group(1)) for l in built if (m := FINEST.search(l))),
+            default=0,
+        )
+        bench.check(
+            f"{name}: finest level over the payload limit",
+            finest > PAYLOAD_LIMIT,
+            f"{finest} bytes",
+        )
+        if not CACHING:
+            continue
+        cached = list(folder.rglob(f"{entity_id:016x}.shapes"))
+        size = cached[0].stat().st_size if cached else 0
+        bench.check(
+            f"{name}: all its shapes in the WA's cache",
+            size > finest > 0,
+            f"{size} bytes",
+        )
+
+
 def restart_checks(bench: Bench, stats_file: Path, player_node: str, ids: dict) -> None:
     """The WA's saved index and shape cache across a WA restart"""
     time.sleep(70)  # The WA saves its index at most once a minute
@@ -254,7 +300,13 @@ def restart_checks(bench: Bench, stats_file: Path, player_node: str, ids: dict) 
     time.sleep(60)  # A scan, a build, and the minute's shape counts
     built = new_lines(bench, before, rf"Impostor build: id={entity_id} ")
     counts = new_lines(bench, before, r"Impostor shapes in the last minute")
-    bench.record("restart-builds", {"built": built, "counts": counts})
+    hits = new_lines(bench, before, rf"Impostor from the cache: id={entity_id} ")
+    bench.record("restart-builds", {"built": built, "counts": counts, "hits": hits})
+    for hit in hits:
+        print(
+            f"{name} from the WA's cache: {WALL.search(hit).group(1)} ms wall",
+            flush=True,
+        )
     if not CACHING:
         return
     bench.check(
@@ -338,10 +390,7 @@ def run(bench: Bench, stats_file: Path) -> None:
         time.sleep(2)
         bench.screenshot(CLIENT_ID, f"offline-{name}")
 
-    if CACHING:
-        folder = bench.run_root / "wa-1-data" / CACHE_FOLDER
-        cached = list(folder.rglob(f"{ASTEROID[0]:016x}.shapes"))
-        bench.check("the asteroid both nodes built is in the WA's cache", bool(cached))
+    large_shape_checks(bench)
 
     if os.environ.get("IMP_RESTART", "1") != "0":
         restart_checks(bench, stats_file, player_node, ids)
@@ -365,7 +414,8 @@ def work_summary(bench: Bench) -> None:
                 l
                 for l in log.read_text(errors="replace").splitlines()
                 if re.search(
-                    r"Impostor cache: failed|Failed to build impostor|cache-get|IOException",
+                    r"Impostor cache: failed|Failed to build impostor|cache-get|IOException"
+                    r"|the WA failed",
                     l,
                 )
             ]
