@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Sandbox.Game;
+using Sandbox.Game.Entities;
 using Sandbox.ModAPI;
 using VRage.Game;
 using VRage.Game.Components;
@@ -35,6 +36,26 @@ namespace Impostors
         // 1 and saturate.
         private const float Ambient = 0.08f;
         private const float Diffuse = 1.6f;
+
+        // Planets shade the impostors behind them, faked from a sphere per planet: the
+        // sunlight fades out while the ray from the impostor to the sun passes from Top down
+        // to sea level (AverageRadius), and is gone below. Top is the highest cloud layer of
+        // the game's planets, about as far above the hills as they rise above sea level
+        // (MyRenderComponentPlanet, the cloud layers aren't whitelisted for mods), plus a
+        // quarter more. Without an atmosphere it's the hilltops. Ambient light stays.
+        private const float CloudTop = 2f;
+        private const float AboveClouds = 1.25f;
+        private const int PlanetTicks = 600;
+        private readonly List<PlanetShade> planets = new List<PlanetShade>();
+        private readonly HashSet<VRage.ModAPI.IMyEntity> planetEntities =
+            new HashSet<VRage.ModAPI.IMyEntity>();
+
+        private struct PlanetShade
+        {
+            public Vector3D Center;
+            public double Ground;
+            public double Top;
+        }
 
         // Small asteroids: under about 27 pixels in radius on a 1080p screen the real ones look
         // darker than lit impostors, down to 0.82 times as bright under 13 pixels. Fitted to
@@ -157,6 +178,12 @@ namespace Impostors
 
         // Debug: draws no impostors, only what the game itself has
         private bool realOnly;
+
+        // Debug: draws the impostors in sunlight, as if no planet shaded them; the time
+        // spent in Sunlight and its calls since the last stats
+        private bool unshaded;
+        private long shadeTicks;
+        private int shadeCount;
 
         // Debug: draws the impostors moved by this much, next to the real entities (voxel
         // maps can't be hidden on the client)
@@ -387,6 +414,9 @@ namespace Impostors
                     readyTicks += timer.ElapsedTicks - start;
             }
 
+            if (tick % PlanetTicks == 1)
+                FindPlanets();
+
             if (debug && tick % 60 == 0)
             {
                 ReadMode();
@@ -562,7 +592,8 @@ namespace Impostors
 
         // "impostor" in the mode file draws the impostors instead of the real entities,
         // "shift x y z" draws them moved by that vector next to the real ones, "real" draws
-        // none of them
+        // none of them. " unshaded" after any of them lights the impostors as if no planet
+        // shaded them.
         private void ReadMode()
         {
             var mode = "";
@@ -571,6 +602,9 @@ namespace Impostors
                 using (var file = ReadStorage("mode"))
                     mode = file.ReadToEnd().Trim();
             }
+            unshaded = mode.EndsWith(" unshaded");
+            if (unshaded)
+                mode = mode.Substring(0, mode.Length - " unshaded".Length);
             var words = mode.Split(' ');
             shift = Vector3D.Zero;
             if (words.Length == 4 && words[0] == "shift")
@@ -709,6 +743,12 @@ namespace Impostors
                     + store.Bytes / 1024
                     + " sun="
                     + Vec(MyVisualScriptLogicProvider.GetSunDirection())
+                    + " planets="
+                    + Planets()
+                    + " shadeus="
+                    + (shadeTicks * 1000000 / MyGameTimer.Frequency)
+                    + " shades="
+                    + shadeCount
                     + " tick="
                     + tick
                     + " fov="
@@ -776,11 +816,15 @@ namespace Impostors
                                 ? " tint=" + state.Tint.PackedValue.ToString("x8")
                                 : ""
                         )
+                        + " sunlight="
+                        + impostor.Sunlight.ToString("0.000")
                         + ZoneStats(impostor)
                         + ScreenPosition(state)
                 );
             }
             readyTicks = 0;
+            shadeTicks = 0;
+            shadeCount = 0;
             using (var file = WriteStorage("stats.txt"))
                 file.Write(text.ToString());
         }
@@ -1303,6 +1347,71 @@ namespace Impostors
             );
         }
 
+        // The planets, every PlanetTicks: few, and they don't move
+        private void FindPlanets()
+        {
+            planets.Clear();
+            planetEntities.Clear();
+            MyAPIGateway.Entities.GetEntities(planetEntities, e => e is MyPlanet);
+            foreach (var entity in planetEntities)
+            {
+                var planet = (MyPlanet)entity;
+                var ground = (double)planet.AverageRadius;
+                var top = (double)planet.MaximumRadius;
+                if (planet.HasAtmosphere)
+                    top = ground + (top - ground) * CloudTop * AboveClouds;
+                planets.Add(
+                    new PlanetShade
+                    {
+                        Center = planet.PositionComp.WorldAABB.Center,
+                        Ground = ground,
+                        Top = Math.Max(top, ground + 1),
+                    }
+                );
+            }
+            planetEntities.Clear();
+        }
+
+        // The share of the sunlight that reaches a point past the planets. Against each planet
+        // one ray towards the sun: how close it passes to the center. On the planet's day side
+        // the ray heads away from it, and that distance grows by how far it is the other way,
+        // so the light fades in near the ground as the sun rises instead of all at once.
+        private float Sunlight(Vector3D point, Vector3 sun)
+        {
+            var light = 1.0;
+            foreach (var planet in planets)
+            {
+                var toCenter = planet.Center - point;
+                var along = Vector3D.Dot(toCenter, sun);
+                var squared = toCenter.LengthSquared();
+                var pass =
+                    along > 0
+                        ? Math.Sqrt(Math.Max(0, squared - along * along))
+                        : Math.Sqrt(squared) - along;
+                if (pass >= planet.Top)
+                    continue;
+                var t = (pass - planet.Ground) / (planet.Top - planet.Ground);
+                if (t <= 0)
+                    return 0;
+                light *= t * t * (3 - 2 * t);
+            }
+            return (float)light;
+        }
+
+        private string Planets()
+        {
+            var text = new System.Text.StringBuilder();
+            foreach (var planet in planets)
+            {
+                if (text.Length > 0)
+                    text.Append(';');
+                text.Append(planet.Ground.ToString("0"))
+                    .Append(':')
+                    .Append(planet.Top.ToString("0"));
+            }
+            return text.ToString();
+        }
+
         private static float Brightness(ImpostorState state, double distance)
         {
             var small = state.Kind == ImpostorKind.Voxel ? SmallBrightness : SmallGridBrightness;
@@ -1324,6 +1433,15 @@ namespace Impostors
             var view = LocalView(impostor, eye, out position, out rotation);
             var sunLocal = Vector3.TransformNormal(sun, Matrix.Transpose(rotation));
             var brightness = Brightness(state, Vector3D.Distance(eye, position));
+            var start = debug ? timer.ElapsedTicks : 0;
+            var sunlight = unshaded ? 1f : Sunlight(position, sun);
+            if (debug)
+            {
+                shadeTicks += timer.ElapsedTicks - start;
+                shadeCount++;
+            }
+            impostor.Sunlight = sunlight;
+            var diffuse = Diffuse * sunlight;
             var tinted = state.Tint.A != 0;
             var tint = Vector3.Lerp(state.Tint.ToVector3(), Vector3.One, ZoneTintPale);
 
@@ -1352,7 +1470,7 @@ namespace Impostors
 
                 var center = position + Vector3.TransformNormal(shape.Centers[i], rotation);
                 var light =
-                    Ambient + Diffuse * Math.Max(0, Vector3.Dot(shape.Shading[i], sunLocal));
+                    Ambient + diffuse * Math.Max(0, Vector3.Dot(shape.Shading[i], sunLocal));
                 var lit = shape.Colors[i] * light * brightness;
                 if (tinted)
                     lit = Vector3.Lerp(lit, tint, ZoneTint);
