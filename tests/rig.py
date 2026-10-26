@@ -35,6 +35,9 @@ Paths, all overridable by environment variables:
     IMP_MOD_FOLDER            the mod the worlds list (ImpostorsMod/Mod of this
                               working copy), for another version of it
 
+IMP_SMOOTH=0 or 1 sets AsteroidSmoothNormals in every plugin config a test
+writes (plugin_config), unless the test sets it itself.
+
 IMP_RESOLUTION sets the clients' screen size (1280x720). IMP_DISPLAY=:N gives
 the clients a real window on that X display instead of --headless. Headless
 clients can't render on the NVIDIA GPU (Remote drops its Vulkan driver),
@@ -236,7 +239,10 @@ def _value(value) -> str:
 
 def plugin_config(**options) -> str:
     """Impostors.cfg with these options, by option name; the rest keep their
-    defaults"""
+    defaults. IMP_SMOOTH=0 or 1 sets AsteroidSmoothNormals where the caller
+    doesn't."""
+    if os.environ.get("IMP_SMOOTH") in ("0", "1"):
+        options.setdefault("AsteroidSmoothNormals", os.environ["IMP_SMOOTH"] == "1")
     values = "".join(f"<{k}>{_value(v)}</{k}>" for k, v in options.items())
     return (
         '<?xml version="1.0" encoding="utf-8"?>\n'

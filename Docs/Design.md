@@ -443,7 +443,9 @@ pack is a mod with the impostors of all of a world's asteroids, at every level, 
 - The pack is one file, `ImpostorsAsteroidPack.bin` (`AsteroidPack` in the mod's `Common`):
   per asteroid its entity id, the hash of the content it was built from (the shape cache's
   input hash), the version and the shapes. The index is read at load; shapes are read from
-  the file when needed.
+  the file when needed. Since format 2 (SE-710) the header also has the asteroid settings it
+  was built with (`VoxelSource.Settings`), and the service warns at the start when they
+  differ from its own, as then no asteroid of the pack matches.
 - Server: `AsteroidPackCache` sits in front of the shape cache. A build whose content hashes
   the same as the pack's entry takes the pack's shapes. A mined asteroid hashes differently
   and is built and cached as before; reset to its original voxels, it hits the pack again.
@@ -464,8 +466,8 @@ pack is a mod with the impostors of all of a world's asteroids, at every level, 
   joining client gets. They are used only with that save (the game time of its
   `Sandbox.sbc`): an older backup of the world, or a world that crashed before its next
   save, may hold other voxels. They also carry a hash of what the shapes depend on besides
-  the voxels (`VoxelSource.Settings`: the occlusion setting and the material colors); with
-  other settings they are not used, and every asteroid is read again.
+  the voxels (`VoxelSource.Settings`: the occlusion and normals settings and the material
+  colors); with other settings they are not used, and every asteroid is read again.
 - Client: the mod adds the pack's asteroids (id, version, level mask) to its Inventory (see
   "Disk cache"), so the server sends the 14 byte reference instead of a shape, and the client
   reads the shape from the pack. A client without the pack gets the shapes as before. A
@@ -593,7 +595,16 @@ from afar anyway.
   one cell per voxel above the iso level. Colors come from the material's mined ore through a
   small table (stone, iron, ice and the rest), on a background thread.
 - Quads are shaded with smoothed normals: an asteroid seen along an axis would otherwise be
-  one flat color.
+  one flat color. Each level pools the voxels' content into its cells as a fill, the share of
+  the cell inside the rock, blurs it by a Gaussian of one cell, and every face takes the
+  gradient at its center, halfway to the empty cell in front (`AsteroidSmoothNormals`,
+  SE-710). Before that the normal was the gradient of the filled cells, blurred by 1.5 cells,
+  one per cell: it followed the cells' blocks, and the coarse levels a ring gets under the
+  quad budget looked like lit cubes. That is still what `AsteroidSmoothNormals` off gives,
+  with the same content hashes, so caches and packs of it stay valid. A quad has one color,
+  so a face can't shade across itself; turning the faces of a cell with the rock is what
+  brings the coarse levels closer to it. `tests/asteroid_normals.py` measures both against a
+  made-up rock, ray marched, at the size each level is drawn at.
 - The coarsest level is pooled from voxels two levels finer: a cell is filled when at least
   half of its voxels are. The game's own coarse voxels erode thin parts, and level 8 looked
   half as large as level 16. That level also gets at least 6 cells across a rock that is
