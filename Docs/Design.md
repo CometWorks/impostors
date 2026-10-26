@@ -230,9 +230,14 @@ second (0.05 s at 10 km/s), long before the server has streamed it to the client
 client has built its render cells. So an impostor the client already has is held inside the
 replication cube instead of removed:
 
-- The server keeps it at the level it was sent at, the finest one from the approach, and
-  sends no new shapes for it, only states when it moves. Held impostors sort right after the
-  safe zones, so `MaxImpostorsPerPlayer` doesn't drop them.
+- The player is close now, so the server gives it the level its distance calls for, never
+  coarser than the one the client has, and sends that shape whatever the player's shape
+  debt (SE-709). At 10 km/s the approach takes a second or two and the player is often in
+  debt by then, so the level from afar is a small one: level 16 or coarser for a station.
+  When the levels are over `MaxQuadsPerFrame`, the other impostors get coarser ones and the
+  held ones keep theirs.
+  Held impostors sort right after the safe zones, so they get the shape credit before the
+  others and `MaxImpostorsPerPlayer` doesn't drop them.
 - The client tells the server with a `Ready` message when the real entity draws itself: in
   the scene with render objects (`IMyEntity.Render.RenderObjectIDs`; a grid has them once its
   render cells are built, a safe zone once its model is) for a second, the longest the game
@@ -443,9 +448,10 @@ pack is a mod with the impostors of all of a world's asteroids, at every level, 
 - The pack is one file, `ImpostorsAsteroidPack.bin` (`AsteroidPack` in the mod's `Common`):
   per asteroid its entity id, the hash of the content it was built from (the shape cache's
   input hash), the version and the shapes. The index is read at load; shapes are read from
-  the file when needed. Since format 2 (SE-710) the header also has the asteroid settings it
-  was built with (`VoxelSource.Settings`), and the service warns at the start when they
-  differ from its own, as then no asteroid of the pack matches.
+  the file when needed. Since format 3 the header also has the asteroid settings it was built
+  with (`VoxelSource.Settings`, SE-710), and the service warns at the start when they differ
+  from its own, as then no asteroid of the pack matches; each entry has the frame clients
+  show it at before the server sends it (SE-712).
 - Server: `AsteroidPackCache` sits in front of the shape cache. A build whose content hashes
   the same as the pack's entry takes the pack's shapes. A mined asteroid hashes differently
   and is built and cached as before; reset to its original voxels, it hits the pack again.
@@ -515,6 +521,17 @@ Each frame it:
   screenshots of real grids and asteroids from 8 directions. Under 27 pixels in radius on a
   1080p screen it brightens grids (up to 1.35 times under 13 pixels) and dims asteroids (down
   to 0.82), where the real ones carry more or less light than their impostors.
+- dims the sunlit part behind planets (SE-713), faked from the planet's size, the sun
+  direction and the impostor's position, once per impostor per frame: a ray from the
+  impostor towards the sun, and how close it passes to each planet's center. Below sea level
+  (`AverageRadius`) the impostor gets ambient light only; from there up to the top of the
+  band the sunlight fades in (smoothstep). With an atmosphere the band reaches 2.5 times the
+  hill height above sea level: the game's highest cloud layers sit about twice as high as the
+  hills (`MyRenderComponentPlanet`), plus a quarter. The mod can't read the cloud layers,
+  `MyCloudLayerSettings` isn't whitelisted. Without one it ends at the hilltops
+  (`MaximumRadius`). On the day side the ray heads away from the planet, and the distance
+  grows by how far it does, so near the ground the light fades in as the sun rises instead of
+  switching on at the terminator. The planets are looked up every 10 seconds.
 
 The client plugin compiles the same files. That copy has no mod context; on a multiplayer
 client it stands down when a session mod contains the renderer, so it only draws on servers
@@ -650,12 +667,15 @@ game never reads it and draws those zones anyway.
 
 The game draws a zone's surface with a distorting shield effect, which blurs and tints what
 is inside. Impostors are billboards drawn after tone mapping, so they show undistorted on top
-of it. A grid or asteroid impostor whose AABB center is inside an enabled zone therefore gets
-one level of detail lower than it would outside, and its state carries the zone's color
-(`Tint`, 4 bytes, alpha 0 outside of zones). The mod blends its quad colors 35% towards the
-zone's surface color, the zone's color 60% of the way to white (`ZoneTint`, `ZoneTintPale` in
-the renderer), fitted to comparison sheets. The level picked
-before the drop is kept for the hysteresis, so the drop doesn't repeat every second.
+of it. The state of a grid or asteroid impostor whose AABB center is inside an enabled zone
+therefore carries the zone's color (`Tint`, 4 bytes, alpha 0 outside of zones). The mod
+blends its quad colors 35% towards the zone's surface color, the zone's color 60% of the way
+to white (`ZoneTint`, `ZoneTintPale` in the renderer), fitted to comparison sheets. With
+`SafeZoneLowerLevel` (off by default, SE-709) it also gets one level of detail lower than it
+would outside. The level picked before the drop is kept for the hysteresis, so the drop
+doesn't repeat every second. A zone that also holds the player's camera counts for neither:
+its surface isn't between the two, and the impostors seen from there stand in for grids
+still streaming in, which should show at their best.
 
 On a cluster, admin zones are on every node (the cluster plugin's `AdminSafeZones`), so each
 node shows them itself, like asteroids. The zone of a safe zone block travels with the

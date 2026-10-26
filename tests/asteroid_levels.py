@@ -67,10 +67,12 @@ def read_pack(path: Path):
     o += 4
     index = []
     for _ in range(count):
-        asteroid, _content, _version, _flags, levels = struct.unpack_from(
-            "<qqiBB", data, o
-        )
-        o += 22
+        asteroid, _content, _version, _flags = struct.unpack_from("<qqiB", data, o)
+        o += 21
+        if fmt >= 3:
+            o += 44  # the frame
+        levels = data[o]
+        o += 1
         lengths = [struct.unpack_from("<Bi", data, o + 5 * k) for k in range(levels)]
         o += 5 * levels
         index.append((asteroid, lengths))
@@ -261,7 +263,16 @@ def build_shapes(dumps: Path, out: Path) -> None:
         (Path(folder) / "AsteroidLevels.csproj").write_text(project)
         (Path(folder) / "Stubs.cs").write_text(stubs)
         run = subprocess.run(
-            ["dotnet", "run", "-c", "Release", "--project", folder, str(dumps), str(out)],
+            [
+                "dotnet",
+                "run",
+                "-c",
+                "Release",
+                "--project",
+                folder,
+                str(dumps),
+                str(out),
+            ],
             capture_output=True,
             text=True,
         )
@@ -364,7 +375,9 @@ def voxels_mode(folder: Path) -> int:
     with tempfile.TemporaryDirectory() as out:
         start = time.monotonic()
         build_shapes(folder, Path(out))
-        print(f"Built the shapes of {len(dumps)} asteroids in {time.monotonic() - start:.0f} s")
+        print(
+            f"Built the shapes of {len(dumps)} asteroids in {time.monotonic() - start:.0f} s"
+        )
         results = {i: measure_voxels(dumps[i], Path(out)) for i in sample(dumps)}
     return verdict(table(f"{folder} against the voxels", results))
 
@@ -402,7 +415,9 @@ def main() -> int:
     if mode == "pack" and len(sys.argv) > 2:
         return pack_mode([Path(p) for p in sys.argv[2:]])
     if mode == "voxels":
-        folder = sys.argv[2] if len(sys.argv) > 2 else Path.home() / ".se-test/se722-voxels"
+        folder = (
+            sys.argv[2] if len(sys.argv) > 2 else Path.home() / ".se-test/se722-voxels"
+        )
         return voxels_mode(Path(folder))
     if mode == "dump":
         return dump_mode()

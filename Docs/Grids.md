@@ -38,6 +38,8 @@ by the sun.
 - Subgrids are frozen at their pose of the last build.
 - Small impostors are brightened by the mod, up to 1.35 times under 13 pixels in radius on a
   1080p screen: real grids carry more light than their impostors at that size.
+- An impostor in a planet's shadow keeps only the ambient light. Across the band from sea
+  level to above the clouds the sunlight fades in (see [Design](Design.md#client)).
 
 ## Levels of detail
 

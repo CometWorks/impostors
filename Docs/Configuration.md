@@ -12,6 +12,7 @@ The file is read only when the server starts, so changes take effect after a res
 | `AsteroidOcclusion` | true | Darkens pits and crevices of asteroid impostors, doubles their build time |
 | `AsteroidSmoothNormals` | true | Shades asteroid impostors along the rock's surface; off, along their cells, which makes the coarse levels look like lit blocks |
 | `SafeZones` | true | Impostors of enabled safe zones, see [Safe zones](SafeZones.md) |
+| `SafeZoneLowerLevel` | false | Grids and asteroids inside a safe zone get one level of detail lower, see [Safe zones](SafeZones.md#grids-and-asteroids-inside-a-zone) |
 | `MinBlocks` | 8 | Grid groups with fewer blocks are not shown |
 | `MaxDistance` | 500000 | Farthest impostor in meters (500 km), 0 is the world's view distance |
 | `MinPixels` | 3 | Impostors less than this many pixels across on a 1080p screen are not sent |
@@ -75,11 +76,16 @@ Notes:
   the session: the server counts on it. Its entries are pruned by the same limits when the
   file is loaded and saved; the sweep deletes the files of other worlds. The Impostors mod
   has no config and uses the defaults; the client plugin uses its own `Impostors.cfg`.
+- The client plugin has its own `Impostors.cfg` in the game's user data folder, with the
+  same options. Its service uses them offline and on a lobby host, `SafeZoneLowerLevel`
+  among them.
 - The client plugin reads `AsteroidOcclusion` and `AsteroidSmoothNormals` for its own builds
   offline and on a lobby host, and `AsteroidPack` and `AsteroidPackMod` for those and for the
   impostors it draws on servers whose world has no Impostors mod. The Impostors mod always
   uses the world's pack.
 - A larger shape than `ShapeBytesPerSecond` still goes out; the following ones wait until the
   player's next seconds have paid it off. New impostors never wait, but while the player is in
-  debt they start with a small level. Levels the client got earlier in the session cost no
+  debt they start with a small level. Impostors that stand in for grids still streaming in
+  never wait either, they get the level for their distance at once (see
+  [Design](Design.md#server)). Levels the client got earlier in the session cost no
   shape credit (see [Moving views](Design.md#moving-views-se-671)).

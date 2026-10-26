@@ -447,7 +447,7 @@ public sealed class ImpostorService : IDisposable
                 path,
                 world,
                 sources.OfType<VoxelSource>().First().Settings,
-                asteroids.Select(e => (e.Id, e.Input, e.Shapes)),
+                asteroids.Select(e => (e.Id, e.Input, e.Shapes, e.State(0))),
                 (byte)config.AsteroidPackMaxLevel
             );
             log.Info(
@@ -569,6 +569,14 @@ public sealed class ImpostorService : IDisposable
         writer.Byte(Protocol.Version);
         writer.Long(instanceId);
         writer.Int(config.MaxQuadsPerFrame);
+
+        // How far the client may show asteroids before we send them, and how small
+        writer.Float(
+            !config.Asteroids ? 0
+            : config.MaxDistance > 0 ? config.MaxDistance
+            : MySession.Static.Settings.ViewDistance
+        );
+        writer.Float(config.MinPixels);
         Send(sender);
     }
 
@@ -810,7 +818,7 @@ public sealed class ImpostorService : IDisposable
         // The local player's shapes don't go over the network, they never wait
         if (viewer.Local)
             viewer.ShapeCredit = int.MaxValue;
-        var fit = FitLevels(viewer, shown, zones);
+        var fit = FitLevels(viewer, shown, zones, held);
         for (var i = 0; i < shown.Count; i++)
         {
             var (entry, _, _, distance) = shown[i];
@@ -818,28 +826,18 @@ public sealed class ImpostorService : IDisposable
             entry.Viewed = true;
             viewer.Sent.TryGetValue(entry.Id, out var sent);
 
-            // Held in the replication cube: the shape the client has, its finest from the
-            // approach, only moved
-            if (held.Contains(entry.Id))
-            {
-                var heldState = entry.State(sent.Lod);
-                heldState.Version = sent.Version;
-                heldState.Tint = sent.Tint;
-                if (Moved(sent, heldState, distance))
-                {
-                    states.Add(heldState);
-                    sent.Position = heldState.Position;
-                    sent.Orientation = heldState.Orientation;
-                    sent.Velocity = heldState.Velocity;
-                }
-                continue;
-            }
-            if (sent != null)
+            // Held in the replication cube while the real entity streams in: the player is
+            // close, so it gets the level for its distance at once, never coarser than the
+            // one the client has, whatever the shape debt
+            var isHeld = held.Contains(entry.Id);
+            if (sent != null && !isHeld)
                 sent.Held = false;
             if (entry.Shapes == null)
                 continue;
 
             var (index, picked, tint) = fit[i];
+            if (isHeld && sent.Version == entry.Version)
+                index = Math.Max(index, entry.ShapeIndex(sent.Lod));
             // A new impostor gets a level the client has, or a small one while the player is
             // in debt
             if (sent == null && viewer.ShapeCredit <= 0 && !Has(viewer, entry, index))
@@ -872,7 +870,7 @@ public sealed class ImpostorService : IDisposable
                     viewer.FromDisk++;
                     shapes.Add((entry, shape, true));
                 }
-                else if (viewer.ShapeCredit <= 0 && sent != null)
+                else if (viewer.ShapeCredit <= 0 && sent != null && !isHeld)
                 {
                     // New impostors don't wait, the rest wait while the player is in debt. A
                     // shape larger than a second's worth still goes out, or it would never be
@@ -901,7 +899,8 @@ public sealed class ImpostorService : IDisposable
 
                 // The states go first, so the client knows the version a shape belongs to
                 states.Add(state);
-                viewer.Sent[entry.Id] = sent = new Sent();
+                if (sent == null)
+                    viewer.Sent[entry.Id] = sent = new Sent();
             }
             else if (!Moved(sent, state, distance) && sent.Tint == tint)
             {
@@ -981,27 +980,33 @@ public sealed class ImpostorService : IDisposable
     // MaxQuadsPerFrame, about half of a shape's quads face the camera: when the wanted levels
     // are over it, all of them are picked for a smaller screen, so the near ones lose detail
     // instead of the client dropping the far ones. Over an asteroid ring a few near asteroids
-    // at level 32 would take the whole budget.
+    // at level 32 would take the whole budget. Held impostors keep their full level, they
+    // stand in for the real grids right next to the player: the others make room.
     private List<(int index, byte picked, Color tint)> FitLevels(
         Viewer viewer,
         List<(ImpostorEntry entry, double pixels, double zoom, double distance)> shown,
-        List<ZoneVolume?> zones
+        List<ZoneVolume?> zones,
+        HashSet<long> held
     )
     {
         var tints = shown
-            .Select(c => c.entry.Kind == ImpostorKind.SafeZone ? default : ZoneTint(zones, c.entry))
+            .Select(c =>
+                c.entry.Kind == ImpostorKind.SafeZone
+                    ? default
+                    : ZoneTint(zones, c.entry, viewer.Eye)
+            )
             .ToList();
-        var fit = Levels(viewer, shown, tints, 1, out var quads);
+        var fit = Levels(viewer, shown, tints, held, 1, out var quads);
         if (quads <= config.MaxQuadsPerFrame)
             return fit;
 
         double low = 0,
             high = 1;
-        var best = Levels(viewer, shown, tints, 0, out _);
+        var best = Levels(viewer, shown, tints, held, 0, out _);
         for (var step = 0; step < 12; step++)
         {
             var scale = (low + high) / 2;
-            var levels = Levels(viewer, shown, tints, scale, out quads);
+            var levels = Levels(viewer, shown, tints, held, scale, out quads);
             if (quads <= config.MaxQuadsPerFrame)
             {
                 low = scale;
@@ -1022,7 +1027,8 @@ public sealed class ImpostorService : IDisposable
         Viewer viewer,
         List<(ImpostorEntry entry, double pixels, double zoom, double distance)> shown,
         List<Color> tints,
-        double scale,
+        HashSet<long> held,
+        double screen,
         out int quads
     )
     {
@@ -1038,6 +1044,7 @@ public sealed class ImpostorService : IDisposable
             }
 
             viewer.Sent.TryGetValue(entry.Id, out var sent);
+            var scale = held.Contains(entry.Id) ? 1 : screen;
             var full = scale >= 1;
             var picked = PickLod(
                 pixels * zoom * scale,
@@ -1054,10 +1061,11 @@ public sealed class ImpostorService : IDisposable
             while (index > normal && QuadCount(entry.Shapes[index]) > config.MaxQuadsPerFrame)
                 index--;
 
-            // Inside a safe zone: one level lower and tinted with the zone's color, the zone's
-            // distorting surface shows less of it than of one outside
+            // Seen through a safe zone's surface it is tinted with the zone's color, and with
+            // SafeZoneLowerLevel one level lower: the zone's distorting surface shows less of
+            // it than of one outside
             var tint = tints[i];
-            if (tint.A != 0 && index > 0)
+            if (tint.A != 0 && config.SafeZoneLowerLevel && index > 0)
                 index--;
 
             // A zoomed client draws only what is in its view. Unzoomed the server doesn't know
@@ -1069,12 +1077,13 @@ public sealed class ImpostorService : IDisposable
         return result;
     }
 
-    // The color of the first enabled safe zone holding the entry's center, none if outside
-    private static Color ZoneTint(List<ZoneVolume?> zones, ImpostorEntry entry)
+    // The color of the first enabled safe zone holding the entry's center but not the eye,
+    // none if outside: from inside the same zone its surface isn't in the way
+    private static Color ZoneTint(List<ZoneVolume?> zones, ImpostorEntry entry, Vector3D eye)
     {
         foreach (var zone in zones)
         {
-            if (zone.Value.Contains(entry.WorldAabb.Center))
+            if (zone.Value.Contains(entry.WorldAabb.Center) && !zone.Value.Contains(eye))
             {
                 var color = zone.Value.Color;
                 color.A = 255;

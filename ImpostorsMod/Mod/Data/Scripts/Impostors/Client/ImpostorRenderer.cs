@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Sandbox.Game;
+using Sandbox.Game.Entities;
 using Sandbox.ModAPI;
 using VRage.Game;
 using VRage.Game.Components;
@@ -35,6 +36,26 @@ namespace Impostors
         // 1 and saturate.
         private const float Ambient = 0.08f;
         private const float Diffuse = 1.6f;
+
+        // Planets shade the impostors behind them, faked from a sphere per planet: the
+        // sunlight fades out while the ray from the impostor to the sun passes from Top down
+        // to sea level (AverageRadius), and is gone below. Top is the highest cloud layer of
+        // the game's planets, about as far above the hills as they rise above sea level
+        // (MyRenderComponentPlanet, the cloud layers aren't whitelisted for mods), plus a
+        // quarter more. Without an atmosphere it's the hilltops. Ambient light stays.
+        private const float CloudTop = 2f;
+        private const float AboveClouds = 1.25f;
+        private const int PlanetTicks = 600;
+        private readonly List<PlanetShade> planets = new List<PlanetShade>();
+        private readonly HashSet<VRage.ModAPI.IMyEntity> planetEntities =
+            new HashSet<VRage.ModAPI.IMyEntity>();
+
+        private struct PlanetShade
+        {
+            public Vector3D Center;
+            public double Ground;
+            public double Top;
+        }
 
         // Small asteroids: under about 27 pixels in radius on a 1080p screen the real ones look
         // darker than lit impostors, down to 0.82 times as bright under 13 pixels. Fitted to
@@ -114,6 +135,13 @@ namespace Impostors
         public static bool UsePack = true;
         public static ulong PackMod;
 
+        // Asteroids of the pack and the disk cache shown before the server sends them, out to
+        // the server's asteroid range (the view distance until its Welcome says) and down to
+        // its MinPixels; null without a pack or a cache, or with "noearly" in the storage
+        private EarlyAsteroids early;
+        private double asteroidRange = -1;
+        private double minPixels = 3;
+
         // In the camera's view in the last frame, before the budget (stats)
         private int inView;
         private readonly List<DrawPart> parts = new List<DrawPart>();
@@ -158,6 +186,12 @@ namespace Impostors
         // Debug: draws no impostors, only what the game itself has
         private bool realOnly;
 
+        // Debug: draws the impostors in sunlight, as if no planet shaded them; the time
+        // spent in Sunlight and its calls since the last stats
+        private bool unshaded;
+        private long shadeTicks;
+        private int shadeCount;
+
         // Debug: draws the impostors moved by this much, next to the real entities (voxel
         // maps can't be hidden on the client)
         private Vector3D shift;
@@ -191,6 +225,14 @@ namespace Impostors
         private int culled;
         private int overBudget;
         private int coarser;
+
+        // Bytes of the server's messages, and the last tick the view turned or jumped (see
+        // NoteMoves)
+        private long receivedBytes;
+        private int turnTick = -1;
+        private int jumpTick = -1;
+        private Vector3 lastForward;
+        private Vector3D lastEye;
 
         public override void LoadData()
         {
@@ -231,9 +273,9 @@ namespace Impostors
                     cache = new ShapeCache(ModContext != null);
                     cache.Load(MyAPIGateway.Session.Name);
                 }
-                if (UsePack)
-                    OpenPack();
             }
+            if (UsePack)
+                OpenPack();
             MyAPIGateway.Utilities.RegisterMessageHandler(BudgetMessage, OnBudget);
             MyAPIGateway.Utilities.RegisterMessageHandler(VoxelLoadedMessage, OnVoxelLoaded);
             active = true;
@@ -241,6 +283,10 @@ namespace Impostors
             // Tests put this file into the storage (see StorageExists) to get stats.txt every
             // second and to switch between the real entities and their impostors (see ReadMode)
             debug = StorageExists("debug");
+
+            // Tests turn the early asteroids off with "noearly", for a baseline
+            if ((cache != null || pack != null) && !(debug && StorageExists("noearly")))
+                early = new EarlyAsteroids(impostors, cache, pack);
         }
 
         private void OpenPack()
@@ -329,6 +375,7 @@ namespace Impostors
             impostors.Clear();
             store.Clear();
             pack = null;
+            early = null;
             if (cache != null)
             {
                 cache.Save();
@@ -378,6 +425,9 @@ namespace Impostors
             if (cache != null)
                 cache.Update();
 
+            if (early != null)
+                UpdateEarly();
+
             // A few View messages per second at most
             if (tick % 10 == 0)
                 SendView();
@@ -390,11 +440,43 @@ namespace Impostors
                     readyTicks += timer.ElapsedTicks - start;
             }
 
+            if (tick % PlanetTicks == 1)
+                FindPlanets();
+
             if (debug && tick % 60 == 0)
             {
                 ReadMode();
                 WriteStats();
             }
+        }
+
+        // The early asteroids out to the server's range, the view distance until it says, and
+        // with the room the server's impostors leave in the quad budget, half of their quads
+        // facing the camera. Locally not those the game draws itself, within the far plane.
+        private void UpdateEarly()
+        {
+            var camera = MyAPIGateway.Session.Camera;
+            if (camera == null)
+                return;
+            var used = 0;
+            if (tick % 10 == 0)
+            {
+                foreach (var impostor in impostors.Values)
+                {
+                    if (!impostor.Early && impostor.Shape != null)
+                        used += impostor.Shape.Count / 2;
+                }
+            }
+            early.Update(
+                camera,
+                tick,
+                asteroidRange >= 0
+                    ? asteroidRange
+                    : MyAPIGateway.Session.SessionSettings.ViewDistance,
+                minPixels,
+                local ? camera.FarPlaneDistance : 0,
+                Math.Max(0, maxQuads - used)
+            );
         }
 
         // Tells the server about a zoomed view or a spectator camera (see Protocol.View): when
@@ -485,7 +567,7 @@ namespace Impostors
         private void SendReady()
         {
             // The local player's game has every entity, the service never holds one for it
-            if (serverInstance == 0 || local)
+            if (local)
                 return;
             readyIds.Clear();
             unreadyIds.Clear();
@@ -506,10 +588,9 @@ namespace Impostors
                     : loadedVoxels.Contains(id) ? ReadyCheckTicks
                     : VoxelReadyTicks;
                 var ready = impostor.DrawableTick >= 0 && tick - impostor.DrawableTick >= wait;
-                if (ready == impostor.Ready)
-                    continue;
-                impostor.Ready = ready;
-                if (debug && ready)
+
+                // Early asteroids hide too, but the server doesn't know them
+                if (ready != impostor.Ready && debug && ready)
                 {
                     if (readyLog.Count == 8)
                         readyLog.RemoveAt(0);
@@ -523,6 +604,10 @@ namespace Impostors
                             + (loadedVoxels.Contains(id) ? 1 : 0)
                     );
                 }
+                impostor.Ready = ready;
+                if (impostor.Early || serverInstance == 0 || ready == impostor.Reported)
+                    continue;
+                impostor.Reported = ready;
                 (ready ? readyIds : unreadyIds).Add(id);
             }
             readySent += readyIds.Count;
@@ -565,7 +650,8 @@ namespace Impostors
 
         // "impostor" in the mode file draws the impostors instead of the real entities,
         // "shift x y z" draws them moved by that vector next to the real ones, "real" draws
-        // none of them
+        // none of them. " unshaded" after any of them lights the impostors as if no planet
+        // shaded them.
         private void ReadMode()
         {
             var mode = "";
@@ -574,6 +660,9 @@ namespace Impostors
                 using (var file = ReadStorage("mode"))
                     mode = file.ReadToEnd().Trim();
             }
+            unshaded = mode.EndsWith(" unshaded");
+            if (unshaded)
+                mode = mode.Substring(0, mode.Length - " unshaded".Length);
             var words = mode.Split(' ');
             shift = Vector3D.Zero;
             if (words.Length == 4 && words[0] == "shift")
@@ -712,6 +801,12 @@ namespace Impostors
                     + store.Bytes / 1024
                     + " sun="
                     + Vec(MyVisualScriptLogicProvider.GetSunDirection())
+                    + " planets="
+                    + Planets()
+                    + " shadeus="
+                    + (shadeTicks * 1000000 / MyGameTimer.Frequency)
+                    + " shades="
+                    + shadeCount
                     + " tick="
                     + tick
                     + " fov="
@@ -738,6 +833,32 @@ namespace Impostors
                     + sentViewTick
                     + " zoomtick="
                     + zoomTick
+                    + " recvkb="
+                    + receivedBytes / 1024
+                    + " turntick="
+                    + turnTick
+                    + " jumptick="
+                    + jumpTick
+                    + " range="
+                    + asteroidRange.ToString("0")
+                    + (
+                        early != null
+                            ? " early="
+                                + early.Count
+                                + " earlyknown="
+                                + early.KnownCount
+                                + " earlyloads="
+                                + early.Loaded
+                                + " earlyms="
+                                + (early.LoadTicks * 1000 / MyGameTimer.Frequency)
+                                + " kept="
+                                + early.Kept
+                                + " swapped="
+                                + early.Swapped
+                                + " swaplog="
+                                + string.Join(",", early.SwapLog)
+                            : " early=off"
+                    )
             );
             foreach (var impostor in impostors.Values)
             {
@@ -766,6 +887,12 @@ namespace Impostors
                         + (impostor.Ready ? 1 : 0)
                         + " drawn="
                         + (visible.Contains(impostor) ? 1 : 0)
+                        + " early="
+                        + (impostor.Early ? 1 : 0)
+                        + " firstshape="
+                        + impostor.FirstShapeTick
+                        + " firstdrawn="
+                        + impostor.FirstDrawnTick
                         + " r="
                         + state.Radius.ToString("0.0")
                         + " pos="
@@ -779,11 +906,15 @@ namespace Impostors
                                 ? " tint=" + state.Tint.PackedValue.ToString("x8")
                                 : ""
                         )
+                        + " sunlight="
+                        + impostor.Sunlight.ToString("0.000")
                         + ZoneStats(impostor)
                         + ScreenPosition(state)
                 );
             }
             readyTicks = 0;
+            shadeTicks = 0;
+            shadeCount = 0;
             using (var file = WriteStorage("stats.txt"))
                 file.Write(text.ToString());
         }
@@ -832,6 +963,7 @@ namespace Impostors
         {
             if (!fromServer || message.Length == 0)
                 return;
+            receivedBytes += message.Length;
 
             try
             {
@@ -859,10 +991,17 @@ namespace Impostors
                         return;
                     var instance = r.Long();
                     maxQuads = MathHelper.Clamp(r.Int(), 0, Protocol.BillboardLimit);
+                    if (r.Remaining >= 8)
+                    {
+                        asteroidRange = Math.Max(0, r.Float());
+                        minPixels = r.Float();
+                    }
                     if (instance != serverInstance)
                     {
                         impostors.Clear();
                         store.Clear();
+                        if (early != null)
+                            early.Reset();
                         serverInstance = instance;
 
                         // A new server knows nothing of the view yet
@@ -880,6 +1019,10 @@ namespace Impostors
                     {
                         var state = ImpostorState.Read(r);
                         var impostor = Get(state.Id);
+                        if (early != null)
+                            early.Served(state.Id, impostor, state.Version, tick);
+                        if (caching && state.Kind == ImpostorKind.Voxel)
+                            cache.AddState(state);
                         impostor.State = state;
                         impostor.ReceivedTick = tick;
 
@@ -896,6 +1039,8 @@ namespace Impostors
                         )
                         {
                             impostor.Shape = stored;
+                            if (impostor.FirstShapeTick < 0)
+                                impostor.FirstShapeTick = tick;
                             restoredCount++;
                         }
                     }
@@ -907,7 +1052,10 @@ namespace Impostors
                     var count = r.UShort();
                     for (var i = 0; i < count; i++)
                     {
-                        if (impostors.Remove(r.Long()))
+                        var id = r.Long();
+                        if (early != null)
+                            early.Served(id, null, 0, tick);
+                        if (impostors.Remove(id))
                             removedCount++;
                     }
                     break;
@@ -963,6 +1111,8 @@ namespace Impostors
                         var impostor = Get(id);
                         impostor.Shape = shape;
                         impostor.ShapeTick = tick;
+                        if (impostor.FirstShapeTick < 0)
+                            impostor.FirstShapeTick = tick;
                         store.Add(id, shape.Lod, version, data.Length, shape);
                     }
 
@@ -1004,6 +1154,8 @@ namespace Impostors
         {
             impostors.Clear();
             store.Clear();
+            if (early != null)
+                early.Reset();
             serverInstance = 0;
             caching = false;
             if (cache != null)
@@ -1032,11 +1184,10 @@ namespace Impostors
             visible.Clear();
             standIns = 0;
             inView = 0;
-            if (!active || impostors.Count == 0 || realOnly)
-                return;
-
             var camera = MyAPIGateway.Session.Camera;
-            if (camera == null)
+            if (debug && camera != null)
+                NoteMoves(camera);
+            if (!active || impostors.Count == 0 || realOnly || camera == null)
                 return;
             var eye = camera.Position;
             var view = MatrixD.Transpose(camera.WorldMatrix);
@@ -1144,11 +1295,29 @@ namespace Impostors
                     DrawImpostor(part.Impostor, eye, sun);
             }
             visible.RemoveRange(count, visible.Count - count);
+            foreach (var impostor in visible)
+            {
+                if (impostor.FirstDrawnTick < 0)
+                    impostor.FirstDrawnTick = tick;
+            }
+        }
+
+        // Stats: the last tick the view turned by over 20 degrees or jumped by over a
+        // kilometer from one frame to the next, the rigs time what comes after
+        private void NoteMoves(VRage.ModAPI.IMyCamera camera)
+        {
+            var forward = (Vector3)camera.WorldMatrix.Forward;
+            if (Vector3.Dot(forward, lastForward) < 0.94f)
+                turnTick = tick;
+            if (Vector3D.DistanceSquared(camera.Position, lastEye) > 1e6)
+                jumpTick = tick;
+            lastForward = forward;
+            lastEye = camera.Position;
         }
 
         // A sphere inside the four side planes of the camera's view. Not IMyCamera.IsInFrustum:
         // that frustum ends at the far plane, 20 km away, and impostors go much farther.
-        private static bool InView(
+        public static bool InView(
             VRage.ModAPI.IMyCamera camera,
             MatrixD view,
             Vector3D center,
@@ -1306,6 +1475,71 @@ namespace Impostors
             );
         }
 
+        // The planets, every PlanetTicks: few, and they don't move
+        private void FindPlanets()
+        {
+            planets.Clear();
+            planetEntities.Clear();
+            MyAPIGateway.Entities.GetEntities(planetEntities, e => e is MyPlanet);
+            foreach (var entity in planetEntities)
+            {
+                var planet = (MyPlanet)entity;
+                var ground = (double)planet.AverageRadius;
+                var top = (double)planet.MaximumRadius;
+                if (planet.HasAtmosphere)
+                    top = ground + (top - ground) * CloudTop * AboveClouds;
+                planets.Add(
+                    new PlanetShade
+                    {
+                        Center = planet.PositionComp.WorldAABB.Center,
+                        Ground = ground,
+                        Top = Math.Max(top, ground + 1),
+                    }
+                );
+            }
+            planetEntities.Clear();
+        }
+
+        // The share of the sunlight that reaches a point past the planets. Against each planet
+        // one ray towards the sun: how close it passes to the center. On the planet's day side
+        // the ray heads away from it, and that distance grows by how far it is the other way,
+        // so the light fades in near the ground as the sun rises instead of all at once.
+        private float Sunlight(Vector3D point, Vector3 sun)
+        {
+            var light = 1.0;
+            foreach (var planet in planets)
+            {
+                var toCenter = planet.Center - point;
+                var along = Vector3D.Dot(toCenter, sun);
+                var squared = toCenter.LengthSquared();
+                var pass =
+                    along > 0
+                        ? Math.Sqrt(Math.Max(0, squared - along * along))
+                        : Math.Sqrt(squared) - along;
+                if (pass >= planet.Top)
+                    continue;
+                var t = (pass - planet.Ground) / (planet.Top - planet.Ground);
+                if (t <= 0)
+                    return 0;
+                light *= t * t * (3 - 2 * t);
+            }
+            return (float)light;
+        }
+
+        private string Planets()
+        {
+            var text = new System.Text.StringBuilder();
+            foreach (var planet in planets)
+            {
+                if (text.Length > 0)
+                    text.Append(';');
+                text.Append(planet.Ground.ToString("0"))
+                    .Append(':')
+                    .Append(planet.Top.ToString("0"));
+            }
+            return text.ToString();
+        }
+
         private static float Brightness(ImpostorState state, double distance)
         {
             var small = state.Kind == ImpostorKind.Voxel ? SmallBrightness : SmallGridBrightness;
@@ -1327,6 +1561,15 @@ namespace Impostors
             var view = LocalView(impostor, eye, out position, out rotation);
             var sunLocal = Vector3.TransformNormal(sun, Matrix.Transpose(rotation));
             var brightness = Brightness(state, Vector3D.Distance(eye, position));
+            var start = debug ? timer.ElapsedTicks : 0;
+            var sunlight = unshaded ? 1f : Sunlight(position, sun);
+            if (debug)
+            {
+                shadeTicks += timer.ElapsedTicks - start;
+                shadeCount++;
+            }
+            impostor.Sunlight = sunlight;
+            var diffuse = Diffuse * sunlight;
             var tinted = state.Tint.A != 0;
             var tint = Vector3.Lerp(state.Tint.ToVector3(), Vector3.One, ZoneTintPale);
 
@@ -1355,7 +1598,7 @@ namespace Impostors
 
                 var center = position + Vector3.TransformNormal(shape.Centers[i], rotation);
                 var light =
-                    Ambient + Diffuse * Math.Max(0, Vector3.Dot(shape.Shading[i], sunLocal));
+                    Ambient + diffuse * Math.Max(0, Vector3.Dot(shape.Shading[i], sunLocal));
                 var lit = shape.Colors[i] * light * brightness;
                 if (tinted)
                     lit = Vector3.Lerp(lit, tint, ZoneTint);

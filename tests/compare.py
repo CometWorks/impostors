@@ -31,8 +31,8 @@ file name needs the storage size after "Asteroid", as in Asteroid512-Seed2-1023.
 
 A safe zone target is an enabled admin zone: a sphere of that radius or a box of that size.
 IMP_ZONE=<radius> puts a grid inside a sphere zone of that radius around GRID_POSITION: the
-impostor shots show both, the grid's impostor one level lower and tinted with the zone's
-color.
+impostor shots show both, the grid's impostor tinted with the zone's color. IMP_ZONE_LOWER=1
+turns SafeZoneLowerLevel on, which makes it one level lower, as on the Rhea sheet.
 
 The image lands in ~/.se-test/<task>-shots/compare-<name>.png.
 
@@ -269,6 +269,7 @@ def main() -> None:
             MinBlocks=1,
             # IMP_OCCLUSION=1 compares asteroids with ambient occlusion baked in
             AsteroidOcclusion=os.environ.get("IMP_OCCLUSION") == "1",
+            SafeZoneLowerLevel=os.environ.get("IMP_ZONE_LOWER") == "1",
         )
     )
     SHOTS.mkdir(parents=True, exist_ok=True)
