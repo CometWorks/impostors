@@ -23,8 +23,8 @@ is that of the zone's bounding box, about 1.7 times a sphere's own. Rendered at 
 
 **IMDC Rhea v2.3 inside a 250 m sphere** (`IMP_ZONE=250`), 400 m to 83 km, from the 8 cube
 corners. The impostor cells show both the ship's impostor and the zone's. The real ship is
-seen through the game's distorting shield; its impostor is one level lower than outside a
-zone and tinted with the zone's color. Past the game's own range the real cell is empty.
+seen through the game's distorting shield; its impostor is tinted with the zone's color and,
+shot with `SafeZoneLowerLevel` on, one level lower than outside a zone. Past the game's own range the real cell is empty.
 The row label's radius is the ship's.
 
 ![IMDC Rhea v2.3 in a 250 m safe zone, real and impostor from 8 directions, 400 m to 83 km](images/safezone-rhea.jpg)
@@ -59,17 +59,30 @@ count against `MaxQuadsPerFrame`, since both halves of the shell are drawn.
 ## Grids and asteroids inside a zone
 
 The game draws a zone's surface with a distorting shield effect, which blurs and tints what
-is inside. Impostors are drawn on top of it, undistorted. To make up for that, a grid or
-asteroid whose center is inside an enabled zone gets an impostor one level of detail lower
-than outside, and the mod blends its colors 35% towards the color of the zone's surface: the
-zone's color 60% of the way to white. Both are fitted to the Rhea sheet above, the mean color
-of the ship's pixels real against impostor: the real ship comes out lighter and keeps its hue,
-blended towards the zone's own color it came out blue. The same `MinPixels` applies as
-everywhere else.
+is inside. Impostors are drawn on top of it, undistorted. To make up for that, the mod blends
+the colors of a grid or asteroid whose center is inside an enabled zone 35% towards the color
+of the zone's surface: the zone's color 60% of the way to white. It is fitted to the Rhea
+sheet above, the mean color of the ship's pixels real against impostor: the real ship comes
+out lighter and keeps its hue, blended towards the zone's own color it came out blue. The
+same `MinPixels` applies as everywhere else.
+
+With `SafeZoneLowerLevel` in [Configuration](Configuration.md) such an impostor also gets one
+level of detail lower than outside, as the shield shows less of the real one. The Rhea sheet
+was shot that way. It is off by default: every station of a world like Octahedron sits
+inside its zone, and the lower level is what the player sees of it until the real grids
+draw.
+
+Neither applies when the player's camera is inside the same zone, as its surface isn't in
+the way then. Grids within a few kilometers are real ones, so that matters only for the
+impostors that stand in until the real ones stream in (see
+[Design](Design.md#server)): the player arrives in the zone and sees them at their full
+level, untinted.
 
 `tests/scenario.py` checks it with two grids alike, as far from the player: the one inside a
-500 m zone is one level lower and tinted, the one outside isn't. A third one, seen through
-the zone but behind it, isn't tinted either.
+500 m zone is tinted, and with `IMP_ZONE_LOWER=1` (which turns `SafeZoneLowerLevel` on) one
+level lower; the one outside is neither. A third one, seen through the zone but behind it,
+isn't tinted either. `tests/streaming.py` arrives inside the zone with the option on: the
+grid inside it is untinted, at its full level, until the real one draws.
 
 ## Clusters
 

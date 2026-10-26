@@ -20,6 +20,10 @@ public interface IPluginConfig : INotifyPropertyChanged
     // Sends impostors of enabled safe zones
     bool SafeZones { get; set; }
 
+    // Grid and asteroid impostors inside an enabled safe zone get one level of detail lower,
+    // as the zone's distorting surface shows less of the real one; not from inside that zone
+    bool SafeZoneLowerLevel { get; set; }
+
     // Grid groups with fewer blocks are not shown
     int MinBlocks { get; set; }
 

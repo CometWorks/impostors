@@ -217,9 +217,12 @@ second (0.05 s at 10 km/s), long before the server has streamed it to the client
 client has built its render cells. So an impostor the client already has is held inside the
 replication cube instead of removed:
 
-- The server keeps it at the level it was sent at, the finest one from the approach, and
-  sends no new shapes for it, only states when it moves. Held impostors sort right after the
-  safe zones, so `MaxImpostorsPerPlayer` doesn't drop them.
+- The player is close now, so the server gives it the level its distance calls for, never
+  coarser than the one the client has, and sends that shape whatever the player's shape
+  debt (SE-709). At 10 km/s the approach takes a second or two and the player is often in
+  debt by then, so the level from afar is a small one: level 16 or coarser for a station.
+  Held impostors sort right after the safe zones, so they get the shape credit before the
+  others and `MaxImpostorsPerPlayer` doesn't drop them.
 - The client tells the server with a `Ready` message when the real entity draws itself: in
   the scene with render objects (`IMyEntity.Render.RenderObjectIDs`; a grid has them once its
   render cells are built, a safe zone once its model is) for a second, the longest the game
@@ -620,12 +623,15 @@ game never reads it and draws those zones anyway.
 
 The game draws a zone's surface with a distorting shield effect, which blurs and tints what
 is inside. Impostors are billboards drawn after tone mapping, so they show undistorted on top
-of it. A grid or asteroid impostor whose AABB center is inside an enabled zone therefore gets
-one level of detail lower than it would outside, and its state carries the zone's color
-(`Tint`, 4 bytes, alpha 0 outside of zones). The mod blends its quad colors 35% towards the
-zone's surface color, the zone's color 60% of the way to white (`ZoneTint`, `ZoneTintPale` in
-the renderer), fitted to comparison sheets. The level picked
-before the drop is kept for the hysteresis, so the drop doesn't repeat every second.
+of it. The state of a grid or asteroid impostor whose AABB center is inside an enabled zone
+therefore carries the zone's color (`Tint`, 4 bytes, alpha 0 outside of zones). The mod
+blends its quad colors 35% towards the zone's surface color, the zone's color 60% of the way
+to white (`ZoneTint`, `ZoneTintPale` in the renderer), fitted to comparison sheets. With
+`SafeZoneLowerLevel` (off by default, SE-709) it also gets one level of detail lower than it
+would outside. The level picked before the drop is kept for the hysteresis, so the drop
+doesn't repeat every second. A zone that also holds the player's camera counts for neither:
+its surface isn't between the two, and the impostors seen from there stand in for grids
+still streaming in, which should show at their best.
 
 On a cluster, admin zones are on every node (the cluster plugin's `AdminSafeZones`), so each
 node shows them itself, like asteroids. The zone of a safe zone block travels with the

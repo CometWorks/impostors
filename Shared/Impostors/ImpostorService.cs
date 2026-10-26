@@ -813,28 +813,18 @@ public sealed class ImpostorService : IDisposable
             entry.Viewed = true;
             viewer.Sent.TryGetValue(entry.Id, out var sent);
 
-            // Held in the replication cube: the shape the client has, its finest from the
-            // approach, only moved
-            if (held.Contains(entry.Id))
-            {
-                var heldState = entry.State(sent.Lod);
-                heldState.Version = sent.Version;
-                heldState.Tint = sent.Tint;
-                if (Moved(sent, heldState, distance))
-                {
-                    states.Add(heldState);
-                    sent.Position = heldState.Position;
-                    sent.Orientation = heldState.Orientation;
-                    sent.Velocity = heldState.Velocity;
-                }
-                continue;
-            }
-            if (sent != null)
+            // Held in the replication cube while the real entity streams in: the player is
+            // close, so it gets the level for its distance at once, never coarser than the
+            // one the client has, whatever the shape debt
+            var isHeld = held.Contains(entry.Id);
+            if (sent != null && !isHeld)
                 sent.Held = false;
             if (entry.Shapes == null)
                 continue;
 
             var (index, picked, tint) = fit[i];
+            if (isHeld && sent.Version == entry.Version)
+                index = Math.Max(index, entry.ShapeIndex(sent.Lod));
             // A new impostor gets a level the client has, or a small one while the player is
             // in debt
             if (sent == null && viewer.ShapeCredit <= 0 && !Has(viewer, entry, index))
@@ -867,7 +857,7 @@ public sealed class ImpostorService : IDisposable
                     viewer.FromDisk++;
                     shapes.Add((entry, shape, true));
                 }
-                else if (viewer.ShapeCredit <= 0 && sent != null)
+                else if (viewer.ShapeCredit <= 0 && sent != null && !isHeld)
                 {
                     // New impostors don't wait, the rest wait while the player is in debt. A
                     // shape larger than a second's worth still goes out, or it would never be
@@ -896,7 +886,8 @@ public sealed class ImpostorService : IDisposable
 
                 // The states go first, so the client knows the version a shape belongs to
                 states.Add(state);
-                viewer.Sent[entry.Id] = sent = new Sent();
+                if (sent == null)
+                    viewer.Sent[entry.Id] = sent = new Sent();
             }
             else if (!Moved(sent, state, distance) && sent.Tint == tint)
             {
@@ -984,7 +975,11 @@ public sealed class ImpostorService : IDisposable
     )
     {
         var tints = shown
-            .Select(c => c.entry.Kind == ImpostorKind.SafeZone ? default : ZoneTint(zones, c.entry))
+            .Select(c =>
+                c.entry.Kind == ImpostorKind.SafeZone
+                    ? default
+                    : ZoneTint(zones, c.entry, viewer.Eye)
+            )
             .ToList();
         var fit = Levels(viewer, shown, tints, 1, out var quads);
         if (quads <= config.MaxQuadsPerFrame)
@@ -1049,10 +1044,11 @@ public sealed class ImpostorService : IDisposable
             while (index > normal && QuadCount(entry.Shapes[index]) > config.MaxQuadsPerFrame)
                 index--;
 
-            // Inside a safe zone: one level lower and tinted with the zone's color, the zone's
-            // distorting surface shows less of it than of one outside
+            // Seen through a safe zone's surface it is tinted with the zone's color, and with
+            // SafeZoneLowerLevel one level lower: the zone's distorting surface shows less of
+            // it than of one outside
             var tint = tints[i];
-            if (tint.A != 0 && index > 0)
+            if (tint.A != 0 && config.SafeZoneLowerLevel && index > 0)
                 index--;
 
             // A zoomed client draws only what is in its view. Unzoomed the server doesn't know
@@ -1064,12 +1060,13 @@ public sealed class ImpostorService : IDisposable
         return result;
     }
 
-    // The color of the first enabled safe zone holding the entry's center, none if outside
-    private static Color ZoneTint(List<ZoneVolume?> zones, ImpostorEntry entry)
+    // The color of the first enabled safe zone holding the entry's center but not the eye,
+    // none if outside: from inside the same zone its surface isn't in the way
+    private static Color ZoneTint(List<ZoneVolume?> zones, ImpostorEntry entry, Vector3D eye)
     {
         foreach (var zone in zones)
         {
-            if (zone.Value.Contains(entry.WorldAabb.Center))
+            if (zone.Value.Contains(entry.WorldAabb.Center) && !zone.Value.Contains(eye))
             {
                 var color = zone.Value.Color;
                 color.A = 255;

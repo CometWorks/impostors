@@ -1,9 +1,13 @@
 """In-game check of impostors standing in while a grid, safe zone or asteroid streams
 in (SE-672): the player jumps from far away to next to it, deep inside the
 replication cube, like a ship arriving at 10 km/s. The impostor must stay and be
-drawn until the real entity draws itself, at the level it had from afar, then
-hide and go. Last the player jumps into the safe zone (SE-703). Same rig as scenario.py. Prints one PASS or FAIL line per check and
-the timings, and exits with the number of failures.
+drawn until the real entity draws itself, never coarser than from afar and, once
+the next pick sent it, at the full level for its new distance (SE-709), then
+hide and go. Last the player jumps into the safe zone (SE-703), with
+SafeZoneLowerLevel on: the grid inside it is tinted and lower from afar, but from
+inside the same zone it stands in untinted at its full level. Same rig as
+scenario.py. Prints one PASS or FAIL line per check and the timings, and exits
+with the number of failures.
 
     uv run --no-project --with httpx --with pillow python tests/streaming.py
     IMP_WITH_PLUGIN=1 ...      # the client also runs the client plugin, which tells
@@ -27,6 +31,8 @@ import rig  # noqa: E402
 import scenario  # noqa: E402
 
 PLUGIN = os.environ.get("IMP_WITH_PLUGIN") == "1"
+# The zone checks need the safe zone rule on, the other targets are outside of zones
+scenario.ZONE_LOWER = True
 if PLUGIN:
     # The world keeps the mod: the plugin's copy of the renderer stands down
     CLIENT = scenario.CLIENT = rig.Client(1, "Alpha", plugin=True)
@@ -36,6 +42,11 @@ if PLUGIN:
 STATION = world.STATION
 ZONE = world.ZONE
 ROCK = world.ROCK_FAR
+SHIELDED = world.SHIELDED
+
+# Seconds after the jump by which the held impostor shows its full level: the server picks
+# once a second and the mod writes its stats once a second
+PICK_DELAY = 2.5
 TARGETS = (
     (
         STATION,
@@ -53,10 +64,32 @@ TARGETS = (
 )
 
 
-def arrive(api, target, far, near, timeout=75.0):
+def shape_lod(i: dict | None) -> int | None:
+    """The level of the shape the client draws"""
+    if not i or i.get("shape", "none") == "none":
+        return None
+    return int(i["shape"].split("/")[1])
+
+
+def expected_level(api, target, eye) -> int | None:
+    """The full level for this distance from the server's entry, None for a safe zone,
+    whose shape has no levels"""
+    point = target.center if isinstance(target, world.Asteroid) else target.position
+    entries = rig.parse_near(
+        command(api, f"!iprobe near {point[0]} {point[1]} {point[2]} 600")
+    )
+    e = entries.get(target.entity_id)
+    if e is None or e["kind"] == "SafeZone":
+        return None
+    distance = sum((a - b) ** 2 for a, b in zip(eye, e["center"])) ** 0.5
+    return rig.full_level(e["kind"], e["radius"], distance, e["built"])
+
+
+def arrive(api, target, far, near, timeout=75.0, also=None):
     """Waits far away for the impostor, jumps next to the target and samples the client's
     stats until the impostor is gone. Returns the level from afar and the samples: seconds
-    since the jump and the impostor's stats (None once removed)."""
+    since the jump, the impostor's stats (None once removed), the totals and the stats of
+    the impostor of `also`, whose stats from afar are in samples[0][3]["afar"]."""
     # Only impostors in view are drawn: the character looks at the target
     point = target.center if isinstance(target, world.Asteroid) else target.position
     api.character_teleport(*far)
@@ -65,7 +98,9 @@ def arrive(api, target, far, near, timeout=75.0):
     if not check(f"{target.name} impostor from afar", drawn(impostors, target)):
         return None, []
     time.sleep(5)  # finer levels for the new distance
-    lod = CLIENT.stats()[1].get(target.entity_id, {}).get("lod")
+    impostors = CLIENT.stats()[1]
+    lod = shape_lod(impostors.get(target.entity_id))
+    afar = impostors.get(also.entity_id) if also else None
 
     api.character_teleport(*near)
     start = time.monotonic()
@@ -74,7 +109,10 @@ def arrive(api, target, far, near, timeout=75.0):
     while time.monotonic() - start < timeout:
         totals, impostors = CLIENT.stats()
         i = impostors.get(target.entity_id)
-        samples.append((time.monotonic() - start, i, totals))
+        other = {"now": impostors.get(also.entity_id) if also else None}
+        if not samples:
+            other["afar"] = afar
+        samples.append((time.monotonic() - start, i, totals, other))
         if i is None:
             break
         time.sleep(0.5)
@@ -107,8 +145,9 @@ def run(api):
         tick = lambda s: int(s[2].get("tick", 0))
         gone = next((tick(s) for s in samples if s[1] is None), None)
         seconds = lambda t: None if t is None else round((t - jump) / 60, 2)
+        full = expected_level(api, target, near)
         print(
-            f"{target.name}: level from afar {lod}, drawable at {seconds(drawable)} s, "
+            f"{target.name}: level from afar {lod}, full level {full}, drawable at {seconds(drawable)} s, "
             f"drawing at {seconds(ready)} s, impostor removed by {seconds(gone)} s, "
             f"meshes reported {loaded}, "
             f"readyus {max(int(s[2].get('readyus', 0)) for s in samples)}"
@@ -125,11 +164,7 @@ def run(api):
             all(i and i.get("drawn") == "1" for i in before),
             [i.get("drawn") if i else "removed" for i in before],
         )
-        check(
-            f"{target.name} level from afar kept",
-            all(i and i.get("lod") == lod for i in before),
-            [i.get("lod") if i else "removed" for i in before],
-        )
+        check_levels(target.name, lod, full, samples, ready)
         check(
             f"{target.name} impostor hidden, then removed",
             samples[-1][1] is None
@@ -142,17 +177,60 @@ def run(api):
     print("server:", command(api, "!iprobe stats"))
 
 
+def check_levels(name, lod, full, samples, ready, stats=lambda s: s[1]):
+    """Held, the impostor is never coarser than from afar, and has its full level from
+    PICK_DELAY seconds after the jump until the real one draws"""
+    tick = lambda s: int(s[2].get("tick", 0))
+    before = [s for s in samples if ready is None or tick(s) < ready]
+    levels = [(round(s[0], 1), shape_lod(stats(s))) for s in before]
+    check(
+        f"{name} never coarser than from afar",
+        lod is not None and all(lv is None or lv >= lod for _, lv in levels),
+        [lod] + levels,
+    )
+    if full is None:
+        return
+    late = [lv for t, lv in levels if t >= PICK_DELAY]
+    check(
+        f"{name} at the full level for its distance",
+        bool(late) and all(lv == full for lv in late),
+        (
+            f"full {full}, {levels}"
+            if late
+            else f"real one drew within {PICK_DELAY} s: {levels}"
+        ),
+    )
+
+
 def inside_zone(api):
     """SE-703: the player arrives inside a spherical zone while its impostor stands in. With
     the camera inside its bounding sphere the impostor isn't drawn, and the client keeps
-    running."""
+    running. SE-709: Shielded, inside the same zone, is tinted from afar and stands in
+    untinted, at its full level, from inside."""
     far = (ZONE.position[0], ZONE.position[1] + 5500, ZONE.position[2])
     inside = (ZONE.position[0], ZONE.position[1] + 200, ZONE.position[2])
-    lod, samples = arrive(api, ZONE, far, inside)
+    lod, samples = arrive(api, ZONE, far, inside, also=SHIELDED)
     if not samples:
         return
-    # Only stats written after the jump: a client that crashed leaves its last ones
+    afar = samples[0][3]["afar"] or {}
+    check("Shielded tinted from afar", "tint" in afar, afar)
+    full = expected_level(api, SHIELDED, inside)
+    log = ready_log(samples[-1][2], SHIELDED.entity_id)
+    ready = log[1] if log else None
+    shielded = lambda s: s[3].get("now")
     tick = lambda s: int(s[2].get("tick", 0))
+    late = [
+        shielded(s)
+        for s in samples
+        if (ready is None or tick(s) < ready) and s[0] >= PICK_DELAY and shielded(s)
+    ]
+    check(
+        "Shielded untinted from inside the same zone",
+        bool(late) and all("tint" not in i for i in late),
+        [i.get("tint", "-") for i in late] or f"real one drew within {PICK_DELAY} s",
+    )
+    check_levels("Shielded", shape_lod(afar), full, samples, ready, stats=shielded)
+    # Only stats written after the jump: a client that crashed leaves its last ones
     fresh = [s[1] for s in samples if tick(s) > tick(samples[0])]
     check(
         "Zone impostor not drawn with the camera inside",
