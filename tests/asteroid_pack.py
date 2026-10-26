@@ -255,9 +255,12 @@ def pack_index(path: Path) -> tuple[int, dict[int, tuple[int, int, list]]]:
         (count,) = struct.unpack("<i", data.read(4))
         entries = {}
         for _ in range(count):
-            asteroid, content, version, _flags, levels = struct.unpack(
-                "<qqiBB", data.read(22)
+            asteroid, content, version, _complete = struct.unpack(
+                "<qqiB", data.read(21)
             )
+            if fmt >= 3:
+                data.read(44)  # the frame
+            levels = data.read(1)[0]
             lengths = [struct.unpack("<Bi", data.read(5)) for _ in range(levels)]
             entries[asteroid] = (content, version, lengths)
     return settings, entries
@@ -276,7 +279,9 @@ def compare() -> int:
         raise SystemExit("compare needs two pack files")
     (sa, a), (sb, b) = (pack_index(Path(f)) for f in sys.argv[2:4])
     common = a.keys() & b.keys()
-    print(f"settings {sa} and {sb}, {len(a)} and {len(b)} asteroids, {len(common)} in both")
+    print(
+        f"settings {sa} and {sb}, {len(a)} and {len(b)} asteroids, {len(common)} in both"
+    )
     print(
         f"same content hash: {sum(a[i][0] == b[i][0] for i in common)}, "
         f"same shapes: {sum(a[i][1] == b[i][1] for i in common)}"
@@ -292,7 +297,9 @@ def compare() -> int:
                 t[1] += length
     for lod in sorted(totals):
         (qa, ba), (qb, bb) = totals[lod]["a"], totals[lod]["b"]
-        print(f"| {lod} | {qa} | {qb} | {qb / max(qa, 1):.3f} | {ba // 1024} | {bb // 1024} |")
+        print(
+            f"| {lod} | {qa} | {qb} | {qb / max(qa, 1):.3f} | {ba // 1024} | {bb // 1024} |"
+        )
     ka = sum(t["a"][1] for t in totals.values())
     kb = sum(t["b"][1] for t in totals.values())
     print(f"All levels: {ka // 1024} KB and {kb // 1024} KB ({kb / ka:.3f}x)")

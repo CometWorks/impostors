@@ -78,6 +78,11 @@ the whitelist, loading the mod in the game does.
   asteroid through a cut, a server restart and a voxel reset; `offline` checks the pack in an
   offline game with the client plugin. `compare` puts two packs side by side: the asteroids
   with the same shapes, and the quads and bytes per level. See its docstring.
+- `tests/early_asteroids.py` times how soon the asteroids show when a client joins above
+  the same ring, with an empty cache, a warm cache and the pack, each with and without the
+  early asteroids, and the bytes the server sent (`measure`); `swap` checks an early shape of
+  an asteroid mined since the pack was made; `offline` does the same with the client plugin
+  offline. See its docstring.
 - `tests/asteroid_normals.py` checks the smooth asteroid normals offline, without a game
   running (SE-710): it builds a made-up rock with flat and with smooth normals through
   `VoxelShapes`, and compares the quads, bytes and build times, and how far each level's

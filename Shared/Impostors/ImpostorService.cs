@@ -447,7 +447,7 @@ public sealed class ImpostorService : IDisposable
                 path,
                 world,
                 sources.OfType<VoxelSource>().First().Settings,
-                asteroids.Select(e => (e.Id, e.Input, e.Shapes)),
+                asteroids.Select(e => (e.Id, e.Input, e.Shapes, e.State(0))),
                 (byte)config.AsteroidPackMaxLevel
             );
             log.Info(
@@ -569,6 +569,14 @@ public sealed class ImpostorService : IDisposable
         writer.Byte(Protocol.Version);
         writer.Long(instanceId);
         writer.Int(config.MaxQuadsPerFrame);
+
+        // How far the client may show asteroids before we send them, and how small
+        writer.Float(
+            !config.Asteroids ? 0
+            : config.MaxDistance > 0 ? config.MaxDistance
+            : MySession.Static.Settings.ViewDistance
+        );
+        writer.Float(config.MinPixels);
         Send(sender);
     }
 
