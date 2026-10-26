@@ -165,8 +165,8 @@ Every second it:
    next ones wait until the following seconds have paid off the debt. New impostors don't
    wait, but while the player is in debt they get a level the client has or one of at most
    2 KB first. The states go first, then the shapes, small ones sharing a message up to 16 KB.
-4. Starts background builds for the wanted entries that have no shapes yet, or whose content
-   changed, at most two at a time. Each finished build logs an `Impostor build:` line with
+4. Lists the wanted entries that have no shapes yet, or whose content changed, and starts
+   their background builds, a quarter of the cores at a time (2 to 4). Each finished build logs an `Impostor build:` line with
    the snapshot time on the game thread and the wall clock time, thread CPU time and quads
    of each level; `tests/build_times.py` turns server logs into a table.
 
@@ -195,10 +195,18 @@ a number to bump whenever a change to the building gives other shapes for the sa
   that no longer exists in the world loses its file (not at once: grids leave the scan while
   a world unloads, before they are closed). Files unused for `CacheDays` (30) go, and the
   least recently used ones while the folder is over `CacheMegabytes` (256).
-- While builds come from the cache the service starts the next ones every 10 ticks instead of
-  every second.
-- Once a minute the log counts the shapes built, taken from the cache and found unchanged
-  (`Impostor shapes in the last minute: ...`). Only real builds write `Impostor build:` lines.
+- Build slots (SE-678): the list of entries due for a build is made after the picks, once a
+  second and after the picks of a zoomed view. Every tick applies the finished builds and
+  starts the next listed ones in the slots they freed, so a cache hit or an asteroid build of
+  a few ms doesn't wait for the next pick. A tick stops starting builds once its snapshots
+  took 2 ms (a grid's can take 5 ms, an asteroid's 0.01 ms). The shapes are hashed for their
+  version on the build thread. On "Octahedron - Seed 2" with a client joining above the asteroid ring
+  (`tests/build_throughput.py`, 16 threads, so 4 slots) the server built 1419 asteroids in
+  17 s, 89 a second at the busiest, where two builds every 10 ticks took 139 s for 1666 at
+  12 a second. Starting them cost the game thread 0.03 ms per build, against 0.21 ms.
+- Once a minute the log counts the shapes built, taken from the cache and found unchanged,
+  and the game thread time of starting the builds (`Impostor shapes in the last minute:
+  ...`). Only real builds write `Impostor build:` lines.
 
 The replication margin makes the hand-off seamless: the client has the impostor while the
 real grid is still replicated (and hides it), so there is no gap when the grid leaves the
@@ -680,8 +688,8 @@ one message under the SDK's 64 KiB payload limit.
 
 | Where | Budget |
 |---|---|
-| Server game thread | one scan per second; a build's snapshot copies every cube of the group |
-| Server background | 2 builds at a time |
+| Server game thread | one scan per second; a build's snapshot copies every cube of the group, 2 ms of snapshots per tick |
+| Server background | a quarter of the cores at a time (2 to 4), half the cores while writing the asteroid pack |
 | Network per player | `ShapeBytesPerSecond` (32 KB/s) for shapes, about 74 bytes per moving impostor per second |
 | Client | `MaxQuadsPerFrame` quads per frame (16000) |
 | Client plugin, render thread | its `PrepareList` patch: 7 µs per frame, 25 µs while every 14th frame is over the limit by 1182 impostor quads, 0.7 ms at most (`tests/billboards.py`, about 33000 billboards, Ryzen 9800X3D) |

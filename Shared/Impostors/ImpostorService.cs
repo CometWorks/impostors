@@ -59,6 +59,11 @@ public sealed class ImpostorService : IDisposable
     private bool packWritten;
     private int tick;
 
+    // Game thread time of the registry's updates since the last minute's log line, all of it
+    // and the most in one tick, Stopwatch ticks
+    private long buildTicks;
+    private long maxBuildTicks;
+
     private sealed class Viewer
     {
         public readonly ulong SteamId;
@@ -314,28 +319,25 @@ public sealed class ImpostorService : IDisposable
 
     private void Update()
     {
+        var now = MySession.Static.ElapsedPlayTime.TotalSeconds;
         if (++tick % 60 != 0)
         {
-            // Builds that reuse cached shapes finish within a few ticks, the next ones start
-            // without waiting for the next full second
-            if (tick % 10 == 0)
-                registry.Update(
-                    MySession.Static.ElapsedPlayTime.TotalSeconds,
-                    config.RebuildSeconds,
-                    config.RefreshSeconds
-                );
-
             // A zoom gets its finer levels within a few ticks, not at the next full second.
             // Six picks per second at most, however many View messages a client sends.
+            var picked = false;
             foreach (var viewer in viewers.Values)
             {
                 if (viewer.Dirty && tick - viewer.LastTick >= 10)
+                {
                     TryUpdateViewer(viewer);
+                    picked = true;
+                }
             }
+
+            // What a zoomed view wants now is built now, not after the next full second
+            UpdateRegistry(now, picked);
             return;
         }
-
-        var now = MySession.Static.ElapsedPlayTime.TotalSeconds;
 
         registry.BeginScan();
         foreach (var source in sources)
@@ -369,7 +371,7 @@ public sealed class ImpostorService : IDisposable
             TryUpdateViewer(viewers[steamId]);
         }
 
-        registry.Update(now, config.RebuildSeconds, config.RefreshSeconds);
+        UpdateRegistry(now, true);
 
         if (WritingPack)
             TryWritePack();
@@ -380,12 +382,30 @@ public sealed class ImpostorService : IDisposable
                 LogViewer(viewer);
 
             var (built, cached, packed, unchanged, reusedCpuMs) = registry.TakeCounts();
+            var ms = 1000.0 / Stopwatch.Frequency;
             if (built + cached + packed + unchanged > 0)
                 log.Info(
                     $"Impostor shapes in the last minute: {built} built, {cached} from the cache, {packed} from the asteroid pack, {unchanged} unchanged; "
-                        + $"the reused ones took {reusedCpuMs:0} ms CPU"
+                        + $"the reused ones took {reusedCpuMs:0} ms CPU; "
+                        + $"starting the builds took {buildTicks * ms:0.0} ms on the game thread, {maxBuildTicks * ms:0.00} ms the most in a tick"
                 );
+            buildTicks = 0;
+            maxBuildTicks = 0;
         }
+    }
+
+    // Every tick: applies the finished builds and starts new ones as slots free, after the
+    // picks plans which ones; timed for the minute's log line
+    private void UpdateRegistry(double now, bool plan)
+    {
+        var start = Stopwatch.GetTimestamp();
+        if (plan)
+            registry.Plan(now, config.RebuildSeconds, config.RefreshSeconds);
+        else
+            registry.Pump(now);
+        var elapsed = Stopwatch.GetTimestamp() - start;
+        buildTicks += elapsed;
+        maxBuildTicks = Math.Max(maxBuildTicks, elapsed);
     }
 
     private bool WritingPack => config.WriteAsteroidPack && !packWritten;
