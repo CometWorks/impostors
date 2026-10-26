@@ -150,7 +150,10 @@ def join(ids, tag: str, with_pack: bool, early: bool, eye, target, away) -> dict
     base = int(totals.get("jumptick", 0)) if moved else 0
     turn = int(totals.get("turntick", 0))
     voxels = [i for i in impostors.values() if i.get("kind") == "Voxel"]
-    shaped = [int(i["firstshape"]) - base for i in voxels if int(i["firstshape"]) >= 0]
+    # After a teleport, shapes the client already had before it count as there at once
+    shaped = [
+        max(0, int(i["firstshape"]) - base) for i in voxels if int(i["firstshape"]) >= 0
+    ]
     drawn = [
         max(0, int(i["firstdrawn"]) - turn)
         for i in voxels
