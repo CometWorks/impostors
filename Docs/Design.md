@@ -500,7 +500,9 @@ cache saves the delay, the server cache saves rebuilding the levels.
   the server does (the same level for the on-screen size, fitted into `MaxQuadsPerFrame`
   less half the quads of the server's impostors), and reads their shapes for 2 ms per
   tick, those in view and the large ones first. The range and `MinPixels` come with the
-  Welcome; until then the session's view distance and 3 pixels apply.
+  Welcome. The client keeps the last ones per world (`asteroid-range.txt` in its storage),
+  so the next join shows the asteroids before the Welcome; the first join of a world uses
+  the session's view distance and 3 pixels until then.
 - Handing over: an early impostor is a normal one of the renderer, by its id, so the
   server's state for it never adds a second one. From that state on it is the server's:
   with the same version it keeps the shape it has until the server's level arrives, usually

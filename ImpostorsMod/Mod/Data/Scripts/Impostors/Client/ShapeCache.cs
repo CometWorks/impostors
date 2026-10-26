@@ -639,7 +639,7 @@ namespace Impostors
             return (int)hash;
         }
 
-        private static long Fnv(string text)
+        public static long Fnv(string text)
         {
             var hash = 14695981039346656037;
             foreach (var c in text ?? "")

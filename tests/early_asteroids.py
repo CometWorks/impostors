@@ -78,6 +78,21 @@ def geometry():
     return eye, target, away
 
 
+def settle() -> None:
+    """At least SETTLE seconds, and until the client got no new shape for 40 s: the shape
+    cache saves 30 s after the last one, a restarted server sends them for minutes"""
+    start = time.monotonic()
+    last, since = None, start
+    while time.monotonic() - start < 600:
+        time.sleep(5)
+        totals = CLIENT.stats()[0]
+        now = (totals.get("impostors"), totals.get("shapes"), totals.get("cached"))
+        if now != last:
+            last, since = now, time.monotonic()
+        if time.monotonic() - start >= SETTLE and time.monotonic() - since >= 40:
+            return
+
+
 def stage_client(ids, with_pack: bool) -> None:
     """The world's mods, with the pack mod's folder empty unless with_pack"""
     mods = CLIENT.appdata / "Mods"
@@ -125,10 +140,9 @@ def join(ids, tag: str, with_pack: bool, early: bool, eye, target, away) -> dict
             api.character_teleport(*eye)
             time.sleep(3)
         api.character_look_at(*target, tolerance=2)
-        time.sleep(SETTLE)
+        settle()
         totals, impostors = CLIENT.stats()
         api.character_look_at(*away, tolerance=2)
-        # The cache saves 30 s after the last new shape, SETTLE covers that
     finally:
         CLIENT.stop()
         noearly.unlink(missing_ok=True)

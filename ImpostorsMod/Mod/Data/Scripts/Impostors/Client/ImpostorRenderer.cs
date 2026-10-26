@@ -261,7 +261,10 @@ namespace Impostors
 
             // Tests turn the early asteroids off with "noearly", for a baseline
             if ((cache != null || pack != null) && !(debug && StorageExists("noearly")))
+            {
                 early = new EarlyAsteroids(impostors, cache, pack);
+                ReadRange();
+            }
         }
 
         private void OpenPack()
@@ -293,6 +296,79 @@ namespace Impostors
                     + ((timer.ElapsedTicks - start) * 1000 / MyGameTimer.Frequency)
                     + " ms"
             );
+        }
+
+        // The asteroid range and MinPixels of the last Welcome in this world, so the next
+        // session shows the early asteroids before the Welcome comes: a line per world, by a
+        // hash of its name, in RangeFile, in meters and thousandths of a pixel (no decimal
+        // separator, whatever the locale)
+        private const string RangeFile = "asteroid-range.txt";
+        private const int RangeWorlds = 64;
+
+        private string WorldKey
+        {
+            get { return ShapeCache.Fnv(MyAPIGateway.Session.Name).ToString("x16"); }
+        }
+
+        private List<string> RangeLines()
+        {
+            var lines = new List<string>();
+            if (!StorageExists(RangeFile))
+                return lines;
+            using (var file = ReadStorage(RangeFile))
+            {
+                string line;
+                while ((line = file.ReadLine()) != null)
+                    lines.Add(line);
+            }
+            return lines;
+        }
+
+        private void ReadRange()
+        {
+            try
+            {
+                foreach (var line in RangeLines())
+                {
+                    var words = line.Split(' ');
+                    if (words.Length == 3 && words[0] == WorldKey)
+                    {
+                        asteroidRange = long.Parse(words[1]);
+                        minPixels = long.Parse(words[2]) / 1000.0;
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                MyLog.Default.WriteLineAndConsole(
+                    "Impostors: failed to read " + RangeFile + ": " + e.Message
+                );
+            }
+        }
+
+        private void WriteRange()
+        {
+            if (early == null)
+                return;
+            try
+            {
+                var key = WorldKey;
+                var lines = RangeLines().FindAll(l => !l.StartsWith(key + " "));
+                if (lines.Count >= RangeWorlds)
+                    lines.RemoveRange(0, lines.Count - RangeWorlds + 1);
+                lines.Add(key + " " + (long)asteroidRange + " " + (long)(minPixels * 1000));
+                using (var file = WriteStorage(RangeFile))
+                {
+                    foreach (var line in lines)
+                        file.WriteLine(line);
+                }
+            }
+            catch (Exception e)
+            {
+                MyLog.Default.WriteLineAndConsole(
+                    "Impostors: failed to write " + RangeFile + ": " + e.Message
+                );
+            }
         }
 
         // The mod's files are in its local storage. Pulsar compiles the client plugin under a
@@ -951,8 +1027,14 @@ namespace Impostors
                     maxQuads = MathHelper.Clamp(r.Int(), 0, Protocol.BillboardLimit);
                     if (r.Remaining >= 8)
                     {
-                        asteroidRange = Math.Max(0, r.Float());
-                        minPixels = r.Float();
+                        var range = Math.Max(0, r.Float());
+                        var pixels = r.Float();
+                        if (range != asteroidRange || pixels != minPixels)
+                        {
+                            asteroidRange = range;
+                            minPixels = pixels;
+                            WriteRange();
+                        }
                     }
                     if (instance != serverInstance)
                     {
