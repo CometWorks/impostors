@@ -5,7 +5,10 @@ cache, and keep the versions, so the client's own disk cache sends no shapes
 either. Before the restart the cache folder gets files retention has to drop
 (40 days unused, and enough to go over the cap). A third start turns asteroid
 occlusion off: the asteroids are built again, the grids still come from the
-cache. Prints one PASS or FAIL line per check and exits with the number of
+cache. Shape files sit in subfolders of their first 2 hex digits; the first
+start moves a flat file there. The first start also moves the cache folder of older versions
+(ImpostorsCache) to the new place, and the restart leaves a second old folder
+alone with a log hint. Prints one PASS or FAIL line per check and exits with the number of
 failures.
 
     uv run --no-project --with httpx --with pillow python tests/server_cache.py
@@ -15,6 +18,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -27,7 +31,9 @@ from cache import session  # noqa: E402
 from scenario import CLIENT, SERVER, check  # noqa: E402
 
 CAP_MB = 8
-CACHE = SERVER.data / "ImpostorsCache"
+CACHE = SERVER.data / "Storage" / "Impostors" / "Cache"
+OLD_CACHE = SERVER.data / "ImpostorsCache"
+MARKER = "moved.marker"
 JUNK = 0x7E00000000000000
 SUMMARY = re.compile(
     r"Impostor shapes in the last minute: (\d+) built, (\d+) from the cache, (\d+) unchanged"
@@ -45,7 +51,13 @@ def config(**options) -> str:
 
 
 def shape_files() -> dict[str, int]:
-    return {f.name: f.stat().st_size for f in CACHE.glob("*.shapes")}
+    return {f.name: f.stat().st_size for f in CACHE.glob("*/*.shapes")}
+
+
+def path_of(entity: int) -> Path:
+    """Where the cache keeps an entity's file, in the subfolder of its first 2 hex digits"""
+    name = f"{entity:016x}"
+    return CACHE / name[:2] / f"{name}.shapes"
 
 
 def server_log() -> str:
@@ -78,16 +90,21 @@ def seed() -> tuple[list[Path], list[Path]]:
     now = time.time()
     old, filler = [], []
     for i in range(5):
-        path = CACHE / f"{JUNK + i:016x}.shapes"
+        path = path_of(JUNK + i)
+        path.parent.mkdir(exist_ok=True)
         path.write_bytes(os.urandom(100 * 1024))
         os.utime(path, (now - 40 * 86400, now - 40 * 86400))
         old.append(path)
     for i in range(12):
-        path = CACHE / f"{JUNK + 100 + i:016x}.shapes"
+        path = path_of(JUNK + 100 + i)
+        path.parent.mkdir(exist_ok=True)
         path.write_bytes(os.urandom(1024 * 1024))
         os.utime(path, (now - 86400, now - 86400))
         filler.append(path)
     return old, filler
+
+
+FLAT = path_of(JUNK + 200)
 
 
 def restart(**options) -> None:
@@ -107,18 +124,29 @@ def main():
     )
     SERVER.prepare([CLIENT.steam_id])
     SERVER.write_plugin_config(config())
-    CACHE.mkdir(parents=True, exist_ok=True)
-    for f in CACHE.iterdir():
-        f.unlink()
+    shutil.rmtree(CACHE, ignore_errors=True)
+    shutil.rmtree(OLD_CACHE, ignore_errors=True)
+    OLD_CACHE.mkdir(parents=True)
+    (OLD_CACHE / MARKER).write_text("old cache folder")
+    (OLD_CACHE / FLAT.name).write_bytes(b"flat layout")
     for f in CLIENT.mod_storage.glob("cache-*"):
         f.unlink()
 
     try:
         SERVER.start()
         session("first join")
+        check(
+            "first start: old cache folder moved",
+            not OLD_CACHE.exists() and (CACHE / MARKER).exists(),
+            f"old exists={OLD_CACHE.exists()}",
+        )
+        check(
+            "first start: flat file moved into its subfolder",
+            FLAT.exists() and not (CACHE / FLAT.name).exists(),
+        )
         first = builds()
         built, cached, _ = summary()
-        real = shape_files()
+        real = {n: b for n, b in shape_files().items() if n != FLAT.name}
         check("first start: shapes built", sum(first.values()) > 0, first)
         check(
             "first start: none from the cache",
@@ -132,11 +160,16 @@ def main():
         )
 
         old, filler = seed()
+        OLD_CACHE.mkdir()
         restart()
         rejoin = session("rejoin after restart")
         again = builds()
         built, cached, _ = summary()
         check("restart: nothing built", sum(again.values()) == 0, again)
+        check(
+            "restart: second old folder left, with a hint",
+            OLD_CACHE.exists() and "is no longer used" in server_log(),
+        )
         check(
             "restart: shapes from the cache",
             built == 0 and cached >= len(real),
@@ -176,6 +209,7 @@ def main():
     finally:
         CLIENT.stop()
         SERVER.stop()
+        shutil.rmtree(OLD_CACHE, ignore_errors=True)
         lines = [
             l
             for l in server_log().splitlines()
