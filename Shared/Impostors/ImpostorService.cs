@@ -580,7 +580,7 @@ public sealed class ImpostorService : IDisposable
         Send(sender);
     }
 
-    // Bounds what a client can make us keep, far more than a 64 MB cache holds
+    // Bounds what a client can make us keep, far more than a 512 MB cache holds
     private const int MaxOnDisk = 1 << 18;
 
     // The client's disk cache, in one or more messages after each Welcome of a new instance

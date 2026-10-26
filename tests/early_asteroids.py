@@ -12,8 +12,9 @@ asteroids have shapes and are drawn, with and without the early asteroids.
 
 `measure` starts the server once, with the pack in the world, and lets a first client fill
 it: every asteroid built or taken from the pack. That client leaves its character above the
-ring looking away from it, so every later join starts there. Then each join, a new client
-process every time:
+ring looking away from it, so every later join starts there. Then two series of joins, a new
+client process every time: to the running server, which has every asteroid's shapes, and
+each to a server that just restarted (`IMP_SERIES=running,restarted`):
 
 - cold: no shape cache, the pack mod staged empty
 - warm, noearly: the cache of the cold join, early asteroids off (the mod's "noearly" file)
@@ -77,11 +78,28 @@ def geometry():
     return eye, target, away
 
 
+def settle() -> None:
+    """At least SETTLE seconds, and until the client got no new shape for 40 s: the shape
+    cache saves 30 s after the last one, a restarted server sends them for minutes"""
+    start = time.monotonic()
+    last, since = None, start
+    while time.monotonic() - start < 600:
+        time.sleep(5)
+        totals = CLIENT.stats()[0]
+        now = (totals.get("impostors"), totals.get("shapes"), totals.get("cached"))
+        if now != last:
+            last, since = now, time.monotonic()
+        if time.monotonic() - start >= SETTLE and time.monotonic() - since >= 40:
+            return
+
+
 def stage_client(ids, with_pack: bool) -> None:
     """The world's mods, with the pack mod's folder empty unless with_pack"""
     mods = CLIENT.appdata / "Mods"
     ring.stage_mods(mods, [i for i in ids if i != ap.PACK_ID])
+    # Remote stages only folders with something in them, a mod without a pack file
     EMPTY_PACK.mkdir(parents=True, exist_ok=True)
+    (EMPTY_PACK / "metadata.mod").write_text("<MyObjectBuilder_ModInfo />")
     link = mods / f"{ap.PACK_ID}.sbm"
     if link.is_symlink() or link.exists():
         link.unlink()
@@ -122,10 +140,9 @@ def join(ids, tag: str, with_pack: bool, early: bool, eye, target, away) -> dict
             api.character_teleport(*eye)
             time.sleep(3)
         api.character_look_at(*target, tolerance=2)
-        time.sleep(SETTLE)
+        settle()
         totals, impostors = CLIENT.stats()
         api.character_look_at(*away, tolerance=2)
-        # The cache saves 30 s after the last new shape, SETTLE covers that
     finally:
         CLIENT.stop()
         noearly.unlink(missing_ok=True)
@@ -197,30 +214,41 @@ def fill(ids, eye, target, away) -> None:
         CLIENT.stop()
 
 
+RUNS = [
+    # tag, pack, early, clear the cache first
+    ("cold", False, True, True),
+    ("warm, noearly", False, False, False),
+    ("warm", False, True, False),
+    ("pack, noearly", True, False, True),
+    ("pack", True, True, True),
+]
+
+
 def measure() -> int:
+    series = os.environ.get("IMP_SERIES", "running,restarted").split(",")
     ids = start_server()
     eye, target, away = geometry()
     results = {}
     try:
         fill(ids, eye, target, away)
-        clear_cache()
-        results["cold"] = join(ids, "cold", False, True, eye, target, away)
-        results["warm-noearly"] = join(
-            ids, "warm, noearly", False, False, eye, target, away
-        )
-        results["warm"] = join(ids, "warm", False, True, eye, target, away)
-        clear_cache()
-        results["pack-noearly"] = join(
-            ids, "pack, noearly", True, False, eye, target, away
-        )
-        clear_cache()
-        results["pack"] = join(ids, "pack", True, True, eye, target, away)
+        for name in series:
+            for tag, pack, early, clear in RUNS:
+                if clear:
+                    clear_cache()
+                # A server that just started has no asteroid's shapes yet: it takes two
+                # from the pack or its cache every 10 ticks
+                if name == "restarted":
+                    SERVER.stop()
+                    SERVER.start(timeout=3600)
+                results[(name, tag)] = join(
+                    ids, f"{name}, {tag}", pack, early, eye, target, away
+                )
     finally:
         CLIENT.stop()
         SERVER.stop()
 
     ok = True
-    for key in ("warm", "pack"):
+    for key in [(name, tag) for name in series for tag in ("warm", "pack")]:
         r = results[key]
         fast = (
             r["shaped"]
@@ -230,7 +258,7 @@ def measure() -> int:
         )
         ok &= bool(fast)
         print(
-            f"{'PASS' if fast else 'FAIL'} {key}: 90% of the asteroids within "
+            f"{'PASS' if fast else 'FAIL'} {', '.join(key)}: 90% of the asteroids within "
             f"{np.percentile(r['shaped'], 90) / 60 if r['shaped'] else -1:.1f} s of the join, "
             f"drawn within {np.percentile(r['drawn'], 90) / 60 if r['drawn'] else -1:.1f} s of the turn",
             flush=True,

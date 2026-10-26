@@ -232,6 +232,8 @@ namespace Impostors
         private int turnTick = -1;
         private int jumpTick = -1;
         private Vector3 lastForward;
+        private Vector3 restForward;
+        private int restTick;
         private Vector3D lastEye;
 
         public override void LoadData()
@@ -286,7 +288,10 @@ namespace Impostors
 
             // Tests turn the early asteroids off with "noearly", for a baseline
             if ((cache != null || pack != null) && !(debug && StorageExists("noearly")))
+            {
                 early = new EarlyAsteroids(impostors, cache, pack);
+                ReadRange();
+            }
         }
 
         private void OpenPack()
@@ -318,6 +323,79 @@ namespace Impostors
                     + ((timer.ElapsedTicks - start) * 1000 / MyGameTimer.Frequency)
                     + " ms"
             );
+        }
+
+        // The asteroid range and MinPixels of the last Welcome in this world, so the next
+        // session shows the early asteroids before the Welcome comes: a line per world, by a
+        // hash of its name, in RangeFile, in meters and thousandths of a pixel (no decimal
+        // separator, whatever the locale)
+        private const string RangeFile = "asteroid-range.txt";
+        private const int RangeWorlds = 64;
+
+        private string WorldKey
+        {
+            get { return ShapeCache.Fnv(MyAPIGateway.Session.Name).ToString("x16"); }
+        }
+
+        private List<string> RangeLines()
+        {
+            var lines = new List<string>();
+            if (!StorageExists(RangeFile))
+                return lines;
+            using (var file = ReadStorage(RangeFile))
+            {
+                string line;
+                while ((line = file.ReadLine()) != null)
+                    lines.Add(line);
+            }
+            return lines;
+        }
+
+        private void ReadRange()
+        {
+            try
+            {
+                foreach (var line in RangeLines())
+                {
+                    var words = line.Split(' ');
+                    if (words.Length == 3 && words[0] == WorldKey)
+                    {
+                        asteroidRange = long.Parse(words[1]);
+                        minPixels = long.Parse(words[2]) / 1000.0;
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                MyLog.Default.WriteLineAndConsole(
+                    "Impostors: failed to read " + RangeFile + ": " + e.Message
+                );
+            }
+        }
+
+        private void WriteRange()
+        {
+            if (early == null)
+                return;
+            try
+            {
+                var key = WorldKey;
+                var lines = RangeLines().FindAll(l => !l.StartsWith(key + " "));
+                if (lines.Count >= RangeWorlds)
+                    lines.RemoveRange(0, lines.Count - RangeWorlds + 1);
+                lines.Add(key + " " + (long)asteroidRange + " " + (long)(minPixels * 1000));
+                using (var file = WriteStorage(RangeFile))
+                {
+                    foreach (var line in lines)
+                        file.WriteLine(line);
+                }
+            }
+            catch (Exception e)
+            {
+                MyLog.Default.WriteLineAndConsole(
+                    "Impostors: failed to write " + RangeFile + ": " + e.Message
+                );
+            }
         }
 
         // The mod's files are in its local storage. Pulsar compiles the client plugin under a
@@ -993,8 +1071,14 @@ namespace Impostors
                     maxQuads = MathHelper.Clamp(r.Int(), 0, Protocol.BillboardLimit);
                     if (r.Remaining >= 8)
                     {
-                        asteroidRange = Math.Max(0, r.Float());
-                        minPixels = r.Float();
+                        var range = Math.Max(0, r.Float());
+                        var pixels = r.Float();
+                        if (range != asteroidRange || pixels != minPixels)
+                        {
+                            asteroidRange = range;
+                            minPixels = pixels;
+                            WriteRange();
+                        }
                     }
                     if (instance != serverInstance)
                     {
@@ -1302,14 +1386,25 @@ namespace Impostors
             }
         }
 
-        // Stats: the last tick the view turned by over 20 degrees or jumped by over a
-        // kilometer from one frame to the next, the rigs time what comes after
+        // Stats: the tick the last turn of the view by over 20 degrees started, and the last
+        // tick it jumped by over a kilometer from one frame to the next, the rigs time what
+        // comes after. At rest the view moves less than half a degree per frame.
         private void NoteMoves(VRage.ModAPI.IMyCamera camera)
         {
             var forward = (Vector3)camera.WorldMatrix.Forward;
-            if (Vector3.Dot(forward, lastForward) < 0.94f)
-                turnTick = tick;
-            if (Vector3D.DistanceSquared(camera.Position, lastEye) > 1e6)
+            if (lastForward == Vector3.Zero || Vector3.Dot(forward, lastForward) > 0.99996f)
+            {
+                restForward = forward;
+                restTick = tick;
+            }
+            else if (Vector3.Dot(forward, restForward) < 0.94f)
+            {
+                turnTick = restTick;
+            }
+            if (
+                lastEye != Vector3D.Zero
+                && Vector3D.DistanceSquared(camera.Position, lastEye) > 1e6
+            )
                 jumpTick = tick;
             lastForward = forward;
             lastEye = camera.Position;

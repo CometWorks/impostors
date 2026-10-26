@@ -29,7 +29,7 @@ import world  # noqa: E402
 from scenario import CLIENT, PLUGIN, SERVER, check, wait_stats  # noqa: E402
 
 # ShapeCache.cs
-MAX_BYTES = 64 * 1024 * 1024
+MAX_BYTES = 512 * 1024 * 1024
 MAX_DAYS = 30
 MAX_BUILD_DAYS = 90
 MAGIC = 0x43504D49
@@ -154,7 +154,7 @@ def other_worlds() -> dict[str, Path]:
     days, two recent ones. The index tells their size, the sweep goes by it, so the files
     themselves stay small."""
     d = today()
-    worlds = {"unused": (40, 1), "older": (3, 40), "recent": (1, 20)}  # days ago, MB
+    worlds = {"unused": (40, 1), "older": (3, 300), "recent": (1, 150)}  # days ago, MB
     lines, files = [], {}
     for n, (name, (days, mb)) in enumerate(worlds.items()):
         file = f"cache-00000000deadbe{n:02x}.bin"
@@ -184,9 +184,10 @@ def seed(own: Path) -> int:
     ]
     # An older version of each real impostor, used before the real one
     superseded = [(i, v ^ 0x5A5A, lod, d, r, s) for i, v, lod, _, r, s in real]
-    # 72 MB of other impostors, pushes the world's file over the cap
+    # 8 MB more than the cap of other impostors, pushes the world's file over it
     big = [
-        (junk_id + 1000 + i, 7, 64, d, d, os.urandom(72 * 1024)) for i in range(1024)
+        (junk_id + 1000 + i, 7, 64, d, d, os.urandom(72 * 1024))
+        for i in range(MAX_BYTES // (72 * 1024) + 114)
     ]
     write_pack(own, old + stale + superseded + big + real)
     return len(real)
@@ -215,6 +216,9 @@ def run():
         rig.plugin_config(RebuildSeconds=10, RefreshSeconds=20, MaxQuadsPerFrame=20000)
     )
     storage().mkdir(parents=True, exist_ok=True)
+    # The client plugin keeps the values of an Impostors.cfg from an earlier run, the
+    # test goes by the defaults
+    (CLIENT.appdata / "Impostors.cfg").unlink(missing_ok=True)
     for f in cache_files() + list(storage().glob(f"{prefix()}cache-index.txt")):
         f.unlink()
 

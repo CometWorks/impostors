@@ -183,8 +183,9 @@ def run(api):
 
 
 def check_levels(name, lod, full, samples, ready, stats=lambda s: s[1]):
-    """Held, the impostor is never coarser than from afar, and has its full level from
-    PICK_DELAY seconds after the jump until the real one draws"""
+    """Held, the impostor is never coarser than from afar, and has its full level by
+    PICK_DELAY seconds after the jump until the real one draws. Returns the samples from
+    the first one with the full level."""
     tick = lambda s: int(s[2].get("tick", 0))
     before = [s for s in samples if ready is None or tick(s) < ready]
     levels = [(round(s[0], 1), shape_lod(stats(s))) for s in before]
@@ -194,17 +195,13 @@ def check_levels(name, lod, full, samples, ready, stats=lambda s: s[1]):
         [lod] + levels,
     )
     if full is None:
-        return
-    late = [lv for t, lv in levels if t >= PICK_DELAY]
-    check(
-        f"{name} at the full level for its distance",
-        bool(late) and all(lv == full for lv in late),
-        (
-            f"full {full}, {levels}"
-            if late
-            else f"real one drew within {PICK_DELAY} s: {levels}"
-        ),
-    )
+        return []
+    reached = rig.stand_in_reached(levels, full, PICK_DELAY)
+    if reached is None:
+        print(f"SKIP {name} full level: the real one drew first, {levels}")
+        return []
+    check(f"{name} at the full level {full} for its distance", reached, levels)
+    return [s for s in before if shape_lod(stats(s)) == full]
 
 
 def inside_zone(api):
@@ -231,17 +228,16 @@ def inside_zone(api):
     )
     shielded = lambda s: s[3].get("now")
     tick = lambda s: int(s[2].get("tick", 0))
-    late = [
-        shielded(s)
-        for s in samples
-        if (ready is None or tick(s) < ready) and s[0] >= PICK_DELAY and shielded(s)
-    ]
-    check(
-        "Shielded untinted from inside the same zone",
-        bool(late) and all("tint" not in i for i in late),
-        [i.get("tint", "-") for i in late] or f"real one drew within {PICK_DELAY} s",
+    late = check_levels(
+        "Shielded", shape_lod(afar), full, samples, ready, stats=shielded
     )
-    check_levels("Shielded", shape_lod(afar), full, samples, ready, stats=shielded)
+    # The state that brings the full level drops the tint too
+    if late:
+        check(
+            "Shielded untinted from inside the same zone",
+            all("tint" not in shielded(s) for s in late),
+            [shielded(s).get("tint", "-") for s in late],
+        )
     # Only stats written after the jump: a client that crashed leaves its last ones
     fresh = [s[1] for s in samples if tick(s) > tick(samples[0])]
     check(

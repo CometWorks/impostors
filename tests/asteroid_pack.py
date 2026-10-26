@@ -246,9 +246,8 @@ def command(api, text: str, timeout: float = 20.0) -> str:
 
 
 def pack_index(path: Path) -> tuple[int, dict[int, tuple[int, int, list]]]:
-    """The asteroid settings hash (0 in format 1) and per asteroid id its content hash,
-    version and (level, bytes) per level, from a pack's index. Format 2 had the settings
-    (SE-710's branch), 3 has them and the frames."""
+    """The asteroid settings hash (0 before format 2) and per asteroid id its content hash,
+    version and (level, bytes) per level, from a pack's index"""
     with path.open("rb") as data:
         _magic, fmt = struct.unpack("<iB", data.read(5))
         data.read(data.read(1)[0])  # the world name, shorter than 128 bytes
@@ -256,7 +255,9 @@ def pack_index(path: Path) -> tuple[int, dict[int, tuple[int, int, list]]]:
         (count,) = struct.unpack("<i", data.read(4))
         entries = {}
         for _ in range(count):
-            asteroid, content, version, _flags = struct.unpack("<qqiB", data.read(21))
+            asteroid, content, version, _complete = struct.unpack(
+                "<qqiB", data.read(21)
+            )
             if fmt >= 3:
                 data.read(44)  # the frame
             levels = data.read(1)[0]

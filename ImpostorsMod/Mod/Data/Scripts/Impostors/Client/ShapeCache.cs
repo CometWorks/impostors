@@ -21,7 +21,7 @@ namespace Impostors
         // Retention, the same as the server's disk cache (Impostors.cfg). The client plugin
         // sets them from its config, the mod keeps these. MaxDays and MaxBuildDays 0 mean no
         // limit, SweepMinutes 0 turns the sweep off.
-        public static long MaxBytes = 64L * 1024 * 1024;
+        public static long MaxBytes = 512L * 1024 * 1024;
         public static int MaxDays = 30;
         public static int MaxBuildDays = 90;
         public static int SweepMinutes = 60;
@@ -639,7 +639,7 @@ namespace Impostors
             return (int)hash;
         }
 
-        private static long Fnv(string text)
+        public static long Fnv(string text)
         {
             var hash = 14695981039346656037;
             foreach (var c in text ?? "")

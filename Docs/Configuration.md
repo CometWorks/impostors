@@ -22,11 +22,11 @@ The file is read only when the server starts, so changes take effect after a res
 | `RebuildSeconds` | 60 | Shortest time between two rebuilds of an impostor |
 | `RefreshSeconds` | 600 | Impostors in view are rebuilt this often to catch paint changes |
 | `ReplicationMargin` | 500 | Impostors arrive this far inside the sync distance already |
-| `CacheMegabytes` | 256 | Disk space for built shapes, so a restart builds only what changed; 0 turns the cache off |
+| `CacheMegabytes` | 1024 | Disk space for built shapes, so a restart builds only what changed; 0 turns the cache off |
 | `CacheDays` | 30 | Cached shapes unused this many days are dropped, 0 for no limit |
 | `CacheBuildDays` | 90 | Cached shapes built this many days ago are dropped even while in use, 0 for no limit |
 | `CacheSweepMinutes` | 60 | Minutes between two background sweeps that drop what the cache limits say, 0 turns them off |
-| `ClientCacheMegabytes` | 64 | Client plugin only: disk space for the shapes received from servers; 0 turns that cache off |
+| `ClientCacheMegabytes` | 512 | Client plugin only: disk space for the shapes received from servers; 0 turns that cache off |
 | `AsteroidPack` | true | Takes asteroid shapes from the world's asteroid pack mod, see [Asteroid pack](AsteroidPack.md) |
 | `AsteroidPackMod` | 0 | Workshop id of the mod with the asteroid pack, 0 for any of the world's mods that has one |
 | `WriteAsteroidPack` | false | Builds every asteroid of the world and writes its asteroid pack mod, once per start |
@@ -60,6 +60,9 @@ Notes:
   it. The WA also saves its index of the cluster's grids there. Older versions used
   `ImpostorsCache`: the first start moves that folder to the new place. If the new folder
   already exists, the old one stays and the log says it can be deleted.
+- The client plugin has its own `Impostors.cfg` in the game's user data folder, with the
+  same options. Its service uses them offline and on a lobby host, `SafeZoneLowerLevel`
+  among them.
 - Cache retention (SE-711) is one policy for the server's cache of built shapes (also the
   client plugin's, for its own builds offline and on a lobby host) and the client's cache of
   received shapes. A low priority background sweep drops the entries unused for
@@ -76,9 +79,6 @@ Notes:
   the session: the server counts on it. Its entries are pruned by the same limits when the
   file is loaded and saved; the sweep deletes the files of other worlds. The Impostors mod
   has no config and uses the defaults; the client plugin uses its own `Impostors.cfg`.
-- The client plugin has its own `Impostors.cfg` in the game's user data folder, with the
-  same options. Its service uses them offline and on a lobby host, `SafeZoneLowerLevel`
-  among them.
 - The client plugin reads `AsteroidOcclusion` and `AsteroidSmoothNormals` for its own builds
   offline and on a lobby host, and `AsteroidPack` and `AsteroidPackMod` for those and for the
   impostors it draws on servers whose world has no Impostors mod. The Impostors mod always

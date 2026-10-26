@@ -39,11 +39,11 @@ public class PluginConfig : IPluginConfig
     private int rebuildSeconds = 60;
     private int refreshSeconds = 600;
     private float replicationMargin = 500f;
-    private int cacheMegabytes = 256;
+    private int cacheMegabytes = 1024;
     private int cacheDays = 30;
     private int cacheBuildDays = 90;
     private int cacheSweepMinutes = 60;
-    private int clientCacheMegabytes = 64;
+    private int clientCacheMegabytes = 512;
     private bool asteroidPack = true;
     private ulong asteroidPackMod;
     private bool writeAsteroidPack;
