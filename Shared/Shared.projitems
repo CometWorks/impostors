@@ -23,6 +23,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)Impostors\ShapeBuild.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Impostors\ShapeCache.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Impostors\VoxelSource.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Impostors\VoxelShapes.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)..\ImpostorsMod\Mod\Data\Scripts\Impostors\Common\AsteroidPack.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)..\ImpostorsMod\Mod\Data\Scripts\Impostors\Common\Protocol.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)..\ImpostorsMod\Mod\Data\Scripts\Impostors\Common\ShapeStore.cs" />

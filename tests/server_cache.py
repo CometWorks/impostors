@@ -3,7 +3,10 @@ with an empty cache and the client joins, then the server restarts and the
 client joins again. The restart must build nothing, take every shape from the
 cache, and keep the versions, so the client's own disk cache sends no shapes
 either. Before the restart the cache folder gets files retention has to drop
-(40 days unused, and enough to go over the cap). A third start turns asteroid
+(40 days unused, built 100 days ago, and enough to go over the cap) and one
+it must keep (built 40 days ago, used half a day ago as uses.bin says). The
+background sweep (SE-711) drops them a couple of minutes after the restart;
+its log line has its timing. A third start turns asteroid
 occlusion off: the asteroids are built again, the grids still come from the
 cache. Shape files sit in subfolders of their first 2 hex digits; the first
 start moves a flat file there. The first start also moves the cache folder of older versions
@@ -28,6 +31,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import rig  # noqa: E402
 import world  # noqa: E402
 from cache import session  # noqa: E402
+from cache_retention import read_uses, write_uses  # noqa: E402
 from scenario import CLIENT, SERVER, check  # noqa: E402
 
 CAP_MB = 8
@@ -35,8 +39,10 @@ CACHE = rig.cache_folder(SERVER.data)
 OLD_CACHE = SERVER.data / "ImpostorsCache"
 MARKER = "moved.marker"
 JUNK = 0x7E00000000000000
+SWEPT = "Impostor cache: swept"
 SUMMARY = re.compile(
-    r"Impostor shapes in the last minute: (\d+) built, (\d+) from the cache, (\d+) unchanged"
+    r"Impostor shapes in the last minute: (\d+) built, (\d+) from the cache, "
+    r"(?:\d+ from the asteroid pack, )?(\d+) unchanged"
 )
 
 
@@ -84,24 +90,35 @@ def summary(timeout: float = 120) -> tuple[int, int, int]:
         time.sleep(5)
 
 
-def seed() -> tuple[list[Path], list[Path]]:
-    """Files retention must drop: unused for 40 days, and 12 MB used yesterday that
-    put the folder over the cap while the real entries are newer"""
+def seed() -> tuple[list[Path], list[Path], Path]:
+    """Files retention must drop: unused for 40 days, built 100 days ago but used
+    lately, and 12 MB used yesterday that put the folder over the cap while the real
+    entries are newer. And one to keep: built 40 days ago, used half a day ago."""
     now = time.time()
     old, filler = [], []
-    for i in range(5):
+    uses = read_uses(CACHE) if (CACHE / "uses.bin").exists() else {}
+    for i in range(10):
         path = path_of(JUNK + i)
         path.parent.mkdir(exist_ok=True)
         path.write_bytes(os.urandom(100 * 1024))
-        os.utime(path, (now - 40 * 86400, now - 40 * 86400))
+        days = 40 if i < 5 else 100
+        os.utime(path, (now - days * 86400, now - days * 86400))
+        if days == 100:
+            uses[JUNK + i] = 0.1
         old.append(path)
+    kept = path_of(JUNK + 300)
+    kept.parent.mkdir(exist_ok=True)
+    kept.write_bytes(os.urandom(10 * 1024))
+    os.utime(kept, (now - 40 * 86400, now - 40 * 86400))
+    uses[JUNK + 300] = 0.5
+    write_uses(CACHE, uses)
     for i in range(12):
         path = path_of(JUNK + 100 + i)
         path.parent.mkdir(exist_ok=True)
         path.write_bytes(os.urandom(1024 * 1024))
         os.utime(path, (now - 86400, now - 86400))
         filler.append(path)
-    return old, filler
+    return old, filler, kept
 
 
 FLAT = path_of(JUNK + 200)
@@ -159,10 +176,11 @@ def main():
             f"{len(real)} files, {sum(real.values()) // 1024} KB",
         )
 
-        old, filler = seed()
+        old, filler, kept = seed()
         OLD_CACHE.mkdir()
         restart()
-        rejoin = session("rejoin after restart")
+        rejoin = session("rejoin after restart", lambda: SWEPT in server_log())
+        check("restart: the background sweep ran", SWEPT in server_log())
         again = builds()
         built, cached, _ = summary()
         check("restart: nothing built", sum(again.values()) == 0, again)
@@ -186,7 +204,11 @@ def main():
             sum(files.values()) <= CAP_MB * 1024 * 1024,
             f"{sum(files.values()) // 1024} KB",
         )
-        check("unused entries dropped", not any(p.exists() for p in old))
+        check(
+            "unused and long ago built entries dropped",
+            not any(p.exists() for p in old),
+        )
+        check("old build used lately kept", kept.exists())
         check(
             "real entries kept",
             all(name in files for name in real),

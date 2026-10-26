@@ -15,8 +15,8 @@ Workshop mods, like tests/ring.py.
 Each grid's line has its level from afar, the levels it stood in at after the jump, the
 full level the service picks for that distance (from the server's entry, rig.full_level) and
 when its real grid drew. PASS or FAIL lines per grid: kept and drawn until the real grid
-draws, never coarser than from afar, at the expected level from PICK_DELAY seconds after the
-jump. Exits with the number of failures. Screenshots of the arrival go to
+draws, never coarser than from afar, at the expected level by PICK_DELAY seconds after the
+jump and from then on (SKIP when the real grid drew before that). Exits with the number of failures. Screenshots of the arrival go to
 ~/.se-test/<task>-shots: from afar, and once the stand-ins have their new level.
 """
 
@@ -95,6 +95,15 @@ def ready_log(totals: dict) -> dict[int, tuple[int, int]]:
             id_, drawable, ready, _ = item.split(":")
             log[int(id_)] = (int(drawable), int(ready))
     return log
+
+
+def drawn(i: dict, totals: dict) -> bool:
+    """Drawn, or the camera is inside its bounding sphere, where the mod never draws it"""
+    if i.get("drawn") == "1":
+        return True
+    camera = [float(v) for v in totals.get("camera", "0,0,0").split(",")]
+    pos = [float(v) for v in i.get("pos", "0,0,0").split(",")]
+    return math.dist(camera, pos) <= float(i.get("r", 0))
 
 
 def shot(api, name: str) -> Path:
@@ -195,7 +204,6 @@ def arrive(api, station: str, center, radius: float, distance: float) -> None:
         drawable, ready = log.get(i, (None, None))
         before = [s for s in samples if ready is None or s[1] < ready]
         levels = [(round(s[0], 1), shape_lod(s[2][i])) for s in before]
-        late = [lv for t, lv in levels if t >= PICK_DELAY]
         print(
             f"{tag} grid {i} ({entries[i]['radius']:.0f} m): level from afar {afar[i]}, "
             f"expected {expected[i]}, stood in at {sorted({lv for _, lv in levels if lv})}, "
@@ -205,9 +213,7 @@ def arrive(api, station: str, center, radius: float, distance: float) -> None:
         check(
             f"{tag} grid {i} kept and drawn until its real grid draws",
             ready is not None
-            and all(
-                s[2][i] is not None and s[2][i].get("drawn") == "1" for s in before
-            ),
+            and all(s[2][i] is not None and drawn(s[2][i], s[3]) for s in before),
             [None if s[2][i] is None else s[2][i].get("drawn") for s in before][:8],
         )
         check(
@@ -215,11 +221,15 @@ def arrive(api, station: str, center, radius: float, distance: float) -> None:
             all(lv is None or lv >= afar[i] for _, lv in levels),
             levels[:8],
         )
-        check(
-            f"{tag} grid {i} at level {expected[i]} for its distance",
-            bool(late) and all(lv == expected[i] for lv in late),
-            levels[:8] if late else f"real one drew within {PICK_DELAY} s: {levels}",
-        )
+        reached = rig.stand_in_reached(levels, expected[i], PICK_DELAY)
+        if reached is None:
+            print(f"SKIP {tag} grid {i}: the real one drew first, {levels}")
+        else:
+            check(
+                f"{tag} grid {i} at level {expected[i]} for its distance",
+                reached,
+                levels[:8],
+            )
 
 
 def main() -> int:

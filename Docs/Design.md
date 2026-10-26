@@ -193,8 +193,21 @@ a number to bump whenever a change to the building gives other shapes for the sa
   across a restart, and the clients' disk caches (see "Disk cache") keep working.
 - Every new build replaces the file of its entity. An entity gone from the scan for a minute
   that no longer exists in the world loses its file (not at once: grids leave the scan while
-  a world unloads, before they are closed). Files unused for `CacheDays` (30) go, and the
-  least recently used ones while the folder is over `CacheMegabytes` (256).
+  a world unloads, before they are closed).
+- Retention (SE-711) runs on a background thread of lowest priority, about 2 minutes after
+  the cache opened and then every `CacheSweepMinutes` (60), give or take a quarter. Files
+  unused for `CacheDays` (30) or built more than `CacheBuildDays` (90) ago go, then the least
+  recently used ones while the folder is over `CacheMegabytes` (1024). A sweep deletes at most
+  200 files, 5 ms apart, each under the cache's lock on its own; with more to do the next
+  one comes after a minute. A build that puts the cache over its cap brings the sweep
+  forward instead of deleting files on the build thread. A file's write time is its build
+  time; a read only notes the time in memory, and `uses.bin` keeps those times across
+  restarts (saved after each sweep and every 10 minutes while they change). Without an
+  entry there, a file counts as unused since its build. Measured offline with
+  `tests/cache_retention.py` on 50000 files: an idle sweep takes about 1 ms of CPU, one that
+  deletes 200 files about 7 ms of CPU (and a second of pauses) with no file reads, saving
+  `uses.bin` about 10 ms and 0.8 MB of writes. Opening the cache scans the files as before,
+  about 100 ms for 50000 files with a warm file system cache.
 - Build slots (SE-678): the list of entries due for a build is made after the picks, once a
   second and after the picks of a zoomed view. Every tick applies the finished builds and
   starts the next listed ones in the slots they freed, so a cache hit or an asteroid build of
@@ -318,22 +331,28 @@ Versions are content hashes of all levels, so (id, version, level) names a shape
   version, a 1 and the level, instead of the shape. The client decodes it from the cache and
   adds it to the shape store with the shape's real size, so both copies of the store stay
   in step.
-- The server counts on what the client announced, so nothing leaves the cache during a
-  session. Retention runs when the file is loaded and when it is saved at the end of the
-  session: an impostor keeps only the version it used last, entries unused for 30 days go,
-  the file keeps under 64 MB with the least recently used entries dropped first, and the
-  files of the worlds used least recently go while all of them are over 64 MB together. A
-  session that grew the cache over 128 MB prunes it and starts over with the server, as does
-  a client asked for a shape its cache doesn't have.
+- The server counts on what the client announced, so nothing leaves the world's file during
+  a session. Its retention runs when the file is loaded and when it is saved at the end of
+  the session: an impostor keeps only the version it used last, entries unused for 30 days
+  or received more than 90 days ago go, and the file keeps under 512 MB with the least
+  recently used entries dropped first. A background sweep (SE-711), about 2 minutes after
+  the load and then every hour, deletes the files of other worlds unused for 30 days, then
+  those used least recently while all of them are over 512 MB together, at most 4 per sweep.
+  The client plugin takes these limits from its config (see
+  [Configuration](Configuration.md)), the mod keeps the defaults. A session that grew the
+  cache over twice the cap prunes it and starts over with the server, as does a client
+  asked for a shape its cache doesn't have.
 - Saving: on a background thread 30 s after the last new shape, every 10 minutes while they
   keep coming, and at the end of the session. A game that quits without unloading the
   session, or crashes, loses only the last seconds. The file has a checksum; a damaged one
-  is dropped. The files of other worlds are trimmed when a world's file is loaded, too.
+  is dropped. Format 2 (SE-711) adds the day an entry was received; a format 1 file loads
+  with the day it was used last in its place.
 - Compatibility: a server without the cache ignores the Inventory, an older client never
   sends one, so the cache needs no new protocol version.
 
 `tests/cache.py` checks it in game: join, leave, add entries retention must drop, join
-again. The rejoin must get no shapes for the unchanged impostors.
+again. The rejoin must get no shapes for the unchanged impostors. Both sessions also check
+what the sweep deletes of the other worlds' files.
 
 A third person or cockpit camera is close enough to the controlled entity for impostors
 kilometers away.
@@ -429,7 +448,9 @@ pack is a mod with the impostors of all of a world's asteroids, at every level, 
 - The pack is one file, `ImpostorsAsteroidPack.bin` (`AsteroidPack` in the mod's `Common`):
   per asteroid its entity id, the hash of the content it was built from (the shape cache's
   input hash), the version and the shapes. The index is read at load; shapes are read from
-  the file when needed.
+  the file when needed. Since format 2 (SE-710) the header also has the asteroid settings it
+  was built with (`VoxelSource.Settings`), and the service warns at the start when they
+  differ from its own, as then no asteroid of the pack matches.
 - Server: `AsteroidPackCache` sits in front of the shape cache. A build whose content hashes
   the same as the pack's entry takes the pack's shapes. A mined asteroid hashes differently
   and is built and cached as before; reset to its original voxels, it hits the pack again.
@@ -450,8 +471,8 @@ pack is a mod with the impostors of all of a world's asteroids, at every level, 
   joining client gets. They are used only with that save (the game time of its
   `Sandbox.sbc`): an older backup of the world, or a world that crashed before its next
   save, may hold other voxels. They also carry a hash of what the shapes depend on besides
-  the voxels (`VoxelSource.Settings`: the occlusion setting and the material colors); with
-  other settings they are not used, and every asteroid is read again.
+  the voxels (`VoxelSource.Settings`: the occlusion and normals settings and the material
+  colors); with other settings they are not used, and every asteroid is read again.
 - Client: the mod adds the pack's asteroids (id, version, level mask) to its Inventory (see
   "Disk cache"), so the server sends the 14 byte reference instead of a shape, and the client
   reads the shape from the pack. A client without the pack gets the shapes as before. A
@@ -462,6 +483,56 @@ pack is a mod with the impostors of all of a world's asteroids, at every level, 
 - A pack written with `AsteroidPackMaxLevel` below 64 has entries without their finest levels.
   Clients use what is there, the server builds those asteroids itself.
 
+## Early asteroids (SE-712)
+
+Over an asteroid ring the client used to wait for the server for every asteroid: the server
+picks a player's impostors once a second, starts two builds or pack hits every 10 ticks, and
+sends a state and a shape (or a reference into the cache or the pack) for each. Above the
+Octahedron ring that took a minute or more for all of them. Yet the asteroid pack and the
+client's disk cache already have the shapes, and asteroids rarely change. So the client
+shows those before the server sends them (`EarlyAsteroids` in the mod's `Client`); the client
+cache saves the delay, the server cache saves rebuilding the levels.
+
+- Where they are: since format 3 every pack entry has its frame (radius, position,
+  orientation), and the disk cache keeps the last state the server sent for each asteroid,
+  as an entry of level 255 next to the shapes of its version. Retention treats it like a
+  shape; the Inventory leaves it out. Where both have an asteroid, the cache's state wins:
+  it is what the server sent last. An older pack still works as before, it just shows
+  nothing early.
+- When: at load, every second, and within 10 ticks when the view jumped a kilometer or
+  turned by an eighth of its field of view. The client takes the asteroids within the
+  server's asteroid range and at least its `MinPixels` across, picks their levels the way
+  the server does (the same level for the on-screen size, fitted into `MaxQuadsPerFrame`
+  less half the quads of the server's impostors), and reads their shapes for 2 ms per
+  tick, those in view and the large ones first. The range and `MinPixels` come with the
+  Welcome. The client keeps the last ones per world (`asteroid-range.txt` in its storage),
+  so the next join shows the asteroids before the Welcome; the first join of a world uses
+  the session's view distance and 3 pixels until then.
+- Handing over: an early impostor is a normal one of the renderer, by its id, so the
+  server's state for it never adds a second one. From that state on it is the server's:
+  with the same version it keeps the shape it has until the server's level arrives, usually
+  a 14 byte reference into the pack or the cache. With another version (the asteroid was
+  mined since the pack was made or the cache got it) the old shape shows until the server's
+  comes, and the cache keeps the new shape and state for the next join. A pack built with
+  other asteroid settings than the server's (see "Asteroid pack") has other versions for every
+  asteroid: they all show early and swap, once per join until the cache has the server's.
+  Ids the server sent a state for or removed are left to it until a new server instance.
+- Streaming in: an early impostor hides when the real voxel map draws, by the same rules as
+  the server's impostors (see "Streaming in"), but the client doesn't report it ready, the
+  server doesn't know it.
+- Offline and on a lobby host the local player's renderer has no disk cache, so only the
+  pack's asteroids show early, and not those within the camera's far plane, where the game
+  draws the real ones.
+- A new server instance (a restart or another cluster node) drops every impostor as before;
+  the early ones are back within a second, the server's follow.
+- The server sends what it sent before: the client still needs the states to know the
+  versions. The bytes the pack and the cache save are the shapes, see the numbers below.
+- `stats.txt` counts them (`early`, `earlyloads`, `earlyms`, `kept`, `swapped`, `swaplog`),
+  and has per impostor the tick it first had a shape and was first drawn. A `noearly` file
+  in the mod's storage turns them off, for the rigs' baselines.
+
+`tests/early_asteroids.py` measures them, see [Asteroid pack](AsteroidPack.md#early-asteroids).
+
 ## Protocol
 
 Mod networking on channel 47213, reliable messages up to 16 KB:
@@ -469,7 +540,7 @@ Mod networking on channel 47213, reliable messages up to 16 KB:
 | Message | Direction | Content |
 |---|---|---|
 | Hello | client to server | protocol version, whether the client has nothing from the server yet, whether an Inventory follows; at load and every 30 s |
-| Welcome | server to client | protocol version, server instance id, `MaxQuadsPerFrame` |
+| Welcome | server to client | protocol version, server instance id, `MaxQuadsPerFrame`, the asteroid range and `MinPixels` (see "Early asteroids") |
 | States | server to client | impostor states: id, kind (grid, voxel or safe zone), version, level, radius, position, orientation, velocity, safe zone tint (74 bytes each); a level from the shape store switches the impostor to it |
 | Remove | server to client | impostor ids |
 | ShapeData | server to client | count, then id, version and shape per impostor; or a 1 and the level for a shape in the client's disk cache |
@@ -590,7 +661,16 @@ from afar anyway.
   one cell per voxel above the iso level. Colors come from the material's mined ore through a
   small table (stone, iron, ice and the rest), on a background thread.
 - Quads are shaded with smoothed normals: an asteroid seen along an axis would otherwise be
-  one flat color.
+  one flat color. Each level pools the voxels' content into its cells as a fill, the share of
+  the cell inside the rock, blurs it by a Gaussian of one cell, and every face takes the
+  gradient at its center, halfway to the empty cell in front (`AsteroidSmoothNormals`,
+  SE-710). Before that the normal was the gradient of the filled cells, blurred by 1.5 cells,
+  one per cell: it followed the cells' blocks, and the coarse levels a ring gets under the
+  quad budget looked like lit cubes. That is still what `AsteroidSmoothNormals` off gives,
+  with the same content hashes, so caches and packs of it stay valid. A quad has one color,
+  so a face can't shade across itself; turning the faces of a cell with the rock is what
+  brings the coarse levels closer to it. `tests/asteroid_normals.py` measures both against a
+  made-up rock, ray marched, at the size each level is drawn at.
 - The coarsest level is pooled from voxels two levels finer: a cell is filled when at least
   half of its voxels are. The game's own coarse voxels erode thin parts, and level 8 looked
   half as large as level 16. That level also gets at least 6 cells across a rock that is

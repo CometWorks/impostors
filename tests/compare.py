@@ -26,6 +26,9 @@ game running), and the rig's IMP_RESOLUTION and IMP_DISPLAY (see rig.py).
         ["~/.config/SpaceEngineers/Blueprints/local/Visitor Ion" | asteroid:Asteroid512-008.vx2
          | safezone:500 | safezone:600,300,400] [distances...]
 
+An asteroid of another world, like a saved one of "Octahedron - Seed 2", goes by its path; the
+file name needs the storage size after "Asteroid", as in Asteroid512-Seed2-1023.vx2.
+
 A safe zone target is an enabled admin zone: a sphere of that radius or a box of that size.
 IMP_ZONE=<radius> puts a grid inside a sphere zone of that radius around GRID_POSITION: the
 impostor shots show both, the grid's impostor tinted with the zone's color. IMP_ZONE_LOWER=1
@@ -65,7 +68,7 @@ ZONE = TARGET.removeprefix("safezone:") if TARGET.startswith("safezone:") else N
 NAME = (
     "safezone-" + ZONE.replace(",", "x")
     if ZONE
-    else (ASTEROID.removesuffix(".vx2") if ASTEROID else Path(TARGET).name)
+    else (Path(ASTEROID).stem if ASTEROID else Path(TARGET).name)
 ).replace(" ", "-")
 # Tells runs with other settings apart, for example another sun
 if os.environ.get("IMP_TAG"):

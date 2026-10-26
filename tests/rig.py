@@ -35,6 +35,9 @@ Paths, all overridable by environment variables:
     IMP_MOD_FOLDER            the mod the worlds list (ImpostorsMod/Mod of this
                               working copy), for another version of it
 
+IMP_SMOOTH=0 or 1 sets AsteroidSmoothNormals in every plugin config a test
+writes (plugin_config), unless the test sets it itself.
+
 IMP_RESOLUTION sets the clients' screen size (1280x720). IMP_DISPLAY=:N gives
 the clients a real window on that X display instead of --headless. Headless
 clients can't render on the NVIDIA GPU (Remote drops its Vulkan driver),
@@ -242,6 +245,17 @@ def full_level(kind: str, radius: float, distance: float, built: int) -> int:
     return min(lod, LODS[max(built, 1) - 1])
 
 
+def stand_in_reached(levels: list, full: int, delay: float) -> bool | None:
+    """Whether a stand-in shows its full level by `delay` seconds after the jump at the
+    latest and keeps it until its real entity draws. `levels`: (seconds, level) samples
+    before that. None when the real entity drew first, before `delay`: nothing to check.
+    """
+    reached = next((k for k, (_, lv) in enumerate(levels) if lv == full), None)
+    if reached is None:
+        return None if not levels or levels[-1][0] < delay else False
+    return levels[reached][0] <= delay and all(lv == full for _, lv in levels[reached:])
+
+
 def parse_near(reply: str) -> dict[int, dict]:
     """The entries of a `!iprobe near` reply by id: kind, AABB center and radius, levels
     built"""
@@ -270,7 +284,10 @@ def _value(value) -> str:
 
 def plugin_config(**options) -> str:
     """Impostors.cfg with these options, by option name; the rest keep their
-    defaults"""
+    defaults. IMP_SMOOTH=0 or 1 sets AsteroidSmoothNormals where the caller
+    doesn't."""
+    if os.environ.get("IMP_SMOOTH") in ("0", "1"):
+        options.setdefault("AsteroidSmoothNormals", os.environ["IMP_SMOOTH"] == "1")
     values = "".join(f"<{k}>{_value(v)}</{k}>" for k, v in options.items())
     return (
         '<?xml version="1.0" encoding="utf-8"?>\n'

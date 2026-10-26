@@ -22,6 +22,10 @@ public sealed class CellVolume
     // Weight of the samples from angled surfaces (sloped armor) per cell, null when none
     private int[] angled;
 
+    // Share of each cell the content fills, 0 to 1, from the voxel densities; null when the
+    // source gave none. Smooth normals follow it instead of the filled cells.
+    private float[] fill;
+
     public CellVolume(Vector3I size, float cellSize, Vector3 origin, byte lod)
     {
         Size = Vector3I.Clamp(size, Vector3I.One, new Vector3I(255));
@@ -67,6 +71,16 @@ public sealed class CellVolume
         }
     }
 
+    // Adds the content of a voxel at this local position to its cell's fill: share is the part
+    // of the cell the voxel fills, its density times its volume over the cell's
+    public void AddFill(Vector3 local, float share)
+    {
+        if (!TryGetCell(local, out var cell))
+            return;
+        fill ??= new float[weight.Length];
+        fill[Index(cell.X, cell.Y, cell.Z)] += share;
+    }
+
     // A level half as fine: each cell pools its 8 child cells, filled when at least minFilled
     // of them are, with their average color. Downsampling keeps the cells on this volume's
     // lattice, where building a coarse level from the content again would not.
@@ -74,14 +88,18 @@ public sealed class CellVolume
     {
         var coarse = new CellVolume((Size + 1) / 2, CellSize * 2, Origin, lod);
         var filled = new int[coarse.weight.Length];
+        if (fill != null)
+            coarse.fill = new float[coarse.weight.Length];
         for (var z = 0; z < Size.Z; z++)
         for (var y = 0; y < Size.Y; y++)
         for (var x = 0; x < Size.X; x++)
         {
             var i = Index(x, y, z);
+            var j = coarse.Index(x / 2, y / 2, z / 2);
+            if (fill != null)
+                coarse.fill[j] += fill[i] / 8;
             if (weight[i] == 0)
                 continue;
-            var j = coarse.Index(x / 2, y / 2, z / 2);
             coarse.red[j] += red[i];
             coarse.green[j] += green[i];
             coarse.blue[j] += blue[i];
@@ -300,21 +318,31 @@ public sealed class CellVolume
     );
 
     // The occupancy blurred by a Gaussian of this width, in cells; smoothed normals are its
-    // gradient, so neighboring cells get nearly the same normal and shade without speckle
+    // gradient, so neighboring cells get nearly the same normal and shade without speckle.
+    // The occupancy is 1 for a filled cell, so the normals follow the blocks of the cells,
+    // which shows on the coarse levels.
     private const float SmoothSigma = 1.5f;
-    private const int SmoothRadius = 3;
+
+    // The same for the fill where the source gave one, which is smooth already: blurred less,
+    // the normals keep more of the rock's shape (tests/asteroid_normals.py)
+    private const float FillSigma = 1f;
 
     private float[] density;
 
     private void BlurOccupancy()
     {
-        var kernel = new float[2 * SmoothRadius + 1];
-        for (var k = -SmoothRadius; k <= SmoothRadius; k++)
-            kernel[k + SmoothRadius] = (float)Math.Exp(-k * k / (2 * SmoothSigma * SmoothSigma));
+        var sigma = fill != null ? FillSigma : SmoothSigma;
+        var radius = (int)Math.Ceiling(2 * sigma);
+        var kernel = new float[2 * radius + 1];
+        for (var k = -radius; k <= radius; k++)
+            kernel[k + radius] = (float)Math.Exp(-k * k / (2 * sigma * sigma));
 
         var source = new float[weight.Length];
         for (var i = 0; i < source.Length; i++)
-            source[i] = weight[i] > 0 ? 1 : 0;
+            source[i] =
+                fill != null ? Math.Min(fill[i], 1)
+                : weight[i] > 0 ? 1
+                : 0;
 
         // Separable: along X, then Y, then Z; outside the volume is empty
         var target = new float[source.Length];
@@ -328,13 +356,13 @@ public sealed class CellVolume
             {
                 var sum = 0f;
                 var center = p[axis];
-                for (var k = -SmoothRadius; k <= SmoothRadius; k++)
+                for (var k = -radius; k <= radius; k++)
                 {
                     var c = center + k;
                     if (c < 0 || c >= size[axis])
                         continue;
                     p[axis] = c;
-                    sum += kernel[k + SmoothRadius] * source[Index(p[0], p[1], p[2])];
+                    sum += kernel[k + radius] * source[Index(p[0], p[1], p[2])];
                 }
                 p[axis] = center;
                 target[Index(p[0], p[1], p[2])] = sum;
@@ -358,19 +386,29 @@ public sealed class CellVolume
             Density(x, y, z - 1) - Density(x, y, z + 1)
         );
 
-    // The surface normal at a filled cell: down the blurred occupancy. Where it points nearly
-    // along the face or away from it, it is tilted towards the face's own normal, gradually,
-    // so the shading has no steps there.
+    // The surface normal at a filled cell: down the blurred occupancy. With the fill of the
+    // voxels it is taken at the face's center, halfway to the empty cell in front of it: the
+    // faces of one cell then turn as the surface does there, which shades the few large cells
+    // of a coarse level more like the rock than one normal per cell does. Where it points
+    // nearly along the face or away from it, it is tilted towards the face's own normal,
+    // gradually, so the shading has no steps there; less with the fill, where the normals of
+    // the faces are closer to the rock's already.
     private ushort SmoothNormal(int x, int y, int z, int face)
     {
         var gradient = Gradient(x, y, z);
+        if (fill != null)
+        {
+            var front = new Vector3I(x, y, z) + Vector3I.Round(FaceVectors[face]);
+            gradient += Gradient(front.X, front.Y, front.Z);
+        }
         if (gradient.LengthSquared() < 1e-8f)
             return FaceNormals[face];
 
         var normal = Vector3.Normalize(gradient);
         var facing = Vector3.Dot(normal, FaceVectors[face]);
-        if (facing < 0.3f)
-            normal = Vector3.Normalize(normal + FaceVectors[face] * (0.3f - facing) * 2);
+        var tilt = fill != null ? 0.15f : 0.3f;
+        if (facing < tilt)
+            normal = Vector3.Normalize(normal + FaceVectors[face] * (tilt - facing) * 2);
         return Shape.EncodeNormal(normal);
     }
 

@@ -50,9 +50,6 @@ public sealed class VoxelSource : ImpostorSource, IDisposable
 
     private static readonly Vector3I Stone = OreColors["Stone"];
 
-    // Cells across the content at the coarsest level, at least
-    private const int CoarsestCells = 6;
-
     private readonly IPluginConfig config;
     private readonly IPluginLogger log;
 
@@ -67,8 +64,8 @@ public sealed class VoxelSource : ImpostorSource, IDisposable
     // Known hashes loaded with the world, for voxel maps not seen yet
     private readonly Dictionary<long, long> loaded;
 
-    // Hash of what the shapes depend on besides the voxels: the material colors and the
-    // occlusion setting. Known hashes are used only with the same settings, else the cache
+    // Hash of what the shapes depend on besides the voxels: the material colors, the
+    // occlusion and the normals setting. Known hashes are used only with the same settings, else the cache
     // would give shapes of the old ones.
     public readonly long Settings;
 
@@ -78,6 +75,8 @@ public sealed class VoxelSource : ImpostorSource, IDisposable
         this.log = log;
         var settings = InputHash.Start((byte)ImpostorKind.Voxel);
         settings.Add(config.AsteroidOcclusion);
+        if (config.AsteroidSmoothNormals)
+            settings.Add(VoxelShapes.SmoothVersion);
         foreach (var color in MaterialColors())
             settings.Add(color);
         Settings = settings.Value;
@@ -262,7 +261,7 @@ public sealed class VoxelSource : ImpostorSource, IDisposable
 
     public override string Describe(ImpostorEntry entry) =>
         entry.Tag is MyVoxelMap { Storage: not null } map
-            ? $"voxels={map.Storage.Size.X}x{map.Storage.Size.Y}x{map.Storage.Size.Z} occlusion={config.AsteroidOcclusion}"
+            ? $"voxels={map.Storage.Size.X}x{map.Storage.Size.Y}x{map.Storage.Size.Z} occlusion={config.AsteroidOcclusion} smooth={config.AsteroidSmoothNormals}"
             : "";
 
     // Colors by voxel material index, looked up on the game thread
@@ -293,6 +292,7 @@ public sealed class VoxelSource : ImpostorSource, IDisposable
         var colors = MaterialColors();
 
         var occluded = config.AsteroidOcclusion;
+        var smooth = config.AsteroidSmoothNormals;
         var id = map.EntityId;
         int edit;
         long knownInput;
@@ -304,14 +304,14 @@ public sealed class VoxelSource : ImpostorSource, IDisposable
         return build =>
         {
             // Unedited since it was hashed: the pack or the cache has its shapes, unless the
-            // cache dropped them or the occlusion setting changed since
+            // cache dropped them or the asteroid settings changed since
             if (knownInput != 0)
             {
                 var reused = build.Reuse(knownInput);
                 if (reused != null)
                     return reused;
             }
-            var shapes = Build(build, storage, size, corner, colors, occluded);
+            var shapes = Build(build, storage, size, corner, colors, occluded, smooth);
             Hashed(id, edit, build.Input);
             return shapes;
         };
@@ -323,130 +323,53 @@ public sealed class VoxelSource : ImpostorSource, IDisposable
         Vector3I size,
         Vector3 corner,
         Vector3I[] colors,
-        bool occluded
+        bool occluded,
+        bool smooth
     )
     {
-        // The levels read from the storage, from 8 up to the first that reads single voxels;
-        // levels 4 and 2 are downsampled from 8
-        var shapes = new byte[ImpostorEntry.Lods.Length][];
-        var first = Array.IndexOf(ImpostorEntry.Lods, (byte)8);
-        var levels = new List<(int index, int voxelLod)>();
-        for (var i = first; i < shapes.Length; i++)
-        {
-            // The coarsest voxel level of detail with at least this many voxels along the longest axis
-            var voxelLod = Math.Max(
-                0,
-                (int)Math.Floor(Math.Log(size.AbsMax() / (double)ImpostorEntry.Lods[i], 2))
-            );
-            levels.Add((i, voxelLod));
-            if (voxelLod == 0)
-                break;
-        }
-
         // The voxels of every level first: they are what the shapes are built from, and the
-        // same voxels reuse the shapes built before. The coarsest level is pooled from voxels
-        // two levels finer, see below.
-        var reads = new MyStorageData[levels.Count];
+        // same voxels reuse the shapes built before
+        var levels = VoxelShapes.Levels(size);
+        var contents = new byte[levels.Count][];
+        var materials = new byte[levels.Count][];
         var input = InputHash.Start((byte)ImpostorKind.Voxel);
         input.Add(size);
         input.Add(Vector3I.Round(corner * 16)); // Float noise of the matrix
         input.Add(occluded);
+        if (smooth)
+            input.Add(VoxelShapes.SmoothVersion);
         foreach (var color in colors)
             input.Add(color);
         for (var k = levels.Count - 1; k >= 0; k--)
         {
-            var voxelLod = levels[k].voxelLod;
-            if (k == 0 && k < levels.Count - 1 && voxelLod > 0)
-                voxelLod = Math.Max(0, voxelLod - 2);
-            var voxels = Vector3I.Max(Vector3I.One, size >> voxelLod);
+            var voxels = VoxelShapes.ReadSize(size, VoxelShapes.ReadLod(levels, k));
             var read = new MyStorageData();
             read.Resize(voxels);
             storage.ReadRange(
                 read,
                 MyStorageDataTypeFlags.ContentAndMaterial,
-                voxelLod,
+                VoxelShapes.ReadLod(levels, k),
                 Vector3I.Zero,
                 voxels - 1
             );
-            reads[k] = read;
-            input.Add(read[MyStorageDataTypeEnum.Content], read.SizeLinear);
-            input.Add(read[MyStorageDataTypeEnum.Material], read.SizeLinear);
+            contents[k] = read[MyStorageDataTypeEnum.Content];
+            materials[k] = read[MyStorageDataTypeEnum.Material];
+            input.Add(contents[k], read.SizeLinear);
+            input.Add(materials[k], read.SizeLinear);
         }
         var reused = build.Reuse(input);
         if (reused != null)
             return reused;
 
-        // Finest first, for the extent of the content. The coarsest level is pooled from voxels
-        // two levels finer, a cell filled when at least half of them are: the game's own
-        // coarse voxels were eroded there, and level 8 looked half as large as level 16. It
-        // also gets at least CoarsestCells cells across a rock that is small for its storage.
-        var extent = 0f;
-        CellVolume level8 = null;
-        for (var k = levels.Count - 1; k >= 0; k--)
-        {
-            var (i, voxelLod) = levels[k];
-            var cellSize = (float)(1 << voxelLod);
-            var pooled = k == 0 && k < levels.Count - 1 && voxelLod > 0;
-            if (pooled)
-            {
-                if (extent > 0)
-                    cellSize = Math.Min(cellSize, extent / CoarsestCells);
-                voxelLod = Math.Max(0, voxelLod - 2);
-            }
-
-            var voxels = Vector3I.Max(Vector3I.One, size >> voxelLod);
-            var voxelSize = (float)(1 << voxelLod);
-            var data = reads[k];
-            reads[k] = null;
-
-            var cells = Vector3I.Ceiling(new Vector3(size) / cellSize);
-            var volume = new CellVolume(cells, cellSize, corner, ImpostorEntry.Lods[i]);
-            var min = new Vector3I(int.MaxValue);
-            var max = new Vector3I(int.MinValue);
-            var p = Vector3I.Zero;
-            for (p.Z = 0; p.Z < voxels.Z; p.Z++)
-            for (p.Y = 0; p.Y < voxels.Y; p.Y++)
-            for (p.X = 0; p.X < voxels.X; p.X++)
-            {
-                if (data.Content(ref p) <= MyVoxelConstants.VOXEL_ISO_LEVEL)
-                    continue;
-                volume.Add(
-                    corner + (new Vector3(p) + 0.5f) * voxelSize,
-                    colors[data.Material(ref p)]
-                );
-                min = Vector3I.Min(min, p);
-                max = Vector3I.Max(max, p);
-            }
-
-            // A pooled cell is filled when at least half of its voxels are
-            if (pooled)
-                volume.DropBelow(
-                    Math.Max(1, (int)Math.Round(Math.Pow(cellSize / voxelSize, 3) / 2))
-                );
-            if (extent == 0 && max.X >= min.X)
-                extent = (max - min + 1).AbsMax() * voxelSize;
-            shapes[i] = volume.ToShape(smooth: true, occluded);
-            BuildTiming.Mark(ImpostorEntry.Lods[i], shapes[i]);
-            if (i == first)
-                level8 = volume;
-        }
-
-        // Far asteroids cover a few pixels, where only their color is left to see. A coarse
-        // cell is filled when half of its 8 children are, which keeps the volume; a thin rock
-        // that would vanish that way keeps every cell with a filled child.
-        var coarse = level8;
-        for (var i = first - 1; i >= 0 && coarse != null; i--)
-        {
-            var finer = coarse;
-            coarse = finer.Downsample(ImpostorEntry.Lods[i], 4);
-            shapes[i] = coarse.ToShape(smooth: true, occluded);
-            if (shapes[i].Length <= Shape.HeaderSize)
-            {
-                coarse = finer.Downsample(ImpostorEntry.Lods[i], 1);
-                shapes[i] = coarse.ToShape(smooth: true, occluded);
-            }
-            BuildTiming.Mark(ImpostorEntry.Lods[i], shapes[i]);
-        }
-        return shapes;
+        return VoxelShapes.Build(
+            size,
+            corner,
+            colors,
+            occluded,
+            smooth,
+            levels,
+            contents,
+            materials
+        );
     }
 }

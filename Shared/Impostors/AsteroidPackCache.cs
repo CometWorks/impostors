@@ -70,12 +70,15 @@ public sealed class AsteroidPackCache : IShapeCache
         }
     }
 
-    // Writes the pack of these asteroids: (id, content hash, shapes in the places of
-    // ImpostorEntry.Lods, the state with the frame clients show them at). Levels finer than maxLod are left out, those entries then serve
+    // Writes the pack of these asteroids, built with these asteroid settings
+    // (VoxelSource.Settings): (id, content hash, shapes in the places of ImpostorEntry.Lods,
+    // the state with the frame clients show them at). Levels finer than maxLod are left out,
+    // those entries then serve
     // only clients. Returns the file's size.
     public static long Write(
         string path,
         string world,
+        long settings,
         IEnumerable<(long id, long input, byte[][] shapes, ImpostorState frame)> asteroids,
         byte maxLod
     )
@@ -87,6 +90,7 @@ public sealed class AsteroidPackCache : IShapeCache
             writer.Write(AsteroidPack.Magic);
             writer.Write(AsteroidPack.Format);
             writer.Write(world ?? "");
+            writer.Write(settings);
             writer.Write(list.Count);
             var kept = new List<byte[][]>();
             foreach (var (id, input, shapes, frame) in list)

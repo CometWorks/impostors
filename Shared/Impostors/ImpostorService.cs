@@ -192,7 +192,16 @@ public sealed class ImpostorService : IDisposable
         if (config.Grids)
             sources.Add(new GridSource(config));
         if (config.Asteroids)
-            sources.Add(new VoxelSource(config, log));
+        {
+            var voxels = new VoxelSource(config, log);
+            sources.Add(voxels);
+            if (asteroids != null && asteroids.Settings != voxels.Settings)
+                log.Warning(
+                    asteroids.Settings == 0
+                        ? "The asteroid pack is from before AsteroidSmoothNormals, it matches only with that off: write it again"
+                        : "The asteroid pack was built with other asteroid settings (AsteroidOcclusion, AsteroidSmoothNormals or the ore colors), its asteroids get built: write it again"
+                );
+        }
         if (config.SafeZones)
             sources.Add(new SafeZoneSource());
         foreach (var factory in ExtraSources)
@@ -214,12 +223,7 @@ public sealed class ImpostorService : IDisposable
             return null;
         try
         {
-            var cache = DiskShapeCache.Get(
-                CacheFolder,
-                config.CacheMegabytes * 1024L * 1024,
-                config.CacheDays,
-                log
-            );
+            var cache = DiskShapeCache.Get(CacheFolder, config, log);
             log.Info(
                 $"Impostor cache: {cache.Count} entries, {cache.Bytes / 1024} KB in {cache.Folder}"
             );
@@ -442,6 +446,7 @@ public sealed class ImpostorService : IDisposable
             var bytes = AsteroidPackCache.Write(
                 path,
                 world,
+                sources.OfType<VoxelSource>().First().Settings,
                 asteroids.Select(e => (e.Id, e.Input, e.Shapes, e.State(0))),
                 (byte)config.AsteroidPackMaxLevel
             );
@@ -575,7 +580,7 @@ public sealed class ImpostorService : IDisposable
         Send(sender);
     }
 
-    // Bounds what a client can make us keep, far more than a 64 MB cache holds
+    // Bounds what a client can make us keep, far more than a 512 MB cache holds
     private const int MaxOnDisk = 1 << 18;
 
     // The client's disk cache, in one or more messages after each Welcome of a new instance
