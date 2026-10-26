@@ -2,9 +2,13 @@
 the scenario world, leaves, and joins again. The second session must get no
 shapes for the unchanged impostors, only the few bytes that tell the client to
 take them from its cache. Before the second join the cache file gets entries
-retention has to drop (a month old, superseded versions, over the size cap)
-and another world's file, so the end checks the cap too. Prints one PASS or
-FAIL line per check and exits with the number of failures.
+retention has to drop (a month old, received over 90 days ago, superseded
+versions, over the size cap), so the end checks the cap too. The files of
+other worlds go in the background sweep (SE-711): before the first join the
+index lists one unused for 40 days, which must go, and two recent ones, which
+must stay; the second join pushes all of them over the cap, so those two go
+too, the older first. Prints one PASS or FAIL line per check and exits with
+the number of failures.
 
     uv run --no-project --with httpx --with pillow python tests/cache.py
     IMP_PLUGIN=1 ...    # the client runs the client plugin, the world has no mod
@@ -27,8 +31,10 @@ from scenario import CLIENT, PLUGIN, SERVER, check, wait_stats  # noqa: E402
 # ShapeCache.cs
 MAX_BYTES = 64 * 1024 * 1024
 MAX_DAYS = 30
+MAX_BUILD_DAYS = 90
 MAGIC = 0x43504D49
-ENTRY_HEADER = 8 + 4 + 1 + 4 + 4
+FORMAT = 2
+ENTRY_HEADER = 8 + 4 + 1 + 4 + 4 + 4
 
 FAR = (world.SHIP, world.STATION, world.FAR, world.ROCK_FAR)
 
@@ -58,27 +64,32 @@ def checksum(data: bytes) -> int:
     return h
 
 
-def read_pack(path: Path) -> list[tuple[int, int, int, int, bytes]]:
+def read_pack(path: Path) -> list[tuple[int, int, int, int, int, bytes]]:
+    """Entries of a world's file: id, version, level, day used, day received, shape"""
     raw = path.read_bytes()
     (length,) = struct.unpack_from("<i", raw)
     data = raw[4 : 4 + length]
     (stored,) = struct.unpack_from("<I", raw, 4 + length)
     assert checksum(data) == stored, f"{path} checksum"
     magic, fmt, count = struct.unpack_from("<iBi", data)
-    assert magic == MAGIC and fmt == 1
+    assert magic == MAGIC and fmt == FORMAT
     pos, entries = 9, []
     for _ in range(count):
-        id_, version, lod, day, size = struct.unpack_from("<qiBii", data, pos)
+        id_, version, lod, day, received, size = struct.unpack_from(
+            "<qiBiii", data, pos
+        )
         pos += ENTRY_HEADER
-        entries.append((id_, version, lod, day, data[pos : pos + size]))
+        entries.append((id_, version, lod, day, received, data[pos : pos + size]))
         pos += size
     return entries
 
 
 def write_pack(path: Path, entries) -> None:
-    body = bytearray(struct.pack("<iBi", MAGIC, 1, len(entries)))
-    for id_, version, lod, day, shape in entries:
-        body += struct.pack("<qiBii", id_, version, lod, day, len(shape)) + shape
+    body = bytearray(struct.pack("<iBi", MAGIC, FORMAT, len(entries)))
+    for id_, version, lod, day, received, shape in entries:
+        body += (
+            struct.pack("<qiBiii", id_, version, lod, day, received, len(shape)) + shape
+        )
     path.write_bytes(
         struct.pack("<i", len(body)) + bytes(body) + struct.pack("<I", checksum(body))
     )
@@ -88,9 +99,10 @@ def today() -> int:
     return int(time.time() // 86400) + 719162  # days since 0001-01-01, as DateTime
 
 
-def session(name: str) -> dict:
+def session(name: str, until=None) -> dict:
     """Joins, waits until the far grids and the asteroid have their shapes and the shapes
-    settled, leaves through the menu so the cache gets saved. The client's totals."""
+    settled, and for until() if given (4 minutes at most), leaves through the menu so the
+    cache gets saved. The client's totals."""
     CLIENT.launch(SERVER.port)
     api = CLIENT.wait_api()
     rig.wait_world(api)
@@ -114,6 +126,10 @@ def session(name: str) -> dict:
             for k in ("shapes", "shapekb", "cached", "cachekb", "stored", "restored")
         },
     )
+    if until:
+        deadline = time.monotonic() + 240
+        while not until() and time.monotonic() < deadline:
+            time.sleep(5)
     # Remote quits without unloading the session, as a crash would: the cache must have
     # saved itself 30 s after the last new shape
     time.sleep(45)
@@ -129,29 +145,51 @@ def session(name: str) -> dict:
     return totals
 
 
-def seed(own: Path) -> dict:
-    """Adds what retention must drop to the client's cache, older in use than the
-    real entries, and a second world's file used before this one"""
+def index_path() -> Path:
+    return storage() / f"{prefix()}cache-index.txt"
+
+
+def other_worlds() -> dict[str, Path]:
+    """Files of other worlds before the first join, listed in the index: one unused for 40
+    days, two recent ones. The index tells their size, the sweep goes by it, so the files
+    themselves stay small."""
+    d = today()
+    worlds = {"unused": (40, 1), "older": (3, 40), "recent": (1, 20)}  # days ago, MB
+    lines, files = [], {}
+    for n, (name, (days, mb)) in enumerate(worlds.items()):
+        file = f"cache-00000000deadbe{n:02x}.bin"
+        files[name] = storage() / f"{prefix()}{file}"
+        write_pack(
+            files[name], [(9_100_000_000_000_000 + n, 3, 64, d - days, d - days, b"x")]
+        )
+        lines.append(f"{file} {mb * 1024 * 1024} {d - days}")
+    index_path().write_text("\n".join(lines) + "\n")
+    return files
+
+
+def seed(own: Path) -> int:
+    """Adds what retention must drop to the client's cache, older in use than the real
+    entries; how many real entries it had"""
     real = read_pack(own)
     d = today()
     junk_id = 9_000_000_000_000_000
-    old = [(junk_id + i, 1, 16, d - MAX_DAYS - 5, os.urandom(1000)) for i in range(50)]
+    old = [
+        (junk_id + i, 1, 16, d - MAX_DAYS - 5, d - MAX_DAYS - 5, os.urandom(1000))
+        for i in range(50)
+    ]
+    # Used today, but received longer ago than MAX_BUILD_DAYS
+    stale = [
+        (junk_id + 500 + i, 1, 16, d, d - MAX_BUILD_DAYS - 5, os.urandom(1000))
+        for i in range(50)
+    ]
     # An older version of each real impostor, used before the real one
-    superseded = [(i, v ^ 0x5A5A, lod, d, s) for i, v, lod, _, s in real]
+    superseded = [(i, v ^ 0x5A5A, lod, d, r, s) for i, v, lod, _, r, s in real]
     # 72 MB of other impostors, pushes the world's file over the cap
-    big = [(junk_id + 1000 + i, 7, 64, d, os.urandom(72 * 1024)) for i in range(1024)]
-    write_pack(own, old + superseded + big + real)
-
-    other = own.with_name(f"{prefix()}cache-00000000deadbeef.bin")
-    write_pack(
-        other,
-        [(junk_id + 5000 + i, 3, 64, d - 2, os.urandom(64 * 1024)) for i in range(160)],
-    )
-    index = storage() / f"{prefix()}cache-index.txt"
-    lines = [l for l in index.read_text().splitlines() if "deadbeef" not in l]
-    lines.insert(0, f"cache-00000000deadbeef.bin {160 * 64 * 1024} {d - 2}")
-    index.write_text("\n".join(lines) + "\n")
-    return {"real": len(real), "other": other}
+    big = [
+        (junk_id + 1000 + i, 7, 64, d, d, os.urandom(72 * 1024)) for i in range(1024)
+    ]
+    write_pack(own, old + stale + superseded + big + real)
+    return len(real)
 
 
 def main():
@@ -180,10 +218,19 @@ def run():
     for f in cache_files() + list(storage().glob(f"{prefix()}cache-index.txt")):
         f.unlink()
 
+    others = other_worlds()
     try:
         SERVER.start()
-        first = session("first join")
-        files = cache_files()
+        first = session("first join", lambda: not others["unused"].exists())
+        check(
+            "sweep: world file unused for 40 days dropped",
+            not others["unused"].exists(),
+        )
+        check(
+            "sweep: recent world files stay",
+            others["older"].exists() and others["recent"].exists(),
+        )
+        files = [f for f in cache_files() if f not in others.values()]
         check("cache file saved", len(files) == 1, files)
         if not files:
             return
@@ -195,8 +242,8 @@ def run():
             f"{len(entries)} entries, {first.get('shapes')} shapes",
         )
 
-        seeded = seed(own)
-        second = session("rejoin")
+        seed(own)
+        second = session("rejoin", lambda: not others["recent"].exists())
         check(
             "rejoin: no shapes sent",
             int(second.get("shapes", -1)) == 0,
@@ -209,7 +256,7 @@ def run():
         )
 
         entries = read_pack(own)
-        data = sum(len(e[4]) for e in entries)
+        data = sum(len(e[5]) for e in entries)
         size = sum(f.stat().st_size for f in cache_files())
         check(
             "cache under its cap",
@@ -220,11 +267,24 @@ def run():
             "month old entries dropped",
             all(e[3] >= today() - MAX_DAYS for e in entries),
         )
+        check(
+            "entries received over 90 days ago dropped",
+            all(e[4] >= today() - MAX_BUILD_DAYS for e in entries),
+        )
         versions = {}
         for e in entries:
             versions.setdefault(e[0], set()).add(e[1])
         check("one version per impostor", all(len(v) == 1 for v in versions.values()))
-        check("other world's file dropped", not seeded["other"].exists())
+        check(
+            "sweep: other worlds' files dropped over the cap",
+            not others["older"].exists() and not others["recent"].exists(),
+        )
+        index = index_path().read_text().split()
+        check(
+            "index lists only the current world",
+            index[0] == own.name.removeprefix(prefix()) and len(index) == 3,
+            index,
+        )
     finally:
         CLIENT.stop()
         SERVER.stop()

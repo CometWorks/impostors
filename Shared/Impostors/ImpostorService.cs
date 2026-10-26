@@ -3,7 +3,9 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using Impostors;
+using Sandbox;
 using Sandbox.Engine.Multiplayer;
 using Sandbox.Game.Multiplayer;
 using Sandbox.Game.World;
@@ -56,6 +58,11 @@ public sealed class ImpostorService : IDisposable
     private readonly ByteWriter writer = new(Protocol.MaxMessageSize + 1024);
     private bool packWritten;
     private int tick;
+
+    // Game thread time of the registry's updates since the last minute's log line, all of it
+    // and the most in one tick, Stopwatch ticks
+    private long buildTicks;
+    private long maxBuildTicks;
 
     private sealed class Viewer
     {
@@ -216,12 +223,7 @@ public sealed class ImpostorService : IDisposable
             return null;
         try
         {
-            var cache = DiskShapeCache.Get(
-                CacheFolder,
-                config.CacheMegabytes * 1024L * 1024,
-                config.CacheDays,
-                log
-            );
+            var cache = DiskShapeCache.Get(CacheFolder, config, log);
             log.Info(
                 $"Impostor cache: {cache.Count} entries, {cache.Bytes / 1024} KB in {cache.Folder}"
             );
@@ -266,7 +268,11 @@ public sealed class ImpostorService : IDisposable
 
     public void Dispose()
     {
-        MyAPIGateway.Multiplayer?.UnregisterSecureMessageHandler(Protocol.Channel, OnMessage);
+        // The game allows changing message handlers on its update thread only. Plugin.Dispose
+        // runs on the unload thread at shutdown, when the game loop is gone: OnMessage ignores
+        // a stopped service, so the handler left registered there does nothing.
+        if (Thread.CurrentThread == MySandboxGame.Static?.UpdateThread)
+            MyAPIGateway.Multiplayer?.UnregisterSecureMessageHandler(Protocol.Channel, OnMessage);
         foreach (var source in sources)
             (source as IDisposable)?.Dispose();
         log.Info("Impostors service stopped");
@@ -309,35 +315,33 @@ public sealed class ImpostorService : IDisposable
 
     public static void Stop()
     {
-        instance?.Dispose();
+        var stopped = instance;
         instance = null;
         session = null;
+        stopped?.Dispose();
     }
 
     private void Update()
     {
+        var now = MySession.Static.ElapsedPlayTime.TotalSeconds;
         if (++tick % 60 != 0)
         {
-            // Builds that reuse cached shapes finish within a few ticks, the next ones start
-            // without waiting for the next full second
-            if (tick % 10 == 0)
-                registry.Update(
-                    MySession.Static.ElapsedPlayTime.TotalSeconds,
-                    config.RebuildSeconds,
-                    config.RefreshSeconds
-                );
-
             // A zoom gets its finer levels within a few ticks, not at the next full second.
             // Six picks per second at most, however many View messages a client sends.
+            var picked = false;
             foreach (var viewer in viewers.Values)
             {
                 if (viewer.Dirty && tick - viewer.LastTick >= 10)
+                {
                     TryUpdateViewer(viewer);
+                    picked = true;
+                }
             }
+
+            // What a zoomed view wants now is built now, not after the next full second
+            UpdateRegistry(now, picked);
             return;
         }
-
-        var now = MySession.Static.ElapsedPlayTime.TotalSeconds;
 
         registry.BeginScan();
         foreach (var source in sources)
@@ -371,7 +375,7 @@ public sealed class ImpostorService : IDisposable
             TryUpdateViewer(viewers[steamId]);
         }
 
-        registry.Update(now, config.RebuildSeconds, config.RefreshSeconds);
+        UpdateRegistry(now, true);
 
         if (WritingPack)
             TryWritePack();
@@ -382,12 +386,30 @@ public sealed class ImpostorService : IDisposable
                 LogViewer(viewer);
 
             var (built, cached, packed, unchanged, reusedCpuMs) = registry.TakeCounts();
+            var ms = 1000.0 / Stopwatch.Frequency;
             if (built + cached + packed + unchanged > 0)
                 log.Info(
                     $"Impostor shapes in the last minute: {built} built, {cached} from the cache, {packed} from the asteroid pack, {unchanged} unchanged; "
-                        + $"the reused ones took {reusedCpuMs:0} ms CPU"
+                        + $"the reused ones took {reusedCpuMs:0} ms CPU; "
+                        + $"starting the builds took {buildTicks * ms:0.0} ms on the game thread, {maxBuildTicks * ms:0.00} ms the most in a tick"
                 );
+            buildTicks = 0;
+            maxBuildTicks = 0;
         }
+    }
+
+    // Every tick: applies the finished builds and starts new ones as slots free, after the
+    // picks plans which ones; timed for the minute's log line
+    private void UpdateRegistry(double now, bool plan)
+    {
+        var start = Stopwatch.GetTimestamp();
+        if (plan)
+            registry.Plan(now, config.RebuildSeconds, config.RefreshSeconds);
+        else
+            registry.Pump(now);
+        var elapsed = Stopwatch.GetTimestamp() - start;
+        buildTicks += elapsed;
+        maxBuildTicks = Math.Max(maxBuildTicks, elapsed);
     }
 
     private bool WritingPack => config.WriteAsteroidPack && !packWritten;
@@ -490,7 +512,7 @@ public sealed class ImpostorService : IDisposable
 
     private void OnMessage(ushort channel, byte[] message, ulong sender, bool fromServer)
     {
-        if (sender != Sync.MyId)
+        if (sender != Sync.MyId && this == instance)
             Receive(message, sender, false);
     }
 
