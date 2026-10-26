@@ -35,7 +35,21 @@ public class Probe : IPlugin
 
     public void Update() { }
 
-    public void Dispose() { }
+    // What the Impostors service left behind once the plugins are disposed (tests/shutdown.py)
+    public void Dispose()
+    {
+        var type = AppDomain
+            .CurrentDomain.GetAssemblies()
+            .Select(a => a.GetType("Shared.Impostors.ImpostorService"))
+            .FirstOrDefault(t => t != null);
+        var instance = type?.GetProperty("Instance")?.GetValue(null);
+        var session = type
+            ?.GetField("session", BindingFlags.NonPublic | BindingFlags.Static)
+            ?.GetValue(null);
+        MyLog.Default.WriteLineAndConsole(
+            $"ImpostorsProbe: disposed, instance={(instance == null ? "null" : "set")} session={(session == null ? "null" : "set")}"
+        );
+    }
 }
 
 // The world lists the Impostors mod under a stand-in Workshop id the Workshop doesn't
@@ -142,6 +156,32 @@ public sealed class ProbeCommands : CommandModule
 
     private static IEnumerable<long> Held(IDictionary sent) =>
         sent.Keys.Cast<long>().Where(id => (bool)Get(sent[id], "Held")).OrderBy(id => id);
+
+    [Command(
+        "near",
+        "The impostor entries within a range of a point: id, kind, the center and radius of the AABB the service sizes them by, and the shapes built."
+    )]
+    [Permission(MyPromoteLevel.Admin)]
+    public string Near(double x, double y, double z, double range)
+    {
+        var service = Service;
+        if (service == null)
+            return "Probe near: off";
+
+        var point = new Vector3D(x, y, z);
+        var entries = ((IEnumerable)Get(service, "Entries"))
+            .Cast<object>()
+            .Select(e => (e, aabb: (BoundingBoxD)Get(e, "WorldAabb")))
+            .Where(t => Vector3D.Distance(t.aabb.Center, point) <= range)
+            .Select(t =>
+            {
+                var c = t.aabb.Center;
+                var shapes = Get(t.e, "Shapes") as byte[][];
+                return $"{Get(t.e, "Id")}:{Get(t.e, "Kind")}:{F(c.X)},{F(c.Y)},{F(c.Z)}"
+                    + $":{F(t.aabb.HalfExtents.Length())}:{shapes?.Count(s => s != null) ?? 0}";
+            });
+        return $"Probe near: {string.Join(" ", entries)}";
+    }
 
     [Command("place", "Puts a grid at a position, at rest.")]
     [Permission(MyPromoteLevel.Admin)]

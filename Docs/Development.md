@@ -39,9 +39,14 @@ the whitelist, loading the mod in the game does.
   billboards); with `IMP_PLUGIN=1` only impostor quads go. See its docstring.
 - `tests/streaming.py` checks the hand-over when the player arrives fast: it jumps from 5 km
   to next to the station, a safe zone and an asteroid, deep into the replication cube, and
-  checks that the impostor stays and is drawn at its level from afar until the real entity
-  draws, then hides and goes. `IMP_WITH_PLUGIN=1` also runs the client plugin, which tells
+  checks that the impostor stays and is drawn until the real entity draws, at the full
+  level for its new distance once the next pick has sent it, then hides and goes. `IMP_WITH_PLUGIN=1` also runs the client plugin, which tells
   the mod when an asteroid's meshes show. See its docstring.
+- `tests/arrival.py` arrives next to the stations of the "Octahedron - Seed 2" world, the
+  way a Trade Lane drops a ship out of its tunnel: from 20 km out to 600 m from each
+  station's safe zone. Until the real grids draw, the stand-ins must show the full level for
+  their distance (SE-709). `IMP_ZONE_LOWER=1` turns `SafeZoneLowerLevel` on and adds an
+  arrival inside each zone. See its docstring.
 - `tests/ring.py` flies over the asteroid ring of the "Octahedron - Seed 2" world with its
   Workshop mods (built by `worlds/octahedron/build_world.py --seed 2`) and prints, per height,
   the voxel maps the client has, the impostors it got and drew, their quads and the frame's
@@ -72,9 +77,16 @@ the whitelist, loading the mod in the game does.
   pack (`measure`) and compares the asteroid builds and the shape bytes. `reset` follows one
   asteroid through a cut, a server restart and a voxel reset; `offline` checks the pack in an
   offline game with the client plugin. See its docstring.
+- `tests/build_throughput.py` measures how fast the server builds the asteroids of the
+  "Octahedron - Seed 2" ring for a client that joins above it with empty caches (SE-678): the
+  bursts of builds, the busiest 5 seconds and the game thread time per build. `logs <files>`
+  prints the same summary for saved server logs. See its docstring.
 - `tests/cluster_scenario.py` checks far view across a cluster on the cluster's scenario
   bench. An asteroid every node builds checks that its shapes reach the WA's cache;
   `IMP_CACHE_MB=0` turns the caches off for a baseline.
+- `tests/shutdown.py` checks the server's shutdown (SE-676): the server starts the service and
+  gets a SIGTERM, which disposes the plugins off the game thread. The log must have no
+  "Dispose failed", and the test probe must find the service's state cleared.
 - `tests/build_times.py` makes a table of the build times from the `Impostor build:` lines of
   server logs, per object and level. Any run that builds impostors writes them;
   `scenario.py` and `compare.py` save the table as `build-times.md` next to their shots.

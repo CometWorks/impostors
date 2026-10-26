@@ -165,8 +165,8 @@ Every second it:
    next ones wait until the following seconds have paid off the debt. New impostors don't
    wait, but while the player is in debt they get a level the client has or one of at most
    2 KB first. The states go first, then the shapes, small ones sharing a message up to 16 KB.
-4. Starts background builds for the wanted entries that have no shapes yet, or whose content
-   changed, at most two at a time. Each finished build logs an `Impostor build:` line with
+4. Lists the wanted entries that have no shapes yet, or whose content changed, and starts
+   their background builds, a quarter of the cores at a time (2 to 4). Each finished build logs an `Impostor build:` line with
    the snapshot time on the game thread and the wall clock time, thread CPU time and quads
    of each level; `tests/build_times.py` turns server logs into a table.
 
@@ -195,10 +195,18 @@ a number to bump whenever a change to the building gives other shapes for the sa
   that no longer exists in the world loses its file (not at once: grids leave the scan while
   a world unloads, before they are closed). Files unused for `CacheDays` (30) go, and the
   least recently used ones while the folder is over `CacheMegabytes` (256).
-- While builds come from the cache the service starts the next ones every 10 ticks instead of
-  every second.
-- Once a minute the log counts the shapes built, taken from the cache and found unchanged
-  (`Impostor shapes in the last minute: ...`). Only real builds write `Impostor build:` lines.
+- Build slots (SE-678): the list of entries due for a build is made after the picks, once a
+  second and after the picks of a zoomed view. Every tick applies the finished builds and
+  starts the next listed ones in the slots they freed, so a cache hit or an asteroid build of
+  a few ms doesn't wait for the next pick. A tick stops starting builds once its snapshots
+  took 2 ms (a grid's can take 5 ms, an asteroid's 0.01 ms). The shapes are hashed for their
+  version on the build thread. On "Octahedron - Seed 2" with a client joining above the asteroid ring
+  (`tests/build_throughput.py`, 16 threads, so 4 slots) the server built 1419 asteroids in
+  17 s, 89 a second at the busiest, where two builds every 10 ticks took 139 s for 1666 at
+  12 a second. Starting them cost the game thread 0.03 ms per build, against 0.21 ms.
+- Once a minute the log counts the shapes built, taken from the cache and found unchanged,
+  and the game thread time of starting the builds (`Impostor shapes in the last minute:
+  ...`). Only real builds write `Impostor build:` lines.
 
 The replication margin makes the hand-off seamless: the client has the impostor while the
 real grid is still replicated (and hides it), so there is no gap when the grid leaves the
@@ -209,9 +217,14 @@ second (0.05 s at 10 km/s), long before the server has streamed it to the client
 client has built its render cells. So an impostor the client already has is held inside the
 replication cube instead of removed:
 
-- The server keeps it at the level it was sent at, the finest one from the approach, and
-  sends no new shapes for it, only states when it moves. Held impostors sort right after the
-  safe zones, so `MaxImpostorsPerPlayer` doesn't drop them.
+- The player is close now, so the server gives it the level its distance calls for, never
+  coarser than the one the client has, and sends that shape whatever the player's shape
+  debt (SE-709). At 10 km/s the approach takes a second or two and the player is often in
+  debt by then, so the level from afar is a small one: level 16 or coarser for a station.
+  When the levels are over `MaxQuadsPerFrame`, the other impostors get coarser ones and the
+  held ones keep theirs.
+  Held impostors sort right after the safe zones, so they get the shape credit before the
+  others and `MaxImpostorsPerPlayer` doesn't drop them.
 - The client tells the server with a `Ready` message when the real entity draws itself: in
   the scene with render objects (`IMyEntity.Render.RenderObjectIDs`; a grid has them once its
   render cells are built, a safe zone once its model is) for a second, the longest the game
@@ -375,14 +388,25 @@ WA, two nodes, two stations of 3760 blocks and a 512 m asteroid. One run with
 | WA restart, offline stations | shown from the saved index | the same |
 | First sight for a joining client | 0.2 s | 0.2 s |
 
-A cache hit on a node saves CPU but not time: `cache-get` asks for one level per round trip,
-six in a row through the WA's game thread, about 0.25 s each. For a grid this small building
-it is faster; it pays for large grids and asteroids (and see SE-704 for those).
+Then a cache hit on a node saved CPU but not time: `cache-get` asked for one level per round
+trip, six in a row through the WA's game thread, about 0.25 s each.
 
 Before SE-662 the WA opened its store only once its world was ready, so its own asteroid build
 a few seconds earlier was never stored, and after a restart it built it again. It opens the
-store on first use now. Each node still builds the asteroid itself: a shape level over the
-SDK's 64 KiB payload can't cross the cluster, see SE-704.
+store on first use now.
+
+A shape level over the SDK's 64 KiB payload couldn't cross the cluster until SE-704: the 512 m
+asteroid's finest level is 155 KB, so every node built it, and a grid of another node with a
+finest level that large got no shape at all. Since then an entry's levels cross in 60 KiB
+chunks and a fetch asks for all of them at once. The same run (polaris, cluster 0.1.21) with
+the stations painted in a checkerboard, 9224 blocks with a 97 KB finest level each:
+
+| Event | Before SE-704 | SE-704 |
+|---|---|---|
+| The other node's station on the player's node | missing | shown |
+| The stations' shapes in the WA's cache | missing | 98 KB each |
+| Each node's asteroid | built, 127 ms CPU | from the WA, 19 to 22 ms CPU |
+| A station's partition loads on a node after the WA restart | built | from the WA, 2 round trips, 0.36 to 0.39 s wall |
 
 Consistency, `tests/cache_consistency.py` on factory@ai, two runs of four rounds: every change
 reached both clients within its limit, in 2 to 11 s for block changes (limit RebuildSeconds
@@ -612,12 +636,15 @@ game never reads it and draws those zones anyway.
 
 The game draws a zone's surface with a distorting shield effect, which blurs and tints what
 is inside. Impostors are billboards drawn after tone mapping, so they show undistorted on top
-of it. A grid or asteroid impostor whose AABB center is inside an enabled zone therefore gets
-one level of detail lower than it would outside, and its state carries the zone's color
-(`Tint`, 4 bytes, alpha 0 outside of zones). The mod blends its quad colors 35% towards the
-zone's surface color, the zone's color 60% of the way to white (`ZoneTint`, `ZoneTintPale` in
-the renderer), fitted to comparison sheets. The level picked
-before the drop is kept for the hysteresis, so the drop doesn't repeat every second.
+of it. The state of a grid or asteroid impostor whose AABB center is inside an enabled zone
+therefore carries the zone's color (`Tint`, 4 bytes, alpha 0 outside of zones). The mod
+blends its quad colors 35% towards the zone's surface color, the zone's color 60% of the way
+to white (`ZoneTint`, `ZoneTintPale` in the renderer), fitted to comparison sheets. With
+`SafeZoneLowerLevel` (off by default, SE-709) it also gets one level of detail lower than it
+would outside. The level picked before the drop is kept for the hysteresis, so the drop
+doesn't repeat every second. A zone that also holds the player's camera counts for neither:
+its surface isn't between the two, and the impostors seen from there stand in for grids
+still streaming in, which should show at their best.
 
 On a cluster, admin zones are on every node (the cluster plugin's `AdminSafeZones`), so each
 node shows them itself, like asteroids. The zone of a safe zone block travels with the
@@ -636,7 +663,7 @@ Magnetar Plugin SDK (`PluginSdk.Clustering`); the client side is unchanged.
   (id, version, frame, velocity, AABB) that changed noticeably since the WA acknowledged the
   last report, and the ids that are gone. Gone means released when the entry's partition left
   the node (handover or offline), deleted otherwise. The shapes of new versions go first
-  (`shape`, one message per level of detail).
+  (`shape-chunk`, see below).
 - The WA merges the reports into the index. A released record stays, without an owner, until
   some node reports the grid again: that is how grids of offline partitions stay visible. Every
   5 s the WA broadcasts the changes to the nodes (`index`) as consecutive revisions.
@@ -644,7 +671,7 @@ Magnetar Plugin SDK (`PluginSdk.Clustering`); the client side is unchanged.
   (`snapshot`).
 - On each node, `RemoteSource` turns the other nodes' records into entries. They skip the
   replication cube test, another node's grid is never replicated to this node's players. Their
-  shapes come from the WA's cache by id and version (`shape-get`).
+  shapes come from the WA's cache by id and version (`shape-get-chunk`).
 - Nodes build every local grid entry, not only the ones their own players see, since players on
   other nodes may need them.
 - The reply to a report carries the WA's instance id. A new one (a WA restart) makes the nodes
@@ -659,11 +686,17 @@ Magnetar Plugin SDK (`PluginSdk.Clustering`); the client side is unchanged.
 - Asteroids are not reported: saved voxel maps are replicas on every node already, each node
   builds them itself.
 - The WA's shape cache is the cluster's only one (SE-648). It keeps the shapes on disk like a
-  single server's cache, and a node's build asks it (`cache-get`, by id and content hash)
+  single server's cache, and a node's build asks it (`cache-get-chunk`, by id and content hash)
   before building. Grid shapes reach it with the reports, which carry the content hash now;
   nodes send the shapes of asteroids and admin safe zones they built too, so the next node to
   build one finds it. A deleted grid leaves the cache, a released one stays. After a WA
-  restart, `shape-get` reads shapes the WA no longer has in memory from the disk.
+  restart, `shape-get-chunk` reads shapes the WA no longer has in memory from the disk.
+- Shapes cross the cluster as one blob per entry, all its levels packed as in the disk cache's
+  files, in chunks of 60 KiB (SE-704): the SDK's payload limit is 64 KiB, and the finest level
+  of a 512 m asteroid is about 150 KB. A push sends all chunks at once, and the WA counts the
+  new version only when every chunk is in. A fetch asks for all levels in one request: the
+  first reply carries the blob's length, and the node asks for the remaining chunks all at once.
+  Failed pushes and fetches log a warning.
 - Safe zones of blocks are reported like grids, admin safe zones are not (see "Safe zones").
 
 The same shape as the cluster's `AntennaGraphService`, which learned that full resends don't
@@ -674,8 +707,8 @@ one message under the SDK's 64 KiB payload limit.
 
 | Where | Budget |
 |---|---|
-| Server game thread | one scan per second; a build's snapshot copies every cube of the group |
-| Server background | 2 builds at a time |
+| Server game thread | one scan per second; a build's snapshot copies every cube of the group, 2 ms of snapshots per tick |
+| Server background | a quarter of the cores at a time (2 to 4), half the cores while writing the asteroid pack |
 | Network per player | `ShapeBytesPerSecond` (32 KB/s) for shapes, about 74 bytes per moving impostor per second |
 | Client | `MaxQuadsPerFrame` quads per frame (16000) |
 | Client plugin, render thread | its `PrepareList` patch: 7 µs per frame, 25 µs while every 14th frame is over the limit by 1182 impostor quads, 0.7 ms at most (`tests/billboards.py`, about 33000 billboards, Ryzen 9800X3D) |

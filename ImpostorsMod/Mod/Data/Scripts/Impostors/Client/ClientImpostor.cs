@@ -121,8 +121,19 @@ namespace Impostors
         // while it isn't
         public int DrawableTick = -1;
 
-        // The real entity draws: the impostor is hidden and the server was told so
+        // The real entity draws: the impostor is hidden
         public bool Ready;
+
+        // What the server was told last about Ready
+        public bool Reported;
+
+        // Shown before the server sent it, from the asteroid pack or the disk cache (see
+        // EarlyAsteroids)
+        public bool Early;
+
+        // Stats: the ticks it first had a shape and was first drawn, -1 before
+        public int FirstShapeTick = -1;
+        public int FirstDrawnTick = -1;
 
         // The shape drawn this frame: Shape, or a coarser one from the store when Shape didn't
         // fit into the quad budget
