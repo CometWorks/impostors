@@ -16,9 +16,11 @@ the WA instead of building them (SE-648). IMP_RESTART=0 skips this part.
 An asteroid 12 km out is on every node: both nodes build it at once and push it to the WA,
 which must end up with it in its cache (SE-662). The stations are painted in a checkerboard,
 so no two neighboring faces merge and their finest level is over the SDK's 64 KiB payload,
-like the asteroid's: shapes cross the cluster in chunks (SE-704). IMP_CACHE_MB sets CacheMegabytes on every
-process, 0 turns the caches off for a baseline; the cache checks are skipped then. The end
-prints the first-sight latency and every process's builds and cache hits with their CPU time.
+like the asteroid's: shapes cross the cluster in chunks (SE-704).
+
+IMP_CACHE_MB sets CacheMegabytes on every process, 0 turns the caches off for a baseline;
+the cache checks are skipped then. The end prints the first-sight latency and every
+process's builds and cache hits with their CPU time.
 
 Run it from the cluster repository's Test folder, with its host.env or the
 environment naming the package, ports and roots, and CLUSTER_EXTRA_PLUGINS naming
