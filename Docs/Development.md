@@ -71,7 +71,13 @@ the whitelist, loading the mod in the game does.
   (`write`), then joins above its asteroid ring with empty shape caches without and with the
   pack (`measure`) and compares the asteroid builds and the shape bytes. `reset` follows one
   asteroid through a cut, a server restart and a voxel reset; `offline` checks the pack in an
-  offline game with the client plugin. See its docstring.
+  offline game with the client plugin. `compare` puts two packs side by side: the asteroids
+  with the same shapes, and the quads and bytes per level. See its docstring.
+- `tests/asteroid_normals.py` checks the smooth asteroid normals offline, without a game
+  running (SE-710): it builds a made-up rock with flat and with smooth normals through
+  `VoxelShapes`, and compares the quads, bytes and build times, and how far each level's
+  normals and its image, drawn at the size the level is shown at, are from the rock itself.
+  It draws them next to the rock, ray marched, into one sheet.
 - `tests/cluster_scenario.py` checks far view across a cluster on the cluster's scenario
   bench. An asteroid every node builds checks that its shapes reach the WA's cache;
   `IMP_CACHE_MB=0` turns the caches off for a baseline.
@@ -80,6 +86,9 @@ the whitelist, loading the mod in the game does.
   `scenario.py` and `compare.py` save the table as `build-times.md` next to their shots.
 - `tests/zone_mesh.py` checks the safe zone meshes offline, without a game running: the
   sphere for each size on screen, up to a camera inside the zone, infinity and NaN.
+
+`IMP_SMOOTH=0` or `1` sets `AsteroidSmoothNormals` in every config a test writes, so any of
+them runs with flat or smooth asteroid normals.
 
 ## Plugin version
 

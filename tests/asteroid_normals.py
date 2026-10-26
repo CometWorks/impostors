@@ -3,13 +3,16 @@ against the game's VRage.Math into a throwaway .NET program (tests/asteroid_norm
 which builds the shapes of a made-up rock of 256 voxels with flat and with smooth normals.
 Needs the dotnet SDK and the game client (IMP_BIN64 as for rig.py).
 
-Prints per level the quads, the bytes and the mean angle between the quads' normals and the
-rock's own surface normal, flat against smooth, and the build times. PASS when the smooth
-normals are closer to the rock's at every level, the shapes grow by at most a quarter and the
-build takes at most half as long again. With pillow installed it also draws both, lit from
-three directions, into ~/.se-test/asteroid-normals/rock.png (IMP_OUT for another folder).
+Prints a table per level: the quads and bytes, the mean angle between the quads' normals and
+the rock's own surface normal, and the image error: the RMS gray difference between the level
+drawn at the size the server sends it for (about 2.5 pixels per cell, lit as the mod lights
+it) and the rock itself, ray marched, over three views and suns. Then the build times. PASS
+when smooth has the smaller image error at every level, the shapes grow by at most a quarter
+and the build takes at most half as long again. Draws the rock, flat and smooth at those
+sizes into rock.png in ~/.se-test/asteroid-normals (IMP_OUT for another folder, IMP_NO_SHEET=1
+to skip it).
 
-    uv run --no-project --with pillow python tests/asteroid_normals.py
+    uv run --no-project --with pillow --with numpy python tests/asteroid_normals.py
 """
 
 from __future__ import annotations

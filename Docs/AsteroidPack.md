@@ -43,8 +43,11 @@ nobody edited and that the world doesn't save get no impostors anyway (see
 
 The pack belongs to that world: it is keyed by the asteroids' entity ids and the voxels they
 were built from. Make it again after changing the world's asteroids, after changing
-`AsteroidOcclusion` and after an Impostors update that changes how asteroids are built (the
-release notes say so); until then the server builds what no longer matches.
+`AsteroidOcclusion` or `AsteroidSmoothNormals` and after an Impostors update that changes how
+asteroids are built (the release notes say so); until then the server builds what no longer
+matches. The pack keeps the asteroid settings it was built with, and the log warns at the
+start when they differ from the server's. Packs written before `AsteroidSmoothNormals` came
+have flat normals: they match only with it off.
 
 `tests/asteroid_pack.py write` does all of this for the "Octahedron - Seed 2" test world.
 

@@ -12,6 +12,7 @@ tests/ring.py.
     IMP_PACK_LEVEL=32 ...                        # write: finest level in the pack (64)
     IMP_HEIGHT=10000 IMP_SETTLE=240 ...          # measure: meters above the ring, seconds
     IMP_RUNS=pack ...                            # measure: only the run with the pack
+    ... python tests/asteroid_pack.py compare A.bin B.bin   # two packs of the world
 
 `reset` follows one asteroid the client sees: unedited it has the pack's version, cut it
 has a new one, after a server restart (the known hashes saved with the world) it keeps that
@@ -244,20 +245,58 @@ def command(api, text: str, timeout: float = 20.0) -> str:
     raise TimeoutError(f"No reply to {text!r}")
 
 
+def pack_index(path: Path) -> tuple[int, dict[int, tuple[int, int, list]]]:
+    """The asteroid settings hash (0 before format 2) and per asteroid id its content hash,
+    version and (level, bytes) per level, from a pack's index"""
+    with path.open("rb") as data:
+        _magic, fmt = struct.unpack("<iB", data.read(5))
+        data.read(data.read(1)[0])  # the world name, shorter than 128 bytes
+        settings = struct.unpack("<q", data.read(8))[0] if fmt >= 2 else 0
+        (count,) = struct.unpack("<i", data.read(4))
+        entries = {}
+        for _ in range(count):
+            asteroid, content, version, _flags, levels = struct.unpack(
+                "<qqiBB", data.read(22)
+            )
+            lengths = [struct.unpack("<Bi", data.read(5)) for _ in range(levels)]
+            entries[asteroid] = (content, version, lengths)
+    return settings, entries
+
+
 def pack_versions() -> dict[int, int]:
     """Version per asteroid id from the pack's index"""
-    data = (PACK / "ImpostorsAsteroidPack.bin").open("rb")
-    magic, fmt = struct.unpack("<iB", data.read(5))
-    data.read(data.read(1)[0])  # the world name, shorter than 128 bytes
-    (count,) = struct.unpack("<i", data.read(4))
-    versions = {}
-    for _ in range(count):
-        asteroid, _input, version, _flags, levels = struct.unpack(
-            "<qqiBB", data.read(22)
-        )
-        data.read(5 * levels)
-        versions[asteroid] = version
-    return versions
+    _, entries = pack_index(PACK / "ImpostorsAsteroidPack.bin")
+    return {asteroid: e[1] for asteroid, e in entries.items()}
+
+
+def compare() -> int:
+    """Two packs of the same world side by side: asteroids with the same content hash and
+    the same shapes (version), and the quads and bytes per level"""
+    if len(sys.argv) < 4:
+        raise SystemExit("compare needs two pack files")
+    (sa, a), (sb, b) = (pack_index(Path(f)) for f in sys.argv[2:4])
+    common = a.keys() & b.keys()
+    print(f"settings {sa} and {sb}, {len(a)} and {len(b)} asteroids, {len(common)} in both")
+    print(
+        f"same content hash: {sum(a[i][0] == b[i][0] for i in common)}, "
+        f"same shapes: {sum(a[i][1] == b[i][1] for i in common)}"
+    )
+    print("| Level | Quads A | Quads B | B/A | KB A | KB B |")
+    print("|---:|---:|---:|---:|---:|---:|")
+    totals = {}
+    for side, entries in (("a", a), ("b", b)):
+        for _, _, lengths in entries.values():
+            for lod, length in lengths:
+                t = totals.setdefault(lod, {"a": [0, 0], "b": [0, 0]})[side]
+                t[0] += (length - 19) // 10
+                t[1] += length
+    for lod in sorted(totals):
+        (qa, ba), (qb, bb) = totals[lod]["a"], totals[lod]["b"]
+        print(f"| {lod} | {qa} | {qb} | {qb / max(qa, 1):.3f} | {ba // 1024} | {bb // 1024} |")
+    ka = sum(t["a"][1] for t in totals.values())
+    kb = sum(t["b"][1] for t in totals.values())
+    print(f"All levels: {ka // 1024} KB and {kb // 1024} KB ({kb / ka:.3f}x)")
+    return 0
 
 
 def entry(api, asteroid: int) -> tuple[int | None, bool, float]:
@@ -578,7 +617,13 @@ def measure() -> int:
 
 if __name__ == "__main__":
     mode = sys.argv[1] if len(sys.argv) > 1 else ""
-    modes = {"write": write, "measure": measure, "reset": reset, "offline": offline}
+    modes = {
+        "write": write,
+        "measure": measure,
+        "reset": reset,
+        "offline": offline,
+        "compare": compare,
+    }
     if mode not in modes:
         raise SystemExit(__doc__)
     sys.exit(modes[mode]())

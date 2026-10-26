@@ -10,6 +10,7 @@ The file is read only when the server starts, so changes take effect after a res
 | `Grids` | true | Impostors of grids, see [Grids](Grids.md) |
 | `Asteroids` | true | Impostors of asteroids, see [Asteroids](Asteroids.md) |
 | `AsteroidOcclusion` | true | Darkens pits and crevices of asteroid impostors, doubles their build time |
+| `AsteroidSmoothNormals` | true | Shades asteroid impostors along the rock's surface; off, along their cells, which makes the coarse levels look like lit blocks |
 | `SafeZones` | true | Impostors of enabled safe zones, see [Safe zones](SafeZones.md) |
 | `MinBlocks` | 8 | Grid groups with fewer blocks are not shown |
 | `MaxDistance` | 500000 | Farthest impostor in meters (500 km), 0 is the world's view distance |
@@ -55,9 +56,10 @@ Notes:
   it. The WA also saves its index of the cluster's grids there. Older versions used
   `ImpostorsCache`: the first start moves that folder to the new place. If the new folder
   already exists, the old one stays and the log says it can be deleted.
-- The client plugin reads `AsteroidPack` and `AsteroidPackMod` too, for the impostors it
-  draws on servers whose world has no Impostors mod and for its own builds offline and on a
-  lobby host. The Impostors mod always uses the world's pack.
+- The client plugin reads `AsteroidOcclusion` and `AsteroidSmoothNormals` for its own builds
+  offline and on a lobby host, and `AsteroidPack` and `AsteroidPackMod` for those and for the
+  impostors it draws on servers whose world has no Impostors mod. The Impostors mod always
+  uses the world's pack.
 - A larger shape than `ShapeBytesPerSecond` still goes out; the following ones wait until the
   player's next seconds have paid it off. New impostors never wait, but while the player is in
   debt they start with a small level. Levels the client got earlier in the session cost no
