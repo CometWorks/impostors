@@ -8,6 +8,8 @@ the players with the world's other mods. Then:
   the asteroid is unchanged,
 - players with the pack get no asteroid shapes over the network, only a 14 byte reference
   per shape, which the Impostors mod reads from the pack,
+- players with the pack see its asteroids as soon as the world is loaded, before the server
+  sends them (see [Early asteroids](#early-asteroids)),
 - players without it, and asteroids somebody mined, work as before.
 
 To find an asteroid's pack entry the server hashes its voxels, which takes about 40% of a
@@ -41,10 +43,16 @@ nobody edited and that the world doesn't save get no impostors anyway (see
    Windows) and publish it to the Workshop from the game, like any mod. Add the published mod
    to the world.
 
+Packs written before the early asteroids (formats 1 and 2) have no positions, so their asteroids
+don't show early; write the pack again to get that.
+
 The pack belongs to that world: it is keyed by the asteroids' entity ids and the voxels they
 were built from. Make it again after changing the world's asteroids, after changing
-`AsteroidOcclusion` and after an Impostors update that changes how asteroids are built (the
-release notes say so); until then the server builds what no longer matches.
+`AsteroidOcclusion` or `AsteroidSmoothNormals` and after an Impostors update that changes how
+asteroids are built (the release notes say so); until then the server builds what no longer
+matches. The pack keeps the asteroid settings it was built with, and the log warns at the
+start when they differ from the server's. Packs written before `AsteroidSmoothNormals` came
+have flat normals: they match only with it off.
 
 `tests/asteroid_pack.py write` does all of this for the "Octahedron - Seed 2" test world.
 

@@ -36,9 +36,12 @@ The server reads the voxel storage at a coarse voxel level of detail and fills o
 voxel above the iso level. The color comes from the material's mined ore (stone, iron, ice and
 the rest).
 
-- Quads are shaded with a smoothed surface normal, the gradient of the blurred occupancy.
+- Quads are shaded with a smoothed surface normal, which follows the voxels' surface: each
+  face takes the slope of the rock at its center (`AsteroidSmoothNormals`, on by default).
   Shaded by their faces alone, the voxel stairs would turn an asteroid seen along an axis into
-  one flat color.
+  one flat color. With the option off, the normals follow the impostor's own cells, as before
+  SE-710: the coarse levels then look like lit blocks, which shows in an asteroid ring, where
+  the quad budget gives most asteroids a coarse level.
 - Small impostors are dimmed by the mod, down to 0.82 times as bright under 13 pixels in
   radius on a 1080p screen: real asteroids look darker than their lit impostors at that size.
 - `AsteroidOcclusion` (on by default) bakes ambient occlusion into the colors, which darkens
