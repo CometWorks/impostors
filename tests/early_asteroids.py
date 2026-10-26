@@ -12,8 +12,9 @@ asteroids have shapes and are drawn, with and without the early asteroids.
 
 `measure` starts the server once, with the pack in the world, and lets a first client fill
 it: every asteroid built or taken from the pack. That client leaves its character above the
-ring looking away from it, so every later join starts there. Then each join, a new client
-process every time:
+ring looking away from it, so every later join starts there. Then two series of joins, a new
+client process every time: to the running server, which has every asteroid's shapes, and
+each to a server that just restarted (`IMP_SERIES=running,restarted`):
 
 - cold: no shape cache, the pack mod staged empty
 - warm, noearly: the cache of the cold join, early asteroids off (the mod's "noearly" file)
@@ -199,30 +200,41 @@ def fill(ids, eye, target, away) -> None:
         CLIENT.stop()
 
 
+RUNS = [
+    # tag, pack, early, clear the cache first
+    ("cold", False, True, True),
+    ("warm, noearly", False, False, False),
+    ("warm", False, True, False),
+    ("pack, noearly", True, False, True),
+    ("pack", True, True, True),
+]
+
+
 def measure() -> int:
+    series = os.environ.get("IMP_SERIES", "running,restarted").split(",")
     ids = start_server()
     eye, target, away = geometry()
     results = {}
     try:
         fill(ids, eye, target, away)
-        clear_cache()
-        results["cold"] = join(ids, "cold", False, True, eye, target, away)
-        results["warm-noearly"] = join(
-            ids, "warm, noearly", False, False, eye, target, away
-        )
-        results["warm"] = join(ids, "warm", False, True, eye, target, away)
-        clear_cache()
-        results["pack-noearly"] = join(
-            ids, "pack, noearly", True, False, eye, target, away
-        )
-        clear_cache()
-        results["pack"] = join(ids, "pack", True, True, eye, target, away)
+        for name in series:
+            for tag, pack, early, clear in RUNS:
+                if clear:
+                    clear_cache()
+                # A server that just started has no asteroid's shapes yet: it takes two
+                # from the pack or its cache every 10 ticks
+                if name == "restarted":
+                    SERVER.stop()
+                    SERVER.start(timeout=3600)
+                results[(name, tag)] = join(
+                    ids, f"{name}, {tag}", pack, early, eye, target, away
+                )
     finally:
         CLIENT.stop()
         SERVER.stop()
 
     ok = True
-    for key in ("warm", "pack"):
+    for key in [(name, tag) for name in series for tag in ("warm", "pack")]:
         r = results[key]
         fast = (
             r["shaped"]
@@ -232,7 +244,7 @@ def measure() -> int:
         )
         ok &= bool(fast)
         print(
-            f"{'PASS' if fast else 'FAIL'} {key}: 90% of the asteroids within "
+            f"{'PASS' if fast else 'FAIL'} {', '.join(key)}: 90% of the asteroids within "
             f"{np.percentile(r['shaped'], 90) / 60 if r['shaped'] else -1:.1f} s of the join, "
             f"drawn within {np.percentile(r['drawn'], 90) / 60 if r['drawn'] else -1:.1f} s of the turn",
             flush=True,

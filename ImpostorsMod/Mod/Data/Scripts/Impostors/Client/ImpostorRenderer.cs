@@ -205,6 +205,8 @@ namespace Impostors
         private int turnTick = -1;
         private int jumpTick = -1;
         private Vector3 lastForward;
+        private Vector3 restForward;
+        private int restTick;
         private Vector3D lastEye;
 
         public override void LoadData()
@@ -1255,14 +1257,25 @@ namespace Impostors
             }
         }
 
-        // Stats: the last tick the view turned by over 20 degrees or jumped by over a
-        // kilometer from one frame to the next, the rigs time what comes after
+        // Stats: the tick the last turn of the view by over 20 degrees started, and the last
+        // tick it jumped by over a kilometer from one frame to the next, the rigs time what
+        // comes after. At rest the view moves less than half a degree per frame.
         private void NoteMoves(VRage.ModAPI.IMyCamera camera)
         {
             var forward = (Vector3)camera.WorldMatrix.Forward;
-            if (Vector3.Dot(forward, lastForward) < 0.94f)
-                turnTick = tick;
-            if (Vector3D.DistanceSquared(camera.Position, lastEye) > 1e6)
+            if (lastForward == Vector3.Zero || Vector3.Dot(forward, lastForward) > 0.99996f)
+            {
+                restForward = forward;
+                restTick = tick;
+            }
+            else if (Vector3.Dot(forward, restForward) < 0.94f)
+            {
+                turnTick = restTick;
+            }
+            if (
+                lastEye != Vector3D.Zero
+                && Vector3D.DistanceSquared(camera.Position, lastEye) > 1e6
+            )
                 jumpTick = tick;
             lastForward = forward;
             lastEye = camera.Position;
