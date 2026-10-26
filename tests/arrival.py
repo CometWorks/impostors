@@ -98,8 +98,17 @@ def ready_log(totals: dict) -> dict[int, tuple[int, int]]:
 
 
 def drawn(i: dict, totals: dict) -> bool:
-    """Drawn, or the camera is inside its bounding sphere, where the mod never draws it"""
+    """Drawn, or off screen, or the camera is inside its bounding sphere: the mod draws
+    neither"""
     if i.get("drawn") == "1":
+        return True
+    screen = i.get("screen", "behind")
+    if "," not in screen:
+        return True
+    x, y = (float(v) for v in screen.split(","))
+    w, h = (float(v) for v in i["viewport"].split("x"))
+    r = float(i.get("radius", 0))
+    if not (-r <= x <= w + r and -r <= y <= h + r):
         return True
     camera = [float(v) for v in totals.get("camera", "0,0,0").split(",")]
     pos = [float(v) for v in i.get("pos", "0,0,0").split(",")]
