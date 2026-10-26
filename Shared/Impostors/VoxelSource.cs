@@ -75,6 +75,7 @@ public sealed class VoxelSource : ImpostorSource, IDisposable
         this.log = log;
         var settings = InputHash.Start((byte)ImpostorKind.Voxel);
         settings.Add(config.AsteroidOcclusion);
+        settings.Add(VoxelShapes.LevelsVersion);
         if (config.AsteroidSmoothNormals)
             settings.Add(VoxelShapes.SmoothVersion);
         foreach (var color in MaterialColors())
@@ -336,26 +337,38 @@ public sealed class VoxelSource : ImpostorSource, IDisposable
         input.Add(size);
         input.Add(Vector3I.Round(corner * 16)); // Float noise of the matrix
         input.Add(occluded);
+        input.Add(VoxelShapes.LevelsVersion);
         if (smooth)
             input.Add(VoxelShapes.SmoothVersion);
         foreach (var color in colors)
             input.Add(color);
         for (var k = levels.Count - 1; k >= 0; k--)
         {
-            var voxels = VoxelShapes.ReadSize(size, VoxelShapes.ReadLod(levels, k));
-            var read = new MyStorageData();
-            read.Resize(voxels);
-            storage.ReadRange(
-                read,
-                MyStorageDataTypeFlags.ContentAndMaterial,
-                VoxelShapes.ReadLod(levels, k),
-                Vector3I.Zero,
-                voxels - 1
-            );
-            contents[k] = read[MyStorageDataTypeEnum.Content];
-            materials[k] = read[MyStorageDataTypeEnum.Material];
-            input.Add(contents[k], read.SizeLinear);
-            input.Add(materials[k], read.SizeLinear);
+            var lod = VoxelShapes.ReadLod(levels, k);
+            var voxels = VoxelShapes.ReadSize(size, lod);
+            var linear = voxels.X * voxels.Y * voxels.Z;
+            // Pooled levels read the level of detail of a finer level again
+            if (k < levels.Count - 1 && VoxelShapes.ReadLod(levels, k + 1) == lod)
+            {
+                contents[k] = contents[k + 1];
+                materials[k] = materials[k + 1];
+            }
+            else
+            {
+                var read = new MyStorageData();
+                read.Resize(voxels);
+                storage.ReadRange(
+                    read,
+                    MyStorageDataTypeFlags.ContentAndMaterial,
+                    lod,
+                    Vector3I.Zero,
+                    voxels - 1
+                );
+                contents[k] = read[MyStorageDataTypeEnum.Content];
+                materials[k] = read[MyStorageDataTypeEnum.Material];
+            }
+            input.Add(contents[k], linear);
+            input.Add(materials[k], linear);
         }
         var reused = build.Reuse(input);
         if (reused != null)

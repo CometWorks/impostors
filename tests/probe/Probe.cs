@@ -18,6 +18,7 @@ using VRage.GameServices;
 using VRage.ModAPI;
 using VRage.Plugins;
 using VRage.Utils;
+using VRage.Voxels;
 using VRageMath;
 
 namespace ImpostorsProbe;
@@ -33,7 +34,19 @@ public class Probe : IPlugin
         ServerCommands.Register(Assembly.GetExecutingAssembly(), typeof(ProbeCommands));
     }
 
-    public void Update() { }
+    private bool dumped;
+
+    // IMP_VOXEL_DUMP=<folder> writes the content of every IMP_VOXEL_DUMP_EVERY-th asteroid
+    // (by entity id, default 20) once the session is ready, for tests/asteroid_levels.py
+    public void Update()
+    {
+        if (dumped || Sandbox.Game.World.MySession.Static?.Ready != true)
+            return;
+        dumped = true;
+        var folder = Environment.GetEnvironmentVariable("IMP_VOXEL_DUMP");
+        if (!string.IsNullOrEmpty(folder))
+            VoxelDump.Write(folder, Environment.GetEnvironmentVariable("IMP_VOXEL_DUMP_EVERY"));
+    }
 
     // What the Impostors service left behind once the plugins are disposed (tests/shutdown.py)
     public void Dispose()
@@ -48,6 +61,58 @@ public class Probe : IPlugin
             ?.GetValue(null);
         MyLog.Default.WriteLineAndConsole(
             $"ImpostorsProbe: disposed, instance={(instance == null ? "null" : "set")} session={(session == null ? "null" : "set")}"
+        );
+    }
+}
+
+// An asteroid's content at every voxel level of detail from the one 128 voxels across (or
+// level 0) up to the one of 2 voxels: per asteroid <entity id>.vxd, int size X, Y, Z, int
+// level count, then per level int lod and the content bytes, X fastest, then Y, then Z
+public static class VoxelDump
+{
+    public static void Write(string folder, string every)
+    {
+        var step = int.TryParse(every, out var n) && n > 0 ? n : 20;
+        Directory.CreateDirectory(folder);
+        var maps = MyEntities
+            .GetEntities()
+            .OfType<MyVoxelMap>()
+            .Where(m => m.Storage != null)
+            .OrderBy(m => m.EntityId)
+            .ToList();
+        var written = 0;
+        for (var i = 0; i < maps.Count; i += step)
+        {
+            var storage = maps[i].Storage;
+            var size = storage.Size;
+            var first = Math.Max(0, (int)Math.Ceiling(Math.Log(size.AbsMax() / 128.0, 2)));
+            var last = Math.Max(first, (int)Math.Floor(Math.Log(size.AbsMax() / 2.0, 2)));
+            using var file = new BinaryWriter(
+                File.Create(Path.Combine(folder, $"{maps[i].EntityId}.vxd"))
+            );
+            file.Write(size.X);
+            file.Write(size.Y);
+            file.Write(size.Z);
+            file.Write(last - first + 1);
+            for (var lod = first; lod <= last; lod++)
+            {
+                var voxels = Vector3I.Max(Vector3I.One, size >> lod);
+                var data = new MyStorageData();
+                data.Resize(voxels);
+                storage.ReadRange(
+                    data,
+                    MyStorageDataTypeFlags.Content,
+                    lod,
+                    Vector3I.Zero,
+                    voxels - 1
+                );
+                file.Write(lod);
+                file.Write(data[MyStorageDataTypeEnum.Content], 0, data.SizeLinear);
+            }
+            written++;
+        }
+        MyLog.Default.WriteLineAndConsole(
+            $"ImpostorsProbe: voxel dump of {written} of {maps.Count} voxel maps in {folder}"
         );
     }
 }

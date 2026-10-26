@@ -287,6 +287,7 @@ def main() -> None:
     shots = (
         {}
     )  # (direction index, row index) -> (real row, real shot, impostor row, impostor shot)
+    backgrounds = {}  # (direction index, row index) -> sky shot
     sun = None
     try:
         SERVER.start()
@@ -350,6 +351,14 @@ def main() -> None:
                 impostor_shot = shoot(
                     api, f"compare-{NAME}-{index}-{int(distance)}-x{zoom:g}-impostor"
                 )
+                if ASTEROID and not ZOOMS:
+                    # The sky alone where both were, for measuring them: the impostor
+                    # hidden, the real one three radii to the side
+                    write_mode("real")
+                    time.sleep(1.5)
+                    backgrounds[index, row_index] = shoot(
+                        api, f"compare-{NAME}-{index}-{int(distance)}-sky"
+                    )
                 CLIENT.set_fov(None)
                 print(
                     f"{view} {far:.0f} m zoom {zoom:g}: {impostor.get('lod')}",
@@ -366,6 +375,8 @@ def main() -> None:
             SERVER.stop()
 
     compose(shots, sun, SHOTS / f"compare-{NAME}.png")
+    if backgrounds:
+        measure_shots(shots, backgrounds, SHOTS / f"compare-{NAME}-measure.md")
     rig.write_build_times(SERVER, SHOTS / f"compare-{NAME}-build-times.md")
     # The stats of every shot, for measuring them later
     (SHOTS / f"compare-{NAME}.json").write_text(
@@ -440,6 +451,78 @@ def settle(entity_id: int, timeout: float = 20) -> dict:
         time.sleep(0.5)
     print(f"level {last} after {changed - start:.1f} s", flush=True)
     return stats_row(entity_id)
+
+
+# Luminance over the sky's, 0..1, from which a pixel counts as covered
+COVERED = 0.03
+
+
+def luminance(path: Path, row: dict, size: int):
+    """Luminance 0..1 of the square around the target, half its side size pixels"""
+    import numpy as np
+    from PIL import Image
+
+    image = Image.open(path).convert("RGB")
+    vw, vh = (int(v) for v in row["viewport"].split("x"))
+    sx, sy = image.size[0] / vw, image.size[1] / vh
+    x, y = (float(v) for v in row["screen"].split(","))
+    cx, cy = int(x * sx), int(y * sy)
+    box = (cx - size, cy - size, cx + size, cy + size)
+    rgb = np.asarray(image.crop(box), dtype=np.float32) / 255
+    return rgb @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
+
+
+def measure_shots(shots, backgrounds, target: Path) -> None:
+    """Per shot: the pixels the real asteroid and the impostor cover (brighter than the sky
+    by COVERED) and their light over the sky's summed over them, and the impostor's over the
+    real one's; then the medians per level. Dark sides against a dark sky don't count, the
+    figures are what shows."""
+    import numpy as np
+
+    lines = [
+        "| Direction | Distance | Level | Radius px | Real px | Impostor px | Area ratio "
+        "| Real light | Impostor light | Light ratio |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+    ]
+    per_level: dict[str, list] = {}
+    for (index, row_index), (real, real_shot, impostor, impostor_shot) in sorted(
+        shots.items()
+    ):
+        sky = backgrounds.get((index, row_index))
+        if sky is None or "screen" not in real or "lod" not in impostor:
+            continue
+        radius = float(real["radius"])
+        size = max(8, int(radius * 1.6))
+        try:
+            base = luminance(sky, real, size)
+            r = luminance(real_shot, real, size) - base
+            m = luminance(impostor_shot, real, size) - base
+        except (KeyError, ValueError):
+            continue
+        real_px, imp_px = int((r > COVERED).sum()), int((m > COVERED).sum())
+        real_light = float(np.clip(r, 0, None)[r > COVERED].sum())
+        imp_light = float(np.clip(m, 0, None)[m > COVERED].sum())
+        area = imp_px / real_px if real_px else float("nan")
+        light = imp_light / real_light if real_light else float("nan")
+        level = impostor["lod"]
+        per_level.setdefault(level, []).append((area, light))
+        name = "".join(
+            f"{'+' if v > 0 else '-'}{a}" for v, a in zip(DIRECTIONS[index], "XYZ") if v
+        )
+        lines.append(
+            f"| {name} | {ROWS[row_index][0]:.0f} | {level} | {radius:.1f} | {real_px} "
+            f"| {imp_px} | {area:.2f} | {real_light:.1f} | {imp_light:.1f} | {light:.2f} |"
+        )
+    lines += ["", "| Level | Shots | Area ratio median | Light ratio median |", "|---:|---:|---:|---:|"]
+    for level in sorted(per_level, key=int):
+        values = np.array(per_level[level], dtype=float)
+        lines.append(
+            f"| {level} | {len(values)} | {np.nanmedian(values[:, 0]):.2f} "
+            f"| {np.nanmedian(values[:, 1]):.2f} |"
+        )
+    target.write_text("\n".join(lines) + "\n")
+    print("\n".join(lines[-len(per_level) - 2 :]), flush=True)
+    print("measured", target, flush=True)
 
 
 def framing(shot: Path, distance: float, nearer) -> dict:
