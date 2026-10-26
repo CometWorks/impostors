@@ -52,8 +52,18 @@ the whitelist, loading the mod in the game does.
   joins and must build nothing the second time, with the versions kept (the client's cache
   then sends no shapes either). It also checks retention and the size cap, and that turning
   asteroid occlusion off rebuilds the asteroids only.
+- `tests/cache_gains.py` measures what the caches save (SE-662): joins with both caches
+  empty, with the server's warm, both warm and only the client's warm, each repeated. It
+  prints the builds and cache hits with their CPU time, the first-sight latency and the shape
+  bytes per state, and the cold builds' table. Results in [Design](Design.md#cache-gains-and-consistency-se-662).
+- `tests/cache_consistency.py` checks the caches against content changes and races (SE-662):
+  two clients, layers built and ground off, repaints, an asteroid mined, a split and a merge,
+  bursts of changes faster than the rebuild interval, a client killed while its cache saves,
+  the server killed during rebuilds, and at the end a rebuild with the cache wiped that must
+  match what the cache served. `IMP_ROUNDS` sets the rounds (4).
 - `tests/cluster_scenario.py` checks far view across a cluster on the cluster's scenario
-  bench.
+  bench. An asteroid every node builds checks that its shapes reach the WA's cache;
+  `IMP_CACHE_MB=0` turns the caches off for a baseline.
 - `tests/build_times.py` makes a table of the build times from the `Impostor build:` lines of
   server logs, per object and level. Any run that builds impostors writes them;
   `scenario.py` and `compare.py` save the table as `build-times.md` next to their shots.

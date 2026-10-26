@@ -48,6 +48,9 @@ namespace Impostors
         private long order;
         private bool dirty;
         private bool saving;
+
+        // The background save and the one at the end of the session write the same file
+        private readonly object writing = new object();
         private DateTime changed;
         private DateTime saved = DateTime.UtcNow;
 
@@ -388,6 +391,12 @@ namespace Impostors
         }
 
         private void Write(string name, byte[] data)
+        {
+            lock (writing)
+                WriteFile(name, data);
+        }
+
+        private void WriteFile(string name, byte[] data)
         {
             using (var writer = OpenWrite(name))
             {

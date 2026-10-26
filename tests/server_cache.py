@@ -31,7 +31,7 @@ from cache import session  # noqa: E402
 from scenario import CLIENT, SERVER, check  # noqa: E402
 
 CAP_MB = 8
-CACHE = SERVER.data / "Storage" / "Impostors" / "Cache"
+CACHE = rig.cache_folder(SERVER.data)
 OLD_CACHE = SERVER.data / "ImpostorsCache"
 MARKER = "moved.marker"
 JUNK = 0x7E00000000000000
