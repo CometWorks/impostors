@@ -76,6 +76,13 @@ public class Plugin : IPlugin, ICommonPlugin
         ImpostorRenderer.UsePack = Config.AsteroidPack;
         ImpostorRenderer.PackMod = Config.AsteroidPackMod;
 
+        // Its copy of the received-shape cache keeps to the config's retention, the mod's own
+        // copy to the defaults
+        ShapeCache.MaxBytes = Config.ClientCacheMegabytes * 1024L * 1024;
+        ShapeCache.MaxDays = Config.CacheDays;
+        ShapeCache.MaxBuildDays = Config.CacheBuildDays;
+        ShapeCache.SweepMinutes = Config.CacheSweepMinutes;
+
         Log.Debug("Successfully loaded");
     }
 

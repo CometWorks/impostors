@@ -243,8 +243,11 @@ namespace Impostors
                 MyAPIGateway.Multiplayer.RegisterSecureMessageHandler(Protocol.Channel, OnMessage);
 
                 // While the game loads, so the Inventory can go out with the first Welcome
-                cache = new ShapeCache(ModContext != null);
-                cache.Load(MyAPIGateway.Session.Name);
+                if (ShapeCache.MaxBytes > 0)
+                {
+                    cache = new ShapeCache(ModContext != null);
+                    cache.Load(MyAPIGateway.Session.Name);
+                }
             }
             if (UsePack)
                 OpenPack();

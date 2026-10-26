@@ -43,13 +43,16 @@ nobody edited and that the world doesn't save get no impostors anyway (see
    Windows) and publish it to the Workshop from the game, like any mod. Add the published mod
    to the world.
 
-Packs written before the early asteroids (format 1) have no positions, so their asteroids
+Packs written before the early asteroids (formats 1 and 2) have no positions, so their asteroids
 don't show early; write the pack again to get that.
 
 The pack belongs to that world: it is keyed by the asteroids' entity ids and the voxels they
 were built from. Make it again after changing the world's asteroids, after changing
-`AsteroidOcclusion` and after an Impostors update that changes how asteroids are built (the
-release notes say so); until then the server builds what no longer matches.
+`AsteroidOcclusion` or `AsteroidSmoothNormals` and after an Impostors update that changes how
+asteroids are built (the release notes say so); until then the server builds what no longer
+matches. The pack keeps the asteroid settings it was built with, and the log warns at the
+start when they differ from the server's. Packs written before `AsteroidSmoothNormals` came
+have flat normals: they match only with it off.
 
 `tests/asteroid_pack.py write` does all of this for the "Octahedron - Seed 2" test world.
 
@@ -91,8 +94,10 @@ until nothing changed for 2 minutes (1479 impostors):
 - The first start reads every asteroid's voxels once to hash them, about 14 ms against 35 ms
   for a whole build. After a restart with the hashes saved with the world, the same pack hits
   took 16 ms CPU together, for 1562 asteroids.
-- The impostors arrive just as fast with the pack: the server starts at most two builds every
-  10 ticks, pack hits included, so the pace is that of the build queue, not of the building.
+- The impostors arrived just as fast with the pack: the server then started at most two
+  builds every 10 ticks, pack hits included, so the pace was that of the build queue, not of
+  the building. Since SE-678 a build starts as soon as a slot frees, see
+  [Design](Design.md#server).
 - The client read the pack's index in 4 to 5 ms when the world loaded.
 
 Offline with the client plugin, the same place over the ring, empty shape cache (1442

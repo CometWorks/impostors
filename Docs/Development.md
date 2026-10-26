@@ -56,8 +56,13 @@ the whitelist, loading the mod in the game does.
   with the client plugin.
 - `tests/server_cache.py` checks the server's shape cache: the server restarts between two
   joins and must build nothing the second time, with the versions kept (the client's cache
-  then sends no shapes either). It also checks retention and the size cap, and that turning
-  asteroid occlusion off rebuilds the asteroids only.
+  then sends no shapes either). It also checks retention and the size cap through the
+  background sweep, and that turning asteroid occlusion off rebuilds the asteroids only.
+- `tests/cache_retention.py` checks the retention of the server's shape cache offline, without
+  a game (SE-711): fake entries unused, built long ago, used lately and over the cap, files
+  that are no entries, the asteroid pack folder, a read's last use across a restart, the
+  background sweep's timing, and the CPU and I/O cost of a sweep on 50000 files.
+  `IMP_QUICK=1` skips the 2 minute wait for the background sweep.
 - `tests/cache_gains.py` measures what the caches save (SE-662): joins with both caches
   empty, with the server's warm, both warm and only the client's warm, each repeated. It
   prints the builds and cache hits with their CPU time, the first-sight latency and the shape
@@ -71,20 +76,36 @@ the whitelist, loading the mod in the game does.
   (`write`), then joins above its asteroid ring with empty shape caches without and with the
   pack (`measure`) and compares the asteroid builds and the shape bytes. `reset` follows one
   asteroid through a cut, a server restart and a voxel reset; `offline` checks the pack in an
-  offline game with the client plugin. See its docstring.
+  offline game with the client plugin. `compare` puts two packs side by side: the asteroids
+  with the same shapes, and the quads and bytes per level. See its docstring.
 - `tests/early_asteroids.py` times how soon the asteroids show when a client joins above
   the same ring, with an empty cache, a warm cache and the pack, each with and without the
   early asteroids, and the bytes the server sent (`measure`); `swap` checks an early shape of
   an asteroid mined since the pack was made; `offline` does the same with the client plugin
   offline. See its docstring.
+- `tests/asteroid_normals.py` checks the smooth asteroid normals offline, without a game
+  running (SE-710): it builds a made-up rock with flat and with smooth normals through
+  `VoxelShapes`, and compares the quads, bytes and build times, and how far each level's
+  normals and its image, drawn at the size the level is shown at, are from the rock itself.
+  It draws them next to the rock, ray marched, into one sheet.
+- `tests/build_throughput.py` measures how fast the server builds the asteroids of the
+  "Octahedron - Seed 2" ring for a client that joins above it with empty caches (SE-678): the
+  bursts of builds, the busiest 5 seconds and the game thread time per build. `logs <files>`
+  prints the same summary for saved server logs. See its docstring.
 - `tests/cluster_scenario.py` checks far view across a cluster on the cluster's scenario
   bench. An asteroid every node builds checks that its shapes reach the WA's cache;
   `IMP_CACHE_MB=0` turns the caches off for a baseline.
+- `tests/shutdown.py` checks the server's shutdown (SE-676): the server starts the service and
+  gets a SIGTERM, which disposes the plugins off the game thread. The log must have no
+  "Dispose failed", and the test probe must find the service's state cleared.
 - `tests/build_times.py` makes a table of the build times from the `Impostor build:` lines of
   server logs, per object and level. Any run that builds impostors writes them;
   `scenario.py` and `compare.py` save the table as `build-times.md` next to their shots.
 - `tests/zone_mesh.py` checks the safe zone meshes offline, without a game running: the
   sphere for each size on screen, up to a camera inside the zone, infinity and NaN.
+
+`IMP_SMOOTH=0` or `1` sets `AsteroidSmoothNormals` in every config a test writes, so any of
+them runs with flat or smooth asteroid normals.
 
 ## Plugin version
 

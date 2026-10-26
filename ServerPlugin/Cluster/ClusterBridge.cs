@@ -41,12 +41,19 @@ public sealed class ClusterBridge : IShapeCache
     // Records per message, under the SDK's 64 KiB payload limit with room for node names
     private const int RecordsPerMessage = 500;
 
+    // An entry's shape levels cross the cluster packed into one blob (Pack) and split into
+    // chunks under the 64 KiB payload limit: the finest level of a large asteroid or grid is
+    // bigger than one message. The topics of these chunks are new names, so a node and a WA of
+    // the older one-level-per-message plugin don't misread each other.
+    private const int ChunkSize = 60 * 1024;
+    private const int MaxPacked = 16 * 1024 * 1024;
+
     private const string TopicReport = "report";
-    private const string TopicShape = "shape";
-    private const string TopicShapeGet = "shape-get";
+    private const string TopicShape = "shape-chunk";
+    private const string TopicShapeGet = "shape-get-chunk";
     private const string TopicIndex = "index";
     private const string TopicSnapshot = "snapshot";
-    private const string TopicCacheGet = "cache-get";
+    private const string TopicCacheGet = "cache-get-chunk";
 
     // The WA saves its index at most this often, seconds
     private const int IndexSaveSeconds = 60;
@@ -92,6 +99,10 @@ public sealed class ClusterBridge : IShapeCache
     private readonly HashSet<long> changed = new();
     private readonly HashSet<long> removed = new();
     private readonly Dictionary<long, (int version, long input, byte[][] shapes)> shapes = new();
+    private readonly Dictionary<
+        long,
+        (int version, long input, byte[] packed, bool[] got, int missing)
+    > incoming = new();
     private DiskShapeCache store;
     private volatile bool storeOpened;
     private readonly object storeOpening = new();
@@ -371,27 +382,77 @@ public sealed class ClusterBridge : IShapeCache
         }
     }
 
-    // Sends the shapes of an entry to the WA, one message per level
+    // Sends the shapes of an entry to the WA, all chunks at once
     private async Task<bool> PushShapes(long id, int version, long input, byte[][] entryShapes)
     {
-        for (var i = 0; i < entryShapes.Length; i++)
+        var packed = Pack(entryShapes);
+        var sends = new List<Task<PluginResult>>();
+        for (var offset = 0; offset < packed.Length; offset += ChunkSize)
         {
-            if (entryShapes[i] == null)
-                break;
-            var w = new ByteWriter(entryShapes[i].Length + 32);
+            var chunk = Slice(packed, offset);
+            var w = new ByteWriter(chunk.Length + 32);
             w.Long(id);
             w.Int(version);
             w.Long(input);
-            w.Byte((byte)i);
-            w.Byte((byte)entryShapes.Count(s => s != null));
-            w.Bytes(entryShapes[i]);
-            var result = await cluster
-                .RequestAsync(WorldAuthority, TopicShape, w.ToArray(), Guid.NewGuid(), Timeout)
-                .ConfigureAwait(false);
-            if (result.Code != PluginResultCode.Success)
-                return false;
+            w.Int(packed.Length);
+            w.Int(offset);
+            w.Bytes(chunk);
+            sends.Add(
+                cluster.RequestAsync(
+                    WorldAuthority,
+                    TopicShape,
+                    w.ToArray(),
+                    Guid.NewGuid(),
+                    Timeout
+                )
+            );
         }
-        return true;
+
+        var results = await Task.WhenAll(sends).ConfigureAwait(false);
+        var failed = results.FirstOrDefault(r => r.Code != PluginResultCode.Success);
+        if (failed == null)
+            return true;
+        log.Warning(
+            $"impostor {id}: pushing its shapes ({packed.Length} bytes) to the WA failed: {failed.Code}"
+        );
+        return false;
+    }
+
+    // An entry's levels as one blob: the level count, then each level's length (-1 for none)
+    // and bytes, as in the disk cache's files
+    private static byte[] Pack(byte[][] levels)
+    {
+        var w = new ByteWriter(levels.Sum(l => (l?.Length ?? 0) + 4) + 1);
+        w.Byte((byte)levels.Length);
+        foreach (var level in levels)
+        {
+            w.Int(level?.Length ?? -1);
+            if (level != null)
+                w.Bytes(level);
+        }
+        return w.ToArray();
+    }
+
+    private static byte[][] Unpack(byte[] packed)
+    {
+        var r = new ByteReader(packed);
+        var levels = new byte[r.Byte()][];
+        for (var i = 0; i < levels.Length; i++)
+        {
+            var length = r.Int();
+            if (length > r.Remaining)
+                throw new InvalidDataException($"level {i} of {length} bytes is cut off");
+            levels[i] = length < 0 ? null : r.Bytes(length);
+        }
+        return levels;
+    }
+
+    // The chunk of a packed blob at this offset
+    private static byte[] Slice(byte[] packed, int offset)
+    {
+        var chunk = new byte[Math.Min(ChunkSize, packed.Length - offset)];
+        Buffer.BlockCopy(packed, offset, chunk, 0, chunk.Length);
+        return chunk;
     }
 
     private Task<byte[]> OnIndex(PluginMessage message)
@@ -478,76 +539,85 @@ public sealed class ClusterBridge : IShapeCache
         });
     }
 
-    // Background thread: the shapes of an entry of another node, all levels or none
-    public byte[][] FetchShapes(long id, int version)
+    // Background thread: the shapes of an entry of another node
+    public byte[][] FetchShapes(long id, int version) => Fetch(TopicShapeGet, id, version);
+
+    // Background thread: the shapes the WA has of this id built from this input. The WA answers
+    // its own builds from its store directly.
+    public byte[][] Get(long id, long input) =>
+        IsWorldAuthority ? Store?.Get(id, input) : Fetch(TopicCacheGet, id, input);
+
+    // All levels of an entry from the WA, by version (shape-get) or input (cache-get), or null
+    // when it doesn't have them. The first reply carries the packed length, the chunks after
+    // it are asked for all at once, so an entry costs one round trip, two when it is larger
+    // than a chunk.
+    private byte[][] Fetch(string topic, long id, long key)
     {
-        var result = new List<byte[]>();
-        for (var i = 0; i < ImpostorEntry.Lods.Length; i++)
+        try
         {
-            var w = new ByteWriter(16);
-            w.Long(id);
-            w.Int(version);
-            w.Byte((byte)i);
-            var reply = cluster
-                .RequestAsync(WorldAuthority, TopicShapeGet, w.ToArray(), Guid.NewGuid(), Timeout)
-                .GetAwaiter()
-                .GetResult();
-            if (
-                reply.Code != PluginResultCode.Success
-                || reply.Payload == null
-                || reply.Payload.Length < 2
-            )
-                return null;
-
-            var r = new ByteReader(reply.Payload);
-            var levels = r.Byte();
-            result.Add(r.Bytes(r.Remaining));
-            if (result.Count >= levels)
-                break;
+            return FetchAsync(topic, id, key).GetAwaiter().GetResult();
         }
-
-        var shapes = new byte[ImpostorEntry.Lods.Length][];
-        for (var i = 0; i < result.Count; i++)
-            shapes[i] = result[i];
-        return shapes;
+        catch (Exception e)
+        {
+            log.Warning($"impostor {id}: {topic} from the WA failed: {e.Message}");
+            return null;
+        }
     }
 
-    // Background thread: the shapes the WA has of this id built from this input, all levels or
-    // none. The WA answers its own builds from its store directly.
-    public byte[][] Get(long id, long input)
+    private async Task<byte[][]> FetchAsync(string topic, long id, long key)
     {
-        if (IsWorldAuthority)
-            return Store?.Get(id, input);
+        if (await RequestChunk(topic, id, key, 0).ConfigureAwait(false) is not { } first)
+            return null;
 
-        var result = new List<byte[]>();
-        for (var i = 0; i < ImpostorEntry.Lods.Length; i++)
+        var packed = new byte[first.total];
+        Buffer.BlockCopy(first.chunk, 0, packed, 0, first.chunk.Length);
+        var rest = new List<Task<(int version, int total, byte[] chunk)?>>();
+        for (var offset = ChunkSize; offset < first.total; offset += ChunkSize)
+            rest.Add(RequestChunk(topic, id, key, offset));
+        var chunks = await Task.WhenAll(rest).ConfigureAwait(false);
+        for (var i = 0; i < chunks.Length; i++)
         {
-            var w = new ByteWriter(24);
-            w.Long(id);
-            w.Long(input);
-            w.Byte((byte)i);
-            var reply = cluster
-                .RequestAsync(WorldAuthority, TopicCacheGet, w.ToArray(), Guid.NewGuid(), Timeout)
-                .GetAwaiter()
-                .GetResult();
-            if (
-                reply.Code != PluginResultCode.Success
-                || reply.Payload == null
-                || reply.Payload.Length < 2
-            )
+            // The WA got another version in between
+            if (chunks[i] is not { } c || c.version != first.version || c.total != first.total)
                 return null;
-
-            var r = new ByteReader(reply.Payload);
-            var levels = r.Byte();
-            result.Add(r.Bytes(r.Remaining));
-            if (result.Count >= levels)
-                break;
+            Buffer.BlockCopy(c.chunk, 0, packed, (i + 1) * ChunkSize, c.chunk.Length);
         }
+        return Unpack(packed);
+    }
 
-        var cached = new byte[ImpostorEntry.Lods.Length][];
-        for (var i = 0; i < result.Count; i++)
-            cached[i] = result[i];
-        return cached;
+    // Reply: int version, int packed length, the chunk at the offset; empty when the WA
+    // doesn't have it
+    private async Task<(int version, int total, byte[] chunk)?> RequestChunk(
+        string topic,
+        long id,
+        long key,
+        int offset
+    )
+    {
+        var w = new ByteWriter(24);
+        w.Long(id);
+        w.Long(key);
+        w.Int(offset);
+        var reply = await cluster
+            .RequestAsync(WorldAuthority, topic, w.ToArray(), Guid.NewGuid(), Timeout)
+            .ConfigureAwait(false);
+        if (reply.Code != PluginResultCode.Success)
+            throw new IOException(reply.Code.ToString());
+        if (reply.Payload is not { Length: > 8 } payload)
+            return null;
+
+        var r = new ByteReader(payload);
+        var version = r.Int();
+        var total = r.Int();
+        var chunk = r.Bytes(r.Remaining);
+        if (
+            total <= 0
+            || total > MaxPacked
+            || offset >= total
+            || chunk.Length != Math.Min(ChunkSize, total - offset)
+        )
+            throw new InvalidDataException($"chunk of {chunk.Length} bytes at {offset} of {total}");
+        return (version, total, chunk);
     }
 
     // A node's grids reach the WA with its report. Asteroids and admin safe zones are on every
@@ -627,6 +697,7 @@ public sealed class ClusterBridge : IShapeCache
     {
         merged.Remove(id);
         shapes.Remove(id);
+        incoming.Remove(id);
         if (forgetShapes)
             Store?.Forget(id);
         changed.Remove(id);
@@ -646,26 +717,58 @@ public sealed class ClusterBridge : IShapeCache
             log.Info($"cluster index: dropped {drop.Count} saved records no node has any more");
     }
 
+    // A chunk of an entry's packed shapes. They count once all chunks are in; until then the
+    // WA keeps answering with the version it had.
     private Task<byte[]> OnShape(PluginMessage message)
     {
         var r = new ByteReader(message.Payload);
         var id = r.Long();
         var version = r.Int();
         var input = r.Long();
-        var level = r.Byte();
-        var levels = r.Byte();
-        if (!shapes.TryGetValue(id, out var cached) || cached.version != version)
-            cached = (version, input, new byte[levels][]);
-        if (level < cached.shapes.Length && cached.shapes[level] == null)
+        var total = r.Int();
+        var offset = r.Int();
+        var chunk = r.Bytes(r.Remaining);
+        if (
+            total <= 0
+            || total > MaxPacked
+            || offset < 0
+            || offset % ChunkSize != 0
+            || offset >= total
+            || chunk.Length != Math.Min(ChunkSize, total - offset)
+        )
+            throw new InvalidDataException($"chunk of {chunk.Length} bytes at {offset} of {total}");
+
+        // Both nodes push the asteroids they built
+        if (shapes.TryGetValue(id, out var have) && have.version == version)
+            return Task.FromResult(new byte[] { 1 });
+
+        if (
+            !incoming.TryGetValue(id, out var part)
+            || part.version != version
+            || part.packed.Length != total
+        )
         {
-            cached.shapes[level] = r.Bytes(r.Remaining);
-            if (Store is { } disk && cached.shapes.All(s => s != null))
-            {
-                var complete = cached;
-                Task.Run(() => disk.Put(id, complete.input, complete.version, complete.shapes));
-            }
+            var count = (total + ChunkSize - 1) / ChunkSize;
+            part = (version, input, new byte[total], new bool[count], count);
         }
-        shapes[id] = cached;
+        var index = offset / ChunkSize;
+        if (!part.got[index])
+        {
+            part.got[index] = true;
+            part.missing--;
+            Buffer.BlockCopy(chunk, 0, part.packed, offset, chunk.Length);
+        }
+        if (part.missing > 0)
+        {
+            incoming[id] = part;
+            return Task.FromResult(new byte[] { 1 });
+        }
+
+        incoming.Remove(id);
+        var levels = Unpack(part.packed);
+        shapes[id] = (version, part.input, levels);
+        if (Store is { } disk)
+            Task.Run(() => disk.Put(id, part.input, version, levels));
         return Task.FromResult(new byte[] { 1 });
     }
 
@@ -684,14 +787,14 @@ public sealed class ClusterBridge : IShapeCache
         return cached;
     }
 
-    // Reply: byte level count, then the shape; empty when the WA doesn't have it
+    // Request: long id, long version, int offset; reply as in RequestChunk
     private Task<byte[]> OnShapeGet(PluginMessage message)
     {
         var r = new ByteReader(message.Payload);
         var id = r.Long();
-        var version = r.Int();
-        var level = r.Byte();
-        return Task.FromResult(ShapeReply(Cached(id, c => c.version == version), level));
+        var version = (int)r.Long();
+        var offset = r.Int();
+        return Task.FromResult(ChunkReply(Cached(id, c => c.version == version), offset));
     }
 
     // The same by input, for a node about to build the shapes
@@ -700,18 +803,23 @@ public sealed class ClusterBridge : IShapeCache
         var r = new ByteReader(message.Payload);
         var id = r.Long();
         var input = r.Long();
-        var level = r.Byte();
-        return Task.FromResult(ShapeReply(Cached(id, c => c.input == input), level));
+        var offset = r.Int();
+        return Task.FromResult(ChunkReply(Cached(id, c => c.input == input), offset));
     }
 
-    private static byte[] ShapeReply((int version, long input, byte[][] shapes)? cached, int level)
+    private static byte[] ChunkReply((int version, long input, byte[][] shapes)? cached, int offset)
     {
-        if (cached is not { } c || level >= c.shapes.Length || c.shapes[level] == null)
+        if (cached is not { } c)
+            return Array.Empty<byte>();
+        var packed = Pack(c.shapes);
+        if (offset < 0 || offset >= packed.Length)
             return Array.Empty<byte>();
 
-        var w = new ByteWriter(c.shapes[level].Length + 1);
-        w.Byte((byte)c.shapes.Length);
-        w.Bytes(c.shapes[level]);
+        var chunk = Slice(packed, offset);
+        var w = new ByteWriter(chunk.Length + 8);
+        w.Int(c.version);
+        w.Int(packed.Length);
+        w.Bytes(chunk);
         return w.ToArray();
     }
 

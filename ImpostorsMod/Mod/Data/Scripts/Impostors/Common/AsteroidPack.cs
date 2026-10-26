@@ -15,18 +15,21 @@ namespace Impostors
     // reset to its original voxels it hits the pack again.
     //
     // The client also shows the pack's asteroids before the server sends them (see
-    // EarlyAsteroids), from the frame each entry has since format 2.
+    // EarlyAsteroids), from the frame each entry has since format 3.
     //
-    // File: magic, format, world name, count, then per asteroid long id, long content hash,
-    // int version, byte complete, the frame (format 2: float radius, double position x, y, z,
-    // float orientation x, y, z, w), byte level count, byte level and int length per level,
-    // and after the index the shapes in the same order. "Complete" is 0 when levels were left
-    // out of the pack: only clients can use such an entry, the server builds those asteroids.
+    // File: magic, format, world name, the asteroid settings (format 2 on), count, then per
+    // asteroid long id, long content hash, int version, byte complete, the frame (format 3 on:
+    // float radius, double position x, y, z, float orientation x, y, z, w), byte level count,
+    // byte level and int length per level, and after the index the shapes in the same order.
+    // "Complete" is 0 when levels were left out of the pack: only clients can use such an
+    // entry, the server builds those asteroids. The settings are the hash of the server's
+    // asteroid settings the pack was built with (see VoxelSource.Settings); format 1 packs
+    // have none and were built with flat normals.
     public class AsteroidPack
     {
         public const string FileName = "ImpostorsAsteroidPack.bin";
         public const int Magic = 0x50414d49; // "IMAP"
-        public const byte Format = 2;
+        public const byte Format = 3;
 
         private class Entry
         {
@@ -38,7 +41,7 @@ namespace Impostors
             public int[] Lengths;
             public byte Mask;
 
-            // Where the asteroid is, Id and Version filled in; Kind 0 in a format 1 pack
+            // Where the asteroid is, Id and Version filled in; Kind 0 before format 3
             public ImpostorState Frame;
         }
 
@@ -51,6 +54,9 @@ namespace Impostors
         private byte[] data;
 
         public string World { get; private set; }
+
+        // Hash of the asteroid settings the pack was built with, 0 for a format 1 pack
+        public long Settings { get; private set; }
         public ulong ModId
         {
             get { return mod.PublishedFileId; }
@@ -94,9 +100,11 @@ namespace Impostors
                 if (reader.ReadInt32() != Magic)
                     throw new FormatException("not an asteroid pack");
                 var format = reader.ReadByte();
-                if (format != 1 && format != Format)
-                    throw new FormatException("an asteroid pack of an unknown version");
+                if (format < 1 || format > Format)
+                    throw new FormatException("an asteroid pack of a newer version");
                 World = reader.ReadString();
+                if (format >= 2)
+                    Settings = reader.ReadInt64();
                 var count = reader.ReadInt32();
                 long offset = 0;
                 for (var i = 0; i < count; i++)
@@ -108,7 +116,7 @@ namespace Impostors
                         Version = reader.ReadInt32(),
                         Complete = reader.ReadByte() == 1,
                     };
-                    if (format >= 2)
+                    if (format >= 3)
                     {
                         entry.Frame = new ImpostorState
                         {

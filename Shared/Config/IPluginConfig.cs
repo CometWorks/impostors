@@ -17,6 +17,10 @@ public interface IPluginConfig : INotifyPropertyChanged
     // building takes about twice as long
     bool AsteroidOcclusion { get; set; }
 
+    // Shades asteroid impostors with normals that follow the voxels' surface; off, they follow
+    // the impostor's cells and the coarse levels look blocky
+    bool AsteroidSmoothNormals { get; set; }
+
     // Sends impostors of enabled safe zones
     bool SafeZones { get; set; }
 
@@ -53,8 +57,19 @@ public interface IPluginConfig : INotifyPropertyChanged
     // cache off.
     int CacheMegabytes { get; set; }
 
-    // Cached shapes not used for this many days are dropped
+    // Cached shapes not used for this many days are dropped, 0 for no limit
     int CacheDays { get; set; }
+
+    // Cached shapes built this many days ago are dropped even while in use, 0 for no limit
+    int CacheBuildDays { get; set; }
+
+    // Minutes between two background sweeps of the caches, which drop what CacheDays,
+    // CacheBuildDays and the size caps say; 0 turns the sweeps off
+    int CacheSweepMinutes { get; set; }
+
+    // Client plugin: disk space for the shapes received from servers, megabytes; 0 turns
+    // that cache off
+    int ClientCacheMegabytes { get; set; }
 
     // Impostors are sent this much inside the sync distance already, meters, so the client has
     // them before the real entity leaves its replication range
