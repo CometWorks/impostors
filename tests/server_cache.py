@@ -41,7 +41,8 @@ MARKER = "moved.marker"
 JUNK = 0x7E00000000000000
 SWEPT = "Impostor cache: swept"
 SUMMARY = re.compile(
-    r"Impostor shapes in the last minute: (\d+) built, (\d+) from the cache, (\d+) unchanged"
+    r"Impostor shapes in the last minute: (\d+) built, (\d+) from the cache, "
+    r"(?:\d+ from the asteroid pack, )?(\d+) unchanged"
 )
 
 
