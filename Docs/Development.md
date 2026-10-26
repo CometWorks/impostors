@@ -72,6 +72,10 @@ the whitelist, loading the mod in the game does.
   pack (`measure`) and compares the asteroid builds and the shape bytes. `reset` follows one
   asteroid through a cut, a server restart and a voxel reset; `offline` checks the pack in an
   offline game with the client plugin. See its docstring.
+- `tests/build_throughput.py` measures how fast the server builds the asteroids of the
+  "Octahedron - Seed 2" ring for a client that joins above it with empty caches (SE-678): the
+  bursts of builds, the busiest 5 seconds and the game thread time per build. `logs <files>`
+  prints the same summary for saved server logs. See its docstring.
 - `tests/cluster_scenario.py` checks far view across a cluster on the cluster's scenario
   bench. An asteroid every node builds checks that its shapes reach the WA's cache;
   `IMP_CACHE_MB=0` turns the caches off for a baseline.

@@ -200,7 +200,10 @@ a number to bump whenever a change to the building gives other shapes for the sa
   starts the next listed ones in the slots they freed, so a cache hit or an asteroid build of
   a few ms doesn't wait for the next pick. A tick stops starting builds once its snapshots
   took 2 ms (a grid's can take 5 ms, an asteroid's 0.01 ms). The shapes are hashed for their
-  version on the build thread.
+  version on the build thread. On "Octahedron - Seed 2" with a client joining above the asteroid ring
+  (`tests/build_throughput.py`, 16 threads, so 4 slots) the server built 1419 asteroids in
+  17 s, 89 a second at the busiest, where two builds every 10 ticks took 139 s for 1666 at
+  12 a second. Starting them cost the game thread 0.03 ms per build, against 0.21 ms.
 - Once a minute the log counts the shapes built, taken from the cache and found unchanged,
   and the game thread time of starting the builds (`Impostor shapes in the last minute:
   ...`). Only real builds write `Impostor build:` lines.
