@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Sandbox.Game.Entities;
 using Shared.Logging;
@@ -12,7 +13,10 @@ namespace Shared.Impostors;
 // Every entry of every source, and the background builds of their shapes
 public sealed class ImpostorRegistry
 {
-    private const int MaxConcurrentBuilds = 2;
+    public const int DefaultMaxBuilds = 2;
+
+    // Builds running at once, more while the asteroid pack is written
+    public int MaxBuilds = DefaultMaxBuilds;
 
     // A build that produced nothing is retried after this long, seconds
     private const double RetrySeconds = 5;
@@ -33,11 +37,15 @@ public sealed class ImpostorRegistry
     private int running;
     private int scan;
 
-    // Builds since the last TakeCounts: shapes built, taken from the cache, and found unchanged
-    // by a refresh
+    // Builds since the last TakeCounts: shapes built, taken from the cache or the asteroid
+    // pack, and found unchanged by a refresh
     private int built;
     private int cached;
+    private int packed;
     private int unchanged;
+
+    // CPU time of the builds that reused shapes (the content hash), microseconds
+    private long reusedCpu;
 
     public ImpostorRegistry(IPluginLogger log, IShapeCache cache)
     {
@@ -82,10 +90,16 @@ public sealed class ImpostorRegistry
         entries.Remove(id);
     }
 
-    public (int built, int cached, int unchanged) TakeCounts()
+    public (int built, int cached, int packed, int unchanged, double reusedCpuMs) TakeCounts()
     {
-        var counts = (built, cached, unchanged);
-        built = cached = unchanged = 0;
+        var counts = (
+            built,
+            cached,
+            packed,
+            unchanged,
+            Interlocked.Exchange(ref reusedCpu, 0) / 1000.0
+        );
+        built = cached = packed = unchanged = 0;
         return counts;
     }
 
@@ -119,7 +133,10 @@ public sealed class ImpostorRegistry
                 if (result.build.Unchanged)
                     unchanged++;
                 else if (result.build.Cached)
-                    cached++;
+                    if (result.build.Packed)
+                        packed++;
+                    else
+                        cached++;
                 else
                     built++;
             }
@@ -132,7 +149,7 @@ public sealed class ImpostorRegistry
             }
         }
 
-        if (running >= MaxConcurrentBuilds)
+        if (running >= MaxBuilds)
             return;
 
         // Missing shapes first, then the stale ones that waited longest
@@ -148,7 +165,7 @@ public sealed class ImpostorRegistry
             )
             .OrderBy(e => e.Shapes != null)
             .ThenBy(e => e.LastBuild)
-            .Take(MaxConcurrentBuilds - running)
+            .Take(MaxBuilds - running)
             .ToList();
 
         foreach (var entry in queue)
@@ -188,9 +205,12 @@ public sealed class ImpostorRegistry
                 {
                     log.Error(e, $"Failed to build impostor {entry.Id}");
                 }
+                var cpu = timing.CpuMs;
                 BuildTiming.Stop();
 
                 var reused = build.Unchanged || build.Cached;
+                if (reused && !double.IsNaN(cpu))
+                    Interlocked.Add(ref reusedCpu, (long)(cpu * 1000));
                 if (shapes != null && !entry.Source.Remote && !reused)
                 {
                     // One line per build for tests/build_times.py
@@ -203,8 +223,9 @@ public sealed class ImpostorRegistry
                 else if (shapes != null && build.Cached)
                 {
                     // What a cache hit costs: the snapshot, the input hash and the read
+                    var from = build.Packed ? "the asteroid pack" : "the cache";
                     log.Info(
-                        $"Impostor from the cache: id={entry.Id} kind={entry.Kind} {size} snapshot={snapshotMs:0.00}{timing}"
+                        $"Impostor from {from}: id={entry.Id} kind={entry.Kind} {size} snapshot={snapshotMs:0.00}{timing}"
                     );
                 }
                 finished.Enqueue((entry, shapes, build));

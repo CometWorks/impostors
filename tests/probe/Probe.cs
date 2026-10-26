@@ -315,4 +315,46 @@ public sealed class ProbeCommands : CommandModule
         });
         return $"Probe zones: {string.Join(" ", zones)}";
     }
+
+    [Command("vcut", "Cuts a sphere out of a voxel map, this far from its center along X.")]
+    [Permission(MyPromoteLevel.Admin)]
+    public string VoxelCut(long voxelId, float offset, float radius)
+    {
+        if (!(MyEntities.GetEntityById(voxelId) is MyVoxelBase voxel))
+            return "Probe vcut: none";
+
+        var shape = MyAPIGateway.Session.VoxelMaps.GetSphereVoxelHand();
+        shape.Center = voxel.PositionComp.WorldAABB.Center + Vector3D.Right * offset;
+        shape.Radius = radius;
+        MyAPIGateway.Session.VoxelMaps.CutOutShape(voxel, shape);
+        return "Probe vcut: done";
+    }
+
+    [Command("vreset", "Resets a voxel map's content and materials to its generator's.")]
+    [Permission(MyPromoteLevel.Admin)]
+    public string VoxelReset(long voxelId)
+    {
+        if (!(MyEntities.GetEntityById(voxelId) is MyVoxelBase voxel))
+            return "Probe vreset: none";
+
+        voxel.Storage.Reset(VRage.Voxels.MyStorageDataTypeFlags.ContentAndMaterial);
+        return "Probe vreset: done";
+    }
+
+    [Command("ventry", "A voxel map's impostor version and whether the game counts it changed.")]
+    [Permission(MyPromoteLevel.Admin)]
+    public string VoxelEntry(long voxelId)
+    {
+        if (!(MyEntities.GetEntityById(voxelId) is MyVoxelBase voxel))
+            return "Probe ventry: none";
+
+        var entry =
+            Service == null
+                ? null
+                : ((IEnumerable)Get(Service, "Entries"))
+                    .Cast<object>()
+                    .FirstOrDefault(e => (long)Get(e, "Id") == voxelId);
+        var version = entry == null ? "-" : Get(entry, "Version");
+        return $"Probe ventry: version={version} changed={voxel.ContentChanged} size={F(voxel.PositionComp.WorldAABB.Size.X)}";
+    }
 }

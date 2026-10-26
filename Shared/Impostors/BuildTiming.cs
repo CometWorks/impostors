@@ -43,6 +43,9 @@ public sealed class BuildTiming
         t.lastCpu = cpuMs;
     }
 
+    // CPU time of the build so far, milliseconds
+    public double CpuMs => ThreadCpuMs() - cpuStart;
+
     // " wall=ms cpu=ms L<lod>=wall/cpu/quads ...", levels in the order they were built
     public override string ToString() =>
         $" wall={wall.Elapsed.TotalMilliseconds:0.00} cpu={ThreadCpuMs() - cpuStart:0.00}{levels}";

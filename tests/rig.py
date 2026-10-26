@@ -175,13 +175,17 @@ def stop_process(pid_file: Path, marker: str, timeout: float = 60.0) -> None:
     if pid is None:
         pid_file.unlink(missing_ok=True)
         return
-    os.killpg(pid, signal.SIGTERM)
-    deadline = time.monotonic() + timeout
-    while _group_alive(pid):
-        if time.monotonic() > deadline:
-            os.killpg(pid, signal.SIGKILL)
-            break
-        time.sleep(1)
+    # The group may be gone by now; that must not skip stopping the next process
+    try:
+        os.killpg(pid, signal.SIGTERM)
+        deadline = time.monotonic() + timeout
+        while _group_alive(pid):
+            if time.monotonic() > deadline:
+                os.killpg(pid, signal.SIGKILL)
+                break
+            time.sleep(1)
+    except ProcessLookupError:
+        pass
     pid_file.unlink(missing_ok=True)
 
 

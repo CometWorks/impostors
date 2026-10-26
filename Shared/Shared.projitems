@@ -12,6 +12,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)Config\IPluginConfig.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Config\PersistentConfig.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Config\PluginConfig.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Impostors\AsteroidPackCache.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Impostors\BuildTiming.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Impostors\CellVolume.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Impostors\GridSource.cs" />
@@ -22,6 +23,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)Impostors\ShapeBuild.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Impostors\ShapeCache.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Impostors\VoxelSource.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)..\ImpostorsMod\Mod\Data\Scripts\Impostors\Common\AsteroidPack.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)..\ImpostorsMod\Mod\Data\Scripts\Impostors\Common\Protocol.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)..\ImpostorsMod\Mod\Data\Scripts\Impostors\Common\ShapeStore.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Logging\IPluginLogger.cs" />

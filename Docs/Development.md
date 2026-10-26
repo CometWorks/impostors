@@ -67,6 +67,11 @@ the whitelist, loading the mod in the game does.
   bursts of changes faster than the rebuild interval, a client killed while its cache saves,
   the server killed during rebuilds, and at the end a rebuild with the cache wiped that must
   match what the cache served. `IMP_ROUNDS` sets the rounds (4).
+- `tests/asteroid_pack.py` writes the asteroid pack of the "Octahedron - Seed 2" world
+  (`write`), then joins above its asteroid ring with empty shape caches without and with the
+  pack (`measure`) and compares the asteroid builds and the shape bytes. `reset` follows one
+  asteroid through a cut, a server restart and a voxel reset; `offline` checks the pack in an
+  offline game with the client plugin. See its docstring.
 - `tests/cluster_scenario.py` checks far view across a cluster on the cluster's scenario
   bench. An asteroid every node builds checks that its shapes reach the WA's cache;
   `IMP_CACHE_MB=0` turns the caches off for a baseline.

@@ -20,6 +20,9 @@ public sealed class ShapeBuild
     public bool Unchanged;
     public bool Cached;
 
+    // The cached shapes are from the world's asteroid pack
+    public bool Packed;
+
     public ShapeBuild(ImpostorEntry entry, IShapeCache cache)
     {
         id = entry.Id;
@@ -29,16 +32,21 @@ public sealed class ShapeBuild
     }
 
     // The shapes built from this content before, or null to build them
-    public byte[][] Reuse(InputHash input)
+    public byte[][] Reuse(InputHash input) => Reuse(input.Value);
+
+    // The same for a content hash known from before, see VoxelSource
+    public byte[][] Reuse(long input)
     {
-        Input = input.Value == 0 ? 1 : input.Value;
+        Input = input == 0 ? 1 : input;
         if (Input == lastInput && lastShapes != null)
         {
             Unchanged = true;
             return lastShapes;
         }
 
-        var shapes = cache?.Get(id, Input);
+        var shapes = cache is AsteroidPackCache pack
+            ? pack.Get(id, Input, out Packed)
+            : cache?.Get(id, Input);
         Cached = shapes != null;
         return shapes;
     }

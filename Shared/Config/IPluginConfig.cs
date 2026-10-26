@@ -59,4 +59,19 @@ public interface IPluginConfig : INotifyPropertyChanged
     // Impostors are sent this much inside the sync distance already, meters, so the client has
     // them before the real entity leaves its replication range
     float ReplicationMargin { get; set; }
+
+    // Takes asteroid shapes from the world's asteroid pack mod (see AsteroidPack) where the
+    // asteroid is unchanged, on the server and, with the client plugin, on the client
+    bool AsteroidPack { get; set; }
+
+    // Workshop id of the mod with the asteroid pack, 0 for any of the world's mods that has one
+    ulong AsteroidPackMod { get; set; }
+
+    // Builds every asteroid of the world and writes the asteroid pack mod into
+    // Storage/Impostors/AsteroidPack in the user data folder, once per session
+    bool WriteAsteroidPack { get; set; }
+
+    // Finest level written into the asteroid pack; with less than 64 the pack is smaller but
+    // serves only clients, the server builds those asteroids
+    int AsteroidPackMaxLevel { get; set; }
 }

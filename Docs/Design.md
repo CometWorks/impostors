@@ -395,6 +395,49 @@ served. No duplicated impostors, no leftover temporary files, no cache errors in
 One race was found and fixed: the client's save at the end of a session could write the cache
 file while the background save was still writing it; both now take the same lock.
 
+## Asteroid pack (SE-701)
+
+A world's asteroids rarely change, yet every server builds them and sends them to every new
+player: above the Octahedron asteroid ring that is hundreds of shapes per player. An asteroid
+pack is a mod with the impostors of all of a world's asteroids, at every level, built once
+(see [Asteroid pack](AsteroidPack.md) for making one).
+
+- The pack is one file, `ImpostorsAsteroidPack.bin` (`AsteroidPack` in the mod's `Common`):
+  per asteroid its entity id, the hash of the content it was built from (the shape cache's
+  input hash), the version and the shapes. The index is read at load; shapes are read from
+  the file when needed.
+- Server: `AsteroidPackCache` sits in front of the shape cache. A build whose content hashes
+  the same as the pack's entry takes the pack's shapes. A mined asteroid hashes differently
+  and is built and cached as before; reset to its original voxels, it hits the pack again.
+  Nothing from the pack goes into the disk cache.
+- Known hashes: reading the voxels for the hash is about 40% of a build, so `VoxelSource`
+  keeps the content hash of every asteroid nobody edited since it was hashed and builds those
+  from the hash alone, from the pack or the shape cache. Any storage change (mining, a voxel
+  hand, a voxel reset, the game's voxel revert) drops the asteroid's hash: its next build
+  reads and hashes the voxels again. After a reset they hash as they did before anybody
+  mined, which is the pack entry's hash, so the pack's shapes come back. A finished build
+  records the hash of what it read, unless the asteroid was edited during the build.
+- So each asteroid is read once, at its first build, and again only after it changed. The
+  game's own `ContentChanged` can't stand in for that: an asteroid saved mined comes back
+  with it false after a restart.
+- The known hashes are saved with the world, as `Storage/Impostors.asteroids` in the save's
+  folder (a save deletes the other files at the top of that folder). They are written while
+  the world saves, so they describe the voxels saved with them, and not for the checkpoint a
+  joining client gets. They are used only with that save (the game time of its
+  `Sandbox.sbc`): an older backup of the world, or a world that crashed before its next
+  save, may hold other voxels. They also carry a hash of what the shapes depend on besides
+  the voxels (`VoxelSource.Settings`: the occlusion setting and the material colors); with
+  other settings they are not used, and every asteroid is read again.
+- Client: the mod adds the pack's asteroids (id, version, level mask) to its Inventory (see
+  "Disk cache"), so the server sends the 14 byte reference instead of a shape, and the client
+  reads the shape from the pack. A client without the pack gets the shapes as before. A
+  server without the pack still saves the bytes as long as it builds the same shapes, as the
+  version is a hash of the shapes.
+- No protocol change: a pack's asteroid looks to the server like a shape in the client's disk
+  cache.
+- A pack written with `AsteroidPackMaxLevel` below 64 has entries without their finest levels.
+  Clients use what is there, the server builds those asteroids itself.
+
 ## Protocol
 
 Mod networking on channel 47213, reliable messages up to 16 KB:
@@ -408,7 +451,7 @@ Mod networking on channel 47213, reliable messages up to 16 KB:
 | ShapeData | server to client | count, then id, version and shape per impostor; or a 1 and the level for a shape in the client's disk cache |
 | View | client to server | field of view with zoom, viewport width and height, view direction, spectator camera and its position; while zoomed or spectating |
 | Ready | client to server | ids of impostors whose real entity started drawing, then those whose entity stopped |
-| Inventory | client to server | whether more follow, count, then id, version and level mask per impostor in the client's disk cache; after each Welcome of a new server instance |
+| Inventory | client to server | whether more follow, count, then id, version and level mask per impostor in the client's disk cache or the world's asteroid pack; after each Welcome of a new server instance |
 
 The repeated hello means the server needs no state about clients across restarts, and a
 cluster node a player was moved to learns about the client within 30 s. A different server

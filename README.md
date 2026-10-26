@@ -21,6 +21,8 @@ Safe zones show from afar too, as translucent bubbles in their color.
 2. Add the Impostors mod to the world.
 3. Optionally edit `Impostors.cfg` in the server's data folder: see
    [Configuration](Docs/Configuration.md).
+4. Optionally make an asteroid pack for the world, so clients get the asteroid impostors
+   with the world's mods instead of over the network: see [Asteroid pack](Docs/AsteroidPack.md).
 
 ## Documentation
 
@@ -32,6 +34,8 @@ Safe zones show from afar too, as translucent bubbles in their color.
   screenshots.
 - [Safe zones](Docs/SafeZones.md): safe zone impostors, and the impostors of grids and
   asteroids inside them.
+- [Asteroid pack](Docs/AsteroidPack.md): asteroid impostors built in advance for a world,
+  shipped as a mod.
 - [Configuration](Docs/Configuration.md): the options of `Impostors.cfg`.
 - [Design](Docs/Design.md): how it works inside, the protocol, clusters and the limits.
 - [Development](Docs/Development.md): building, deployment, debugging and tests.
