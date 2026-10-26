@@ -35,7 +35,21 @@ public class Probe : IPlugin
 
     public void Update() { }
 
-    public void Dispose() { }
+    // What the Impostors service left behind once the plugins are disposed (tests/shutdown.py)
+    public void Dispose()
+    {
+        var type = AppDomain
+            .CurrentDomain.GetAssemblies()
+            .Select(a => a.GetType("Shared.Impostors.ImpostorService"))
+            .FirstOrDefault(t => t != null);
+        var instance = type?.GetProperty("Instance")?.GetValue(null);
+        var session = type
+            ?.GetField("session", BindingFlags.NonPublic | BindingFlags.Static)
+            ?.GetValue(null);
+        MyLog.Default.WriteLineAndConsole(
+            $"ImpostorsProbe: disposed, instance={(instance == null ? "null" : "set")} session={(session == null ? "null" : "set")}"
+        );
+    }
 }
 
 // The world lists the Impostors mod under a stand-in Workshop id the Workshop doesn't

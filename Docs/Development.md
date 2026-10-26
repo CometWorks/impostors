@@ -75,6 +75,9 @@ the whitelist, loading the mod in the game does.
 - `tests/cluster_scenario.py` checks far view across a cluster on the cluster's scenario
   bench. An asteroid every node builds checks that its shapes reach the WA's cache;
   `IMP_CACHE_MB=0` turns the caches off for a baseline.
+- `tests/shutdown.py` checks the server's shutdown (SE-676): the server starts the service and
+  gets a SIGTERM, which disposes the plugins off the game thread. The log must have no
+  "Dispose failed", and the test probe must find the service's state cleared.
 - `tests/build_times.py` makes a table of the build times from the `Impostor build:` lines of
   server logs, per object and level. Any run that builds impostors writes them;
   `scenario.py` and `compare.py` save the table as `build-times.md` next to their shots.
