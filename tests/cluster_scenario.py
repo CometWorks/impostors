@@ -417,7 +417,7 @@ def work_summary(bench: Bench) -> None:
                 for l in log.read_text(errors="replace").splitlines()
                 if re.search(
                     r"Impostor cache: failed|Failed to build impostor|cache-get|IOException"
-                    r"|the WA failed",
+                    r"|shapes \(\d+ bytes\) to the WA failed|-chunk from the WA failed",
                     l,
                 )
             ]
