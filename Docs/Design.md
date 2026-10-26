@@ -383,14 +383,25 @@ WA, two nodes, two stations of 3760 blocks and a 512 m asteroid. One run with
 | WA restart, offline stations | shown from the saved index | the same |
 | First sight for a joining client | 0.2 s | 0.2 s |
 
-A cache hit on a node saves CPU but not time: `cache-get` asks for one level per round trip,
-six in a row through the WA's game thread, about 0.25 s each. For a grid this small building
-it is faster; it pays for large grids and asteroids (and see SE-704 for those).
+Then a cache hit on a node saved CPU but not time: `cache-get` asked for one level per round
+trip, six in a row through the WA's game thread, about 0.25 s each.
 
 Before SE-662 the WA opened its store only once its world was ready, so its own asteroid build
 a few seconds earlier was never stored, and after a restart it built it again. It opens the
-store on first use now. Each node still builds the asteroid itself: a shape level over the
-SDK's 64 KiB payload can't cross the cluster, see SE-704.
+store on first use now.
+
+A shape level over the SDK's 64 KiB payload couldn't cross the cluster until SE-704: the 512 m
+asteroid's finest level is 155 KB, so every node built it, and a grid of another node with a
+finest level that large got no shape at all. Since then an entry's levels cross in 60 KiB
+chunks and a fetch asks for all of them at once. The same run (polaris, cluster 0.1.21) with
+the stations painted in a checkerboard, 9224 blocks with a 97 KB finest level each:
+
+| Event | Before SE-704 | SE-704 |
+|---|---|---|
+| The other node's station on the player's node | missing | shown |
+| The stations' shapes in the WA's cache | missing | 98 KB each |
+| Each node's asteroid | built, 127 ms CPU | from the WA, 19 to 22 ms CPU |
+| A station's partition loads on a node after the WA restart | built | from the WA, 2 round trips, 0.36 to 0.39 s wall |
 
 Consistency, `tests/cache_consistency.py` on factory@ai, two runs of four rounds: every change
 reached both clients within its limit, in 2 to 11 s for block changes (limit RebuildSeconds
