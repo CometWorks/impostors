@@ -252,9 +252,10 @@ def pack_versions() -> dict[int, int]:
     (count,) = struct.unpack("<i", data.read(4))
     versions = {}
     for _ in range(count):
-        asteroid, _input, version, _flags, levels = struct.unpack(
-            "<qqiBB", data.read(22)
-        )
+        asteroid, _input, version, _complete = struct.unpack("<qqiB", data.read(21))
+        if fmt >= 2:
+            data.read(44)  # the frame
+        levels = data.read(1)[0]
         data.read(5 * levels)
         versions[asteroid] = version
     return versions

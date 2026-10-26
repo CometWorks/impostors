@@ -71,12 +71,12 @@ public sealed class AsteroidPackCache : IShapeCache
     }
 
     // Writes the pack of these asteroids: (id, content hash, shapes in the places of
-    // ImpostorEntry.Lods). Levels finer than maxLod are left out, those entries then serve
+    // ImpostorEntry.Lods, the state with the frame clients show them at). Levels finer than maxLod are left out, those entries then serve
     // only clients. Returns the file's size.
     public static long Write(
         string path,
         string world,
-        IEnumerable<(long id, long input, byte[][] shapes)> asteroids,
+        IEnumerable<(long id, long input, byte[][] shapes, ImpostorState frame)> asteroids,
         byte maxLod
     )
     {
@@ -89,7 +89,7 @@ public sealed class AsteroidPackCache : IShapeCache
             writer.Write(world ?? "");
             writer.Write(list.Count);
             var kept = new List<byte[][]>();
-            foreach (var (id, input, shapes) in list)
+            foreach (var (id, input, shapes, frame) in list)
             {
                 var levels = shapes.Where(s => s != null && s.Length > 0).ToArray();
                 var packed = levels.Where(s => s[0] <= maxLod).ToArray();
@@ -98,6 +98,14 @@ public sealed class AsteroidPackCache : IShapeCache
                 writer.Write(input);
                 writer.Write(ImpostorEntry.Hash(shapes));
                 writer.Write((byte)(packed.Length == levels.Length ? 1 : 0));
+                writer.Write(frame.Radius);
+                writer.Write(frame.Position.X);
+                writer.Write(frame.Position.Y);
+                writer.Write(frame.Position.Z);
+                writer.Write(frame.Orientation.X);
+                writer.Write(frame.Orientation.Y);
+                writer.Write(frame.Orientation.Z);
+                writer.Write(frame.Orientation.W);
                 writer.Write((byte)packed.Length);
                 foreach (var shape in packed)
                 {
