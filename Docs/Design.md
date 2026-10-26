@@ -193,8 +193,21 @@ a number to bump whenever a change to the building gives other shapes for the sa
   across a restart, and the clients' disk caches (see "Disk cache") keep working.
 - Every new build replaces the file of its entity. An entity gone from the scan for a minute
   that no longer exists in the world loses its file (not at once: grids leave the scan while
-  a world unloads, before they are closed). Files unused for `CacheDays` (30) go, and the
-  least recently used ones while the folder is over `CacheMegabytes` (256).
+  a world unloads, before they are closed).
+- Retention (SE-711) runs on a background thread of lowest priority, about 2 minutes after
+  the cache opened and then every `CacheSweepMinutes` (60), give or take a quarter. Files
+  unused for `CacheDays` (30) or built more than `CacheBuildDays` (90) ago go, then the least
+  recently used ones while the folder is over `CacheMegabytes` (256). A sweep deletes at most
+  200 files, 5 ms apart, each under the cache's lock on its own; with more to do the next
+  one comes after a minute. A build that puts the cache over its cap brings the sweep
+  forward instead of deleting files on the build thread. A file's write time is its build
+  time; a read only notes the time in memory, and `uses.bin` keeps those times across
+  restarts (saved after each sweep and every 10 minutes while they change). Without an
+  entry there, a file counts as unused since its build. Measured offline with
+  `tests/cache_retention.py` on 50000 files: an idle sweep takes about 1 ms of CPU, one that
+  deletes 200 files about 7 ms of CPU (and a second of pauses) with no file reads, saving
+  `uses.bin` about 10 ms and 0.8 MB of writes. Opening the cache scans the files as before,
+  about 100 ms for 50000 files with a warm file system cache.
 - While builds come from the cache the service starts the next ones every 10 ticks instead of
   every second.
 - Once a minute the log counts the shapes built, taken from the cache and found unchanged
@@ -305,22 +318,28 @@ Versions are content hashes of all levels, so (id, version, level) names a shape
   version, a 1 and the level, instead of the shape. The client decodes it from the cache and
   adds it to the shape store with the shape's real size, so both copies of the store stay
   in step.
-- The server counts on what the client announced, so nothing leaves the cache during a
-  session. Retention runs when the file is loaded and when it is saved at the end of the
-  session: an impostor keeps only the version it used last, entries unused for 30 days go,
-  the file keeps under 64 MB with the least recently used entries dropped first, and the
-  files of the worlds used least recently go while all of them are over 64 MB together. A
-  session that grew the cache over 128 MB prunes it and starts over with the server, as does
-  a client asked for a shape its cache doesn't have.
+- The server counts on what the client announced, so nothing leaves the world's file during
+  a session. Its retention runs when the file is loaded and when it is saved at the end of
+  the session: an impostor keeps only the version it used last, entries unused for 30 days
+  or received more than 90 days ago go, and the file keeps under 64 MB with the least
+  recently used entries dropped first. A background sweep (SE-711), about 2 minutes after
+  the load and then every hour, deletes the files of other worlds unused for 30 days, then
+  those used least recently while all of them are over 64 MB together, at most 4 per sweep.
+  The client plugin takes these limits from its config (see
+  [Configuration](Configuration.md)), the mod keeps the defaults. A session that grew the
+  cache over twice the cap prunes it and starts over with the server, as does a client
+  asked for a shape its cache doesn't have.
 - Saving: on a background thread 30 s after the last new shape, every 10 minutes while they
   keep coming, and at the end of the session. A game that quits without unloading the
   session, or crashes, loses only the last seconds. The file has a checksum; a damaged one
-  is dropped. The files of other worlds are trimmed when a world's file is loaded, too.
+  is dropped. Format 2 (SE-711) adds the day an entry was received; a format 1 file loads
+  with the day it was used last in its place.
 - Compatibility: a server without the cache ignores the Inventory, an older client never
   sends one, so the cache needs no new protocol version.
 
 `tests/cache.py` checks it in game: join, leave, add entries retention must drop, join
-again. The rejoin must get no shapes for the unchanged impostors.
+again. The rejoin must get no shapes for the unchanged impostors. Both sessions also check
+what the sweep deletes of the other worlds' files.
 
 A third person or cockpit camera is close enough to the controlled entity for impostors
 kilometers away.

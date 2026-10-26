@@ -207,12 +207,7 @@ public sealed class ImpostorService : IDisposable
             return null;
         try
         {
-            var cache = DiskShapeCache.Get(
-                CacheFolder,
-                config.CacheMegabytes * 1024L * 1024,
-                config.CacheDays,
-                log
-            );
+            var cache = DiskShapeCache.Get(CacheFolder, config, log);
             log.Info(
                 $"Impostor cache: {cache.Count} entries, {cache.Bytes / 1024} KB in {cache.Folder}"
             );

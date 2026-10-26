@@ -11,20 +11,32 @@ namespace Impostors
     // One file per world (by its name), encoded shapes keyed by impostor id, version and level.
     //
     // The server counts on the client having every shape it announced or got since, so nothing
-    // is dropped during a session. Retention runs when a world's file is loaded and saved: an
-    // id keeps only its last used version, entries unused for MaxDays go, and the files keep
-    // under MaxBytes together, the least recently used world first, then the least recently
-    // used entries.
+    // leaves the world's file during a session. Retention of the entries runs when it is
+    // loaded and saved (see Prune). The files of the other worlds go in a background sweep,
+    // see Sweep.
     public class ShapeCache
     {
-        public const long MaxBytes = 64L * 1024 * 1024;
-        public const int MaxDays = 30;
+        // Retention, the same as the server's disk cache (Impostors.cfg). The client plugin
+        // sets them from its config, the mod keeps these. MaxDays and MaxBuildDays 0 mean no
+        // limit, SweepMinutes 0 turns the sweep off.
+        public static long MaxBytes = 64L * 1024 * 1024;
+        public static int MaxDays = 30;
+        public static int MaxBuildDays = 90;
+        public static int SweepMinutes = 60;
 
         // A session that got this much starts over with a pruned cache, see TooLarge
-        public const long SessionMaxBytes = 2 * MaxBytes;
+        public static long SessionMaxBytes
+        {
+            get { return 2 * MaxBytes; }
+        }
+
+        // Most world files a sweep deletes; one with more to do comes again after a minute.
+        // The first sweep comes this long after the world's file was loaded.
+        private const int FilesPerSweep = 4;
+        private static readonly TimeSpan FirstSweep = TimeSpan.FromMinutes(2);
 
         private const int Magic = 0x43504d49; // "IMPC"
-        private const byte Format = 1;
+        private const byte Format = 2;
         private const string IndexFile = "cache-index.txt";
 
         // Saved this long after the last new shape, and at least this often while they come
@@ -37,6 +49,7 @@ namespace Impostors
             public int Version;
             public byte Lod;
             public int Day;
+            public int Received;
             public long Order;
             public byte[] Data;
         }
@@ -48,6 +61,9 @@ namespace Impostors
         private long order;
         private bool dirty;
         private bool saving;
+        private bool sweeping;
+        private DateTime sweepDue;
+        private readonly Random random = new Random();
 
         // The background save and the one at the end of the session write the same file
         private readonly object writing = new object();
@@ -80,6 +96,7 @@ namespace Impostors
         public void Load(string world)
         {
             file = "cache-" + Fnv(world).ToString("x16") + ".bin";
+            sweepDue = DateTime.UtcNow + Jitter(FirstSweep);
             entries.Clear();
             Bytes = 0;
             try
@@ -205,16 +222,20 @@ namespace Impostors
             }
             entry.Data = data;
             entry.Day = Today;
+            entry.Received = Today;
             entry.Order = order++;
             Bytes += data.Length;
             Changed();
         }
 
         // Retention, only where the server doesn't count on the entries: on load, on save at
-        // the end of the session, and for a session that grew over SessionMaxBytes
+        // the end of the session, and for a session that grew over SessionMaxBytes. An id keeps
+        // only the version it used last, entries unused for MaxDays or received more than
+        // MaxBuildDays ago go, then the least recently used ones while over MaxBytes.
         public void Prune()
         {
-            var oldest = Today - MaxDays;
+            var oldest = MaxDays > 0 ? Today - MaxDays : int.MinValue;
+            var oldestReceived = MaxBuildDays > 0 ? Today - MaxBuildDays : int.MinValue;
             var before = Count;
             var kept = new List<Entry>();
             foreach (var list in entries.Values)
@@ -228,7 +249,11 @@ namespace Impostors
                 }
                 foreach (var entry in list)
                 {
-                    if (entry.Version == last.Version && entry.Day >= oldest)
+                    if (
+                        entry.Version == last.Version
+                        && entry.Day >= oldest
+                        && entry.Received >= oldestReceived
+                    )
                         kept.Add(entry);
                 }
             }
@@ -269,12 +294,41 @@ namespace Impostors
 
         // On a background thread, without pruning: once no new shape came for SaveQuiet, or
         // SaveEvery while they keep coming. A session that ends without unloading, like a
-        // crash, loses only the last few seconds.
+        // crash, loses only the last few seconds. Starts the sweep when it is due.
         public void Update()
         {
-            if (!Loaded || !dirty || saving)
+            if (!Loaded)
                 return;
             var now = DateTime.UtcNow;
+            if (SweepMinutes > 0 && !sweeping && now >= sweepDue)
+            {
+                sweeping = true;
+                var current = file;
+                MyAPIGateway.Parallel.StartBackground(() =>
+                {
+                    var more = false;
+                    try
+                    {
+                        more = Sweep(current) == FilesPerSweep;
+                    }
+                    catch (Exception e)
+                    {
+                        MyLog.Default.WriteLineAndConsole(
+                            "Impostors: the shape cache sweep failed: " + e.Message
+                        );
+                    }
+                    sweepDue =
+                        DateTime.UtcNow
+                        + (
+                            more
+                                ? TimeSpan.FromMinutes(1)
+                                : Jitter(TimeSpan.FromMinutes(SweepMinutes))
+                        );
+                    sweeping = false;
+                });
+            }
+            if (!dirty || saving)
+                return;
             if (now - changed < SaveQuiet && now - saved < SaveEvery)
                 return;
             saved = now;
@@ -298,8 +352,7 @@ namespace Impostors
             });
         }
 
-        // At the end of the session: prune, save, and drop the files of the worlds used least
-        // recently while all of them are over MaxBytes together
+        // At the end of the session: prune and save
         public void Save()
         {
             if (!Loaded)
@@ -360,6 +413,7 @@ namespace Impostors
                 w.Int(entry.Version);
                 w.Byte(entry.Lod);
                 w.Int(entry.Day);
+                w.Int(entry.Received);
                 w.Int(entry.Data.Length);
                 w.Bytes(entry.Data);
             }
@@ -380,7 +434,10 @@ namespace Impostors
                 throw new FormatException("checksum mismatch");
 
             var r = new ByteReader(data);
-            if (r.Int() != Magic || r.Byte() != Format)
+            if (r.Int() != Magic)
+                throw new FormatException("unknown format");
+            var format = r.Byte();
+            if (format != 1 && format != Format)
                 throw new FormatException("unknown format");
             var count = r.Int();
             for (var i = 0; i < count; i++)
@@ -393,6 +450,9 @@ namespace Impostors
                     Day = r.Int(),
                     Order = order++,
                 };
+
+                // Format 1 had no day received, the day used last stands in for it
+                entry.Received = format == 1 ? entry.Day : r.Int();
                 entry.Data = r.Bytes(r.Int());
                 List<Entry> list;
                 if (!entries.TryGetValue(entry.Id, out list))
@@ -418,47 +478,100 @@ namespace Impostors
             }
         }
 
-        // cache-index.txt: a line per world's file with its bytes and the day it was used last
+        // cache-index.txt: a line per world's file with its bytes and the day it was used last.
+        // The current world's line goes last, it was just used.
         private void UpdateIndex()
         {
-            var worlds = new List<string[]>();
-            if (Exists(IndexFile))
+            lock (writing)
             {
-                using (var reader = OpenReadText(IndexFile))
+                var worlds = ReadIndex(file);
+                worlds.Add(new[] { file, Bytes.ToString(), Today.ToString() });
+                WriteIndex(worlds);
+            }
+        }
+
+        // On a background thread: deletes up to FilesPerSweep files of other worlds than the
+        // current one, those not used for MaxDays, then the least recently used ones while
+        // all of them are over MaxBytes together. How many it deleted.
+        private int Sweep(string current)
+        {
+            lock (writing)
+            {
+                var worlds = ReadIndex(null);
+                var own = worlds.Find(w => w[0] == current);
+                worlds.Remove(own);
+                worlds.Sort((a, b) => int.Parse(a[2]).CompareTo(int.Parse(b[2])));
+                var oldest = MaxDays > 0 ? Today - MaxDays : int.MinValue;
+                long total = Math.Max(Bytes, own != null ? long.Parse(own[1]) : 0);
+                foreach (var world in worlds)
+                    total += long.Parse(world[1]);
+
+                var deleted = 0;
+                long bytes = 0;
+                while (worlds.Count > 0 && deleted < FilesPerSweep)
                 {
-                    string line;
-                    while ((line = reader.ReadLine()) != null)
-                    {
-                        var parts = line.Split(' ');
-                        if (parts.Length == 3 && parts[0] != file)
-                            worlds.Add(parts);
-                    }
+                    var world = worlds[0];
+                    if (int.Parse(world[2]) >= oldest && total <= MaxBytes)
+                        break;
+                    Delete(world[0]);
+                    var size = long.Parse(world[1]);
+                    total -= size;
+                    bytes += size;
+                    deleted++;
+                    worlds.RemoveAt(0);
+                }
+                if (deleted == 0)
+                    return 0;
+
+                if (own != null)
+                    worlds.Add(own);
+                WriteIndex(worlds);
+                MyLog.Default.WriteLineAndConsole(
+                    "Impostors: swept "
+                        + deleted
+                        + " shape cache files of other worlds, "
+                        + bytes / 1024
+                        + " KB"
+                );
+                return deleted;
+            }
+        }
+
+        // The lines of the index, but the one of the file named except
+        private List<string[]> ReadIndex(string except)
+        {
+            var worlds = new List<string[]>();
+            if (!Exists(IndexFile))
+                return worlds;
+            using (var reader = OpenReadText(IndexFile))
+            {
+                string line;
+                while ((line = reader.ReadLine()) != null)
+                {
+                    var parts = line.Split(' ');
+                    if (parts.Length == 3 && parts[0] != except)
+                        worlds.Add(parts);
                 }
             }
-            worlds.Add(new[] { file, Bytes.ToString(), Today.ToString() });
+            return worlds;
+        }
 
-            // The current world last, it was just used
-            worlds.Sort(
-                (a, b) =>
-                    a[0] == file ? 1
-                    : b[0] == file ? -1
-                    : int.Parse(a[2]).CompareTo(int.Parse(b[2]))
-            );
-            long total = 0;
-            foreach (var world in worlds)
-                total += long.Parse(world[1]);
-            while (total > MaxBytes && worlds.Count > 1)
-            {
-                total -= long.Parse(worlds[0][1]);
-                Delete(worlds[0][0]);
-                worlds.RemoveAt(0);
-            }
-
+        private void WriteIndex(List<string[]> worlds)
+        {
             using (var writer = OpenWriteText(IndexFile))
             {
                 foreach (var world in worlds)
                     writer.WriteLine(world[0] + " " + world[1] + " " + world[2]);
             }
+        }
+
+        // The interval give or take a quarter
+        private TimeSpan Jitter(TimeSpan interval)
+        {
+            lock (random)
+                return TimeSpan.FromTicks(
+                    (long)(interval.Ticks * (0.75 + 0.5 * random.NextDouble()))
+                );
         }
 
         private static int Checksum(byte[] data)
