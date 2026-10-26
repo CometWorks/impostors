@@ -197,7 +197,7 @@ a number to bump whenever a change to the building gives other shapes for the sa
 - Retention (SE-711) runs on a background thread of lowest priority, about 2 minutes after
   the cache opened and then every `CacheSweepMinutes` (60), give or take a quarter. Files
   unused for `CacheDays` (30) or built more than `CacheBuildDays` (90) ago go, then the least
-  recently used ones while the folder is over `CacheMegabytes` (256). A sweep deletes at most
+  recently used ones while the folder is over `CacheMegabytes` (1024). A sweep deletes at most
   200 files, 5 ms apart, each under the cache's lock on its own; with more to do the next
   one comes after a minute. A build that puts the cache over its cap brings the sweep
   forward instead of deleting files on the build thread. A file's write time is its build
@@ -329,10 +329,10 @@ Versions are content hashes of all levels, so (id, version, level) names a shape
 - The server counts on what the client announced, so nothing leaves the world's file during
   a session. Its retention runs when the file is loaded and when it is saved at the end of
   the session: an impostor keeps only the version it used last, entries unused for 30 days
-  or received more than 90 days ago go, and the file keeps under 64 MB with the least
+  or received more than 90 days ago go, and the file keeps under 512 MB with the least
   recently used entries dropped first. A background sweep (SE-711), about 2 minutes after
   the load and then every hour, deletes the files of other worlds unused for 30 days, then
-  those used least recently while all of them are over 64 MB together, at most 4 per sweep.
+  those used least recently while all of them are over 512 MB together, at most 4 per sweep.
   The client plugin takes these limits from its config (see
   [Configuration](Configuration.md)), the mod keeps the defaults. A session that grew the
   cache over twice the cap prunes it and starts over with the server, as does a client
