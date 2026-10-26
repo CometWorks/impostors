@@ -17,6 +17,10 @@ public interface IPluginConfig : INotifyPropertyChanged
     // building takes about twice as long
     bool AsteroidOcclusion { get; set; }
 
+    // Shades asteroid impostors with normals that follow the voxels' surface; off, they follow
+    // the impostor's cells and the coarse levels look blocky
+    bool AsteroidSmoothNormals { get; set; }
+
     // Sends impostors of enabled safe zones
     bool SafeZones { get; set; }
 

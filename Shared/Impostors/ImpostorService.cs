@@ -185,7 +185,16 @@ public sealed class ImpostorService : IDisposable
         if (config.Grids)
             sources.Add(new GridSource(config));
         if (config.Asteroids)
-            sources.Add(new VoxelSource(config, log));
+        {
+            var voxels = new VoxelSource(config, log);
+            sources.Add(voxels);
+            if (asteroids != null && asteroids.Settings != voxels.Settings)
+                log.Warning(
+                    asteroids.Settings == 0
+                        ? "The asteroid pack is from before AsteroidSmoothNormals, it matches only with that off: write it again"
+                        : "The asteroid pack was built with other asteroid settings (AsteroidOcclusion, AsteroidSmoothNormals or the ore colors), its asteroids get built: write it again"
+                );
+        }
         if (config.SafeZones)
             sources.Add(new SafeZoneSource());
         foreach (var factory in ExtraSources)
@@ -415,6 +424,7 @@ public sealed class ImpostorService : IDisposable
             var bytes = AsteroidPackCache.Write(
                 path,
                 world,
+                sources.OfType<VoxelSource>().First().Settings,
                 asteroids.Select(e => (e.Id, e.Input, e.Shapes)),
                 (byte)config.AsteroidPackMaxLevel
             );

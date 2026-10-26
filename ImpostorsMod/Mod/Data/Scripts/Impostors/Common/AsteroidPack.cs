@@ -13,15 +13,17 @@ namespace Impostors
     // instead of over the network. A mined asteroid hashes differently and is built as before;
     // reset to its original voxels it hits the pack again.
     //
-    // File: magic, format, world name, count, then per asteroid long id, long content hash,
+    // File: magic, format, world name, the asteroid settings (format 2 on), count, then per asteroid long id, long content hash,
     // int version, byte complete, byte level count, byte level and int length per level, and
     // after the index the shapes in the same order. "Complete" is 0 when levels were left out
-    // of the pack: only clients can use such an entry, the server builds those asteroids.
+    // of the pack: only clients can use such an entry, the server builds those asteroids. The
+    // settings are the hash of the server's asteroid settings the pack was built with (see
+    // VoxelSource.Settings); format 1 packs have none and were built with flat normals.
     public class AsteroidPack
     {
         public const string FileName = "ImpostorsAsteroidPack.bin";
         public const int Magic = 0x50414d49; // "IMAP"
-        public const byte Format = 1;
+        public const byte Format = 2;
 
         private class Entry
         {
@@ -43,6 +45,9 @@ namespace Impostors
         private byte[] data;
 
         public string World { get; private set; }
+
+        // Hash of the asteroid settings the pack was built with, 0 for a format 1 pack
+        public long Settings { get; private set; }
         public ulong ModId
         {
             get { return mod.PublishedFileId; }
@@ -83,9 +88,14 @@ namespace Impostors
         {
             using (var reader = MyAPIGateway.Utilities.ReadBinaryFileInModLocation(FileName, mod))
             {
-                if (reader.ReadInt32() != Magic || reader.ReadByte() != Format)
-                    throw new FormatException("not an asteroid pack of this version");
+                if (reader.ReadInt32() != Magic)
+                    throw new FormatException("not an asteroid pack");
+                var format = reader.ReadByte();
+                if (format < 1 || format > Format)
+                    throw new FormatException("an asteroid pack of a newer version");
                 World = reader.ReadString();
+                if (format >= 2)
+                    Settings = reader.ReadInt64();
                 var count = reader.ReadInt32();
                 long offset = 0;
                 for (var i = 0; i < count; i++)
