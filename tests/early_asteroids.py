@@ -81,7 +81,9 @@ def stage_client(ids, with_pack: bool) -> None:
     """The world's mods, with the pack mod's folder empty unless with_pack"""
     mods = CLIENT.appdata / "Mods"
     ring.stage_mods(mods, [i for i in ids if i != ap.PACK_ID])
+    # Remote stages only folders with something in them, a mod without a pack file
     EMPTY_PACK.mkdir(parents=True, exist_ok=True)
+    (EMPTY_PACK / "metadata.mod").write_text("<MyObjectBuilder_ModInfo />")
     link = mods / f"{ap.PACK_ID}.sbm"
     if link.is_symlink() or link.exists():
         link.unlink()

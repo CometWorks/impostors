@@ -72,6 +72,11 @@ the whitelist, loading the mod in the game does.
   pack (`measure`) and compares the asteroid builds and the shape bytes. `reset` follows one
   asteroid through a cut, a server restart and a voxel reset; `offline` checks the pack in an
   offline game with the client plugin. See its docstring.
+- `tests/early_asteroids.py` times how soon the asteroids show when a client joins above
+  the same ring, with an empty cache, a warm cache and the pack, each with and without the
+  early asteroids, and the bytes the server sent (`measure`); `swap` checks an early shape of
+  an asteroid mined since the pack was made; `offline` does the same with the client plugin
+  offline. See its docstring.
 - `tests/cluster_scenario.py` checks far view across a cluster on the cluster's scenario
   bench. An asteroid every node builds checks that its shapes reach the WA's cache;
   `IMP_CACHE_MB=0` turns the caches off for a baseline.

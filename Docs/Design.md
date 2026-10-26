@@ -438,6 +438,52 @@ pack is a mod with the impostors of all of a world's asteroids, at every level, 
 - A pack written with `AsteroidPackMaxLevel` below 64 has entries without their finest levels.
   Clients use what is there, the server builds those asteroids itself.
 
+## Early asteroids (SE-712)
+
+Over an asteroid ring the client used to wait for the server for every asteroid: the server
+picks a player's impostors once a second, starts two builds or pack hits every 10 ticks, and
+sends a state and a shape (or a reference into the cache or the pack) for each. Above the
+Octahedron ring that took a minute or more for all of them. Yet the asteroid pack and the
+client's disk cache already have the shapes, and asteroids rarely change. So the client
+shows those before the server sends them (`EarlyAsteroids` in the mod's `Client`); the client
+cache saves the delay, the server cache saves rebuilding the levels.
+
+- Where they are: since format 2 every pack entry has its frame (radius, position,
+  orientation), and the disk cache keeps the last state the server sent for each asteroid,
+  as an entry of level 255 next to the shapes of its version. Retention treats it like a
+  shape; the Inventory leaves it out. Where both have an asteroid, the cache's state wins:
+  it is what the server sent last. A format 1 pack still works as before, it just shows
+  nothing early.
+- When: at load, every second, and within 10 ticks when the view jumped a kilometer or
+  turned by an eighth of its field of view. The client takes the asteroids within the
+  server's asteroid range and at least its `MinPixels` across, picks their levels the way
+  the server does (the same level for the on-screen size, fitted into `MaxQuadsPerFrame`
+  less half the quads of the server's impostors), and reads their shapes for 2 ms per
+  tick, those in view and the large ones first. The range and `MinPixels` come with the
+  Welcome; until then the session's view distance and 3 pixels apply.
+- Handing over: an early impostor is a normal one of the renderer, by its id, so the
+  server's state for it never adds a second one. From that state on it is the server's:
+  with the same version it keeps the shape it has until the server's level arrives, usually
+  a 14 byte reference into the pack or the cache. With another version (the asteroid was
+  mined since the pack was made or the cache got it) the old shape shows until the server's
+  comes, and the cache keeps the new shape and state for the next join. Ids the server sent a
+  state for or removed are left to it until a new server instance.
+- Streaming in: an early impostor hides when the real voxel map draws, by the same rules as
+  the server's impostors (see "Streaming in"), but the client doesn't report it ready, the
+  server doesn't know it.
+- Offline and on a lobby host the local player's renderer has no disk cache, so only the
+  pack's asteroids show early, and not those within the camera's far plane, where the game
+  draws the real ones.
+- A new server instance (a restart or another cluster node) drops every impostor as before;
+  the early ones are back within a second, the server's follow.
+- The server sends what it sent before: the client still needs the states to know the
+  versions. The bytes the pack and the cache save are the shapes, see the numbers below.
+- `stats.txt` counts them (`early`, `earlyloads`, `earlyms`, `kept`, `swapped`, `swaplog`),
+  and has per impostor the tick it first had a shape and was first drawn. A `noearly` file
+  in the mod's storage turns them off, for the rigs' baselines.
+
+`tests/early_asteroids.py` measures them, see [Asteroid pack](AsteroidPack.md#early-asteroids).
+
 ## Protocol
 
 Mod networking on channel 47213, reliable messages up to 16 KB:
@@ -445,7 +491,7 @@ Mod networking on channel 47213, reliable messages up to 16 KB:
 | Message | Direction | Content |
 |---|---|---|
 | Hello | client to server | protocol version, whether the client has nothing from the server yet, whether an Inventory follows; at load and every 30 s |
-| Welcome | server to client | protocol version, server instance id, `MaxQuadsPerFrame` |
+| Welcome | server to client | protocol version, server instance id, `MaxQuadsPerFrame`, the asteroid range and `MinPixels` (see "Early asteroids") |
 | States | server to client | impostor states: id, kind (grid, voxel or safe zone), version, level, radius, position, orientation, velocity, safe zone tint (74 bytes each); a level from the shape store switches the impostor to it |
 | Remove | server to client | impostor ids |
 | ShapeData | server to client | count, then id, version and shape per impostor; or a 1 and the level for a shape in the client's disk cache |
