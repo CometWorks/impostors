@@ -633,7 +633,7 @@ Magnetar Plugin SDK (`PluginSdk.Clustering`); the client side is unchanged.
   (id, version, frame, velocity, AABB) that changed noticeably since the WA acknowledged the
   last report, and the ids that are gone. Gone means released when the entry's partition left
   the node (handover or offline), deleted otherwise. The shapes of new versions go first
-  (`shape`, one message per level of detail).
+  (`shape-chunk`, see below).
 - The WA merges the reports into the index. A released record stays, without an owner, until
   some node reports the grid again: that is how grids of offline partitions stay visible. Every
   5 s the WA broadcasts the changes to the nodes (`index`) as consecutive revisions.
@@ -641,7 +641,7 @@ Magnetar Plugin SDK (`PluginSdk.Clustering`); the client side is unchanged.
   (`snapshot`).
 - On each node, `RemoteSource` turns the other nodes' records into entries. They skip the
   replication cube test, another node's grid is never replicated to this node's players. Their
-  shapes come from the WA's cache by id and version (`shape-get`).
+  shapes come from the WA's cache by id and version (`shape-get-chunk`).
 - Nodes build every local grid entry, not only the ones their own players see, since players on
   other nodes may need them.
 - The reply to a report carries the WA's instance id. A new one (a WA restart) makes the nodes
@@ -656,11 +656,17 @@ Magnetar Plugin SDK (`PluginSdk.Clustering`); the client side is unchanged.
 - Asteroids are not reported: saved voxel maps are replicas on every node already, each node
   builds them itself.
 - The WA's shape cache is the cluster's only one (SE-648). It keeps the shapes on disk like a
-  single server's cache, and a node's build asks it (`cache-get`, by id and content hash)
+  single server's cache, and a node's build asks it (`cache-get-chunk`, by id and content hash)
   before building. Grid shapes reach it with the reports, which carry the content hash now;
   nodes send the shapes of asteroids and admin safe zones they built too, so the next node to
   build one finds it. A deleted grid leaves the cache, a released one stays. After a WA
-  restart, `shape-get` reads shapes the WA no longer has in memory from the disk.
+  restart, `shape-get-chunk` reads shapes the WA no longer has in memory from the disk.
+- Shapes cross the cluster as one blob per entry, all its levels packed as in the disk cache's
+  files, in chunks of 60 KiB (SE-704): the SDK's payload limit is 64 KiB, and the finest level
+  of a 512 m asteroid is about 150 KB. A push sends all chunks at once, and the WA counts the
+  new version only when every chunk is in. A fetch asks for all levels in one request: the
+  first reply carries the blob's length, and the node asks for the remaining chunks all at once.
+  Failed pushes and fetches log a warning.
 - Safe zones of blocks are reported like grids, admin safe zones are not (see "Safe zones").
 
 The same shape as the cluster's `AntennaGraphService`, which learned that full resends don't
