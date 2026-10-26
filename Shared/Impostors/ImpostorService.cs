@@ -312,24 +312,25 @@ public sealed class ImpostorService : IDisposable
 
     private void Update()
     {
+        var now = MySession.Static.ElapsedPlayTime.TotalSeconds;
         if (++tick % 60 != 0)
         {
-            // Builds that reuse cached shapes finish within a few ticks, the next ones start
-            // without waiting for the next full second
-            if (tick % 10 == 0)
-                UpdateRegistry(MySession.Static.ElapsedPlayTime.TotalSeconds);
-
             // A zoom gets its finer levels within a few ticks, not at the next full second.
             // Six picks per second at most, however many View messages a client sends.
+            var picked = false;
             foreach (var viewer in viewers.Values)
             {
                 if (viewer.Dirty && tick - viewer.LastTick >= 10)
+                {
                     TryUpdateViewer(viewer);
+                    picked = true;
+                }
             }
+
+            // What a zoomed view wants now is built now, not after the next full second
+            UpdateRegistry(now, picked);
             return;
         }
-
-        var now = MySession.Static.ElapsedPlayTime.TotalSeconds;
 
         registry.BeginScan();
         foreach (var source in sources)
@@ -363,7 +364,7 @@ public sealed class ImpostorService : IDisposable
             TryUpdateViewer(viewers[steamId]);
         }
 
-        UpdateRegistry(now);
+        UpdateRegistry(now, true);
 
         if (WritingPack)
             TryWritePack();
@@ -386,11 +387,15 @@ public sealed class ImpostorService : IDisposable
         }
     }
 
-    // Applies the finished builds and starts new ones, timed for the minute's log line
-    private void UpdateRegistry(double now)
+    // Every tick: applies the finished builds and starts new ones as slots free, after the
+    // picks plans which ones; timed for the minute's log line
+    private void UpdateRegistry(double now, bool plan)
     {
         var start = Stopwatch.GetTimestamp();
-        registry.Update(now, config.RebuildSeconds, config.RefreshSeconds);
+        if (plan)
+            registry.Plan(now, config.RebuildSeconds, config.RefreshSeconds);
+        else
+            registry.Pump(now);
         var elapsed = Stopwatch.GetTimestamp() - start;
         buildTicks += elapsed;
         maxBuildTicks = Math.Max(maxBuildTicks, elapsed);
