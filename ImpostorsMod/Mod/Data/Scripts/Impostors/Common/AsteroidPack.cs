@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using Sandbox.ModAPI;
 using VRage.Game;
+using VRageMath;
 
 namespace Impostors
 {
@@ -13,15 +14,19 @@ namespace Impostors
     // instead of over the network. A mined asteroid hashes differently and is built as before;
     // reset to its original voxels it hits the pack again.
     //
+    // The client also shows the pack's asteroids before the server sends them (see
+    // EarlyAsteroids), from the frame each entry has since format 2.
+    //
     // File: magic, format, world name, count, then per asteroid long id, long content hash,
-    // int version, byte complete, byte level count, byte level and int length per level, and
-    // after the index the shapes in the same order. "Complete" is 0 when levels were left out
-    // of the pack: only clients can use such an entry, the server builds those asteroids.
+    // int version, byte complete, the frame (format 2: float radius, double position x, y, z,
+    // float orientation x, y, z, w), byte level count, byte level and int length per level,
+    // and after the index the shapes in the same order. "Complete" is 0 when levels were left
+    // out of the pack: only clients can use such an entry, the server builds those asteroids.
     public class AsteroidPack
     {
         public const string FileName = "ImpostorsAsteroidPack.bin";
         public const int Magic = 0x50414d49; // "IMAP"
-        public const byte Format = 1;
+        public const byte Format = 2;
 
         private class Entry
         {
@@ -32,6 +37,9 @@ namespace Impostors
             public long[] Offsets;
             public int[] Lengths;
             public byte Mask;
+
+            // Where the asteroid is, Id and Version filled in; Kind 0 in a format 1 pack
+            public ImpostorState Frame;
         }
 
         private readonly Dictionary<long, Entry> entries = new Dictionary<long, Entry>();
@@ -83,8 +91,11 @@ namespace Impostors
         {
             using (var reader = MyAPIGateway.Utilities.ReadBinaryFileInModLocation(FileName, mod))
             {
-                if (reader.ReadInt32() != Magic || reader.ReadByte() != Format)
-                    throw new FormatException("not an asteroid pack of this version");
+                if (reader.ReadInt32() != Magic)
+                    throw new FormatException("not an asteroid pack");
+                var format = reader.ReadByte();
+                if (format != 1 && format != Format)
+                    throw new FormatException("an asteroid pack of an unknown version");
                 World = reader.ReadString();
                 var count = reader.ReadInt32();
                 long offset = 0;
@@ -97,6 +108,27 @@ namespace Impostors
                         Version = reader.ReadInt32(),
                         Complete = reader.ReadByte() == 1,
                     };
+                    if (format >= 2)
+                    {
+                        entry.Frame = new ImpostorState
+                        {
+                            Id = id,
+                            Kind = ImpostorKind.Voxel,
+                            Version = entry.Version,
+                            Radius = reader.ReadSingle(),
+                            Position = new Vector3D(
+                                reader.ReadDouble(),
+                                reader.ReadDouble(),
+                                reader.ReadDouble()
+                            ),
+                            Orientation = new Quaternion(
+                                reader.ReadSingle(),
+                                reader.ReadSingle(),
+                                reader.ReadSingle(),
+                                reader.ReadSingle()
+                            ),
+                        };
+                    }
                     var levels = reader.ReadByte();
                     entry.Lods = new byte[levels];
                     entry.Offsets = new long[levels];
@@ -131,6 +163,16 @@ namespace Impostors
         {
             foreach (var pair in entries)
                 visit(pair.Key, pair.Value.Version, pair.Value.Mask);
+        }
+
+        // Client: every asteroid with a frame, its levels and their encoded sizes
+        public void ForEachFrame(Action<ImpostorState, byte[], int[]> visit)
+        {
+            foreach (var entry in entries.Values)
+            {
+                if (entry.Frame.Kind == ImpostorKind.Voxel)
+                    visit(entry.Frame, entry.Lods, entry.Lengths);
+            }
         }
 
         // Client: one level of the asteroid's shapes of this version, or null

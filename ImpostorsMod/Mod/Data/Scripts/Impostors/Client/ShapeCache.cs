@@ -9,6 +9,8 @@ namespace Impostors
     // The shapes the client got from servers, kept on disk so rejoining a server or meeting the
     // same far grids again costs no shapes for unchanged impostors (see Protocol.Inventory).
     // One file per world (by its name), encoded shapes keyed by impostor id, version and level.
+    // An asteroid's last state goes in as an entry of level StateLod, so the client can show
+    // it before the server sends it again (see EarlyAsteroids).
     //
     // The server counts on the client having every shape it announced or got since, so nothing
     // is dropped during a session. Retention runs when a world's file is loaded and saved: an
@@ -26,6 +28,9 @@ namespace Impostors
         private const int Magic = 0x43504d49; // "IMPC"
         private const byte Format = 1;
         private const string IndexFile = "cache-index.txt";
+
+        // The level of the entries that hold an asteroid's state instead of a shape
+        private const byte StateLod = 255;
 
         // Saved this long after the last new shape, and at least this often while they come
         private static readonly TimeSpan SaveQuiet = TimeSpan.FromSeconds(30);
@@ -128,6 +133,8 @@ namespace Impostors
             {
                 foreach (var entry in list)
                 {
+                    if (entry.Lod == StateLod)
+                        continue;
                     Dictionary<int, byte> versions;
                     if (!masks.TryGetValue(entry.Id, out versions))
                         masks[entry.Id] = versions = new Dictionary<int, byte>();
@@ -208,6 +215,56 @@ namespace Impostors
             entry.Order = order++;
             Bytes += data.Length;
             Changed();
+        }
+
+        // An asteroid's state from the server, kept with the shapes of its version
+        public void AddState(ImpostorState state)
+        {
+            var entry = Find(state.Id, state.Version, StateLod);
+            if (entry != null)
+            {
+                entry.Day = Today;
+                entry.Order = order++;
+                return;
+            }
+            var w = new ByteWriter(ImpostorState.Size);
+            state.Write(w);
+            Add(state.Id, state.Version, StateLod, w.ToArray());
+        }
+
+        // Every asteroid with a state: the latest one, with the levels of its version and
+        // their encoded sizes
+        public void ForEachAsteroid(Action<ImpostorState, byte[], int[]> visit)
+        {
+            var lods = new List<byte>();
+            var lengths = new List<int>();
+            foreach (var list in entries.Values)
+            {
+                Entry state = null;
+                foreach (var entry in list)
+                {
+                    if (entry.Lod == StateLod && (state == null || entry.Order > state.Order))
+                        state = entry;
+                }
+                if (state == null)
+                    continue;
+                lods.Clear();
+                lengths.Clear();
+                foreach (var entry in list)
+                {
+                    if (entry.Version == state.Version && entry.Lod != StateLod)
+                    {
+                        lods.Add(entry.Lod);
+                        lengths.Add(entry.Data.Length);
+                    }
+                }
+                if (lods.Count > 0)
+                    visit(
+                        ImpostorState.Read(new ByteReader(state.Data)),
+                        lods.ToArray(),
+                        lengths.ToArray()
+                    );
+            }
         }
 
         // Retention, only where the server doesn't count on the entries: on load, on save at
