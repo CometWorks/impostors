@@ -13,7 +13,7 @@ tests/ring.py.
 Two runs with the same fixed spectator views (the client probe's camera.txt), the Sun's
 rotation off so both see the same light:
 - impostor: the world's view distance 2 km, so beyond that every asteroid is an impostor.
-  Per view a screenshot, one of the sky alone (the impostors hidden), and the client's stats.
+  Per view a screenshot and the client's stats.
   The first view also times the load: seconds from the world being ready and the camera in
   place until 90% and all of the impostors in view are drawn and until their levels stop
   changing. The other views time the same after the camera's jump.
@@ -57,7 +57,7 @@ OUT = rig.TEST_ROOT / f"{rig.TASK}-views" / SETUP
 HEIGHT = 2000.0
 VIEW_DISTANCE = {"impostor": 2000, "real": 50000}
 # Luminance over the sky's from which a pixel counts as covered, as in tests/compare.py
-COVERED = 0.03
+COVERED = 0.04
 rig.CLIENT_GIB = 10.0
 
 
@@ -213,13 +213,6 @@ def run(kind: str) -> dict:
             timing["impostors"] = int(totals.get("impostors", 0))
             shot = OUT / f"{kind}-{name}.png"
             shot.write_bytes(api.screenshot_bytes(ignore_sprites=True))
-            if kind == "impostor":
-                write_mode(client, "real")
-                time.sleep(3)
-                (OUT / f"sky-{name}.png").write_bytes(
-                    api.screenshot_bytes(ignore_sprites=True)
-                )
-                write_mode(client, "")
             result["views"][name] = {
                 "timing": timing,
                 "eye": eye.tolist(),
@@ -234,6 +227,15 @@ def run(kind: str) -> dict:
             server.stop()
     (OUT / f"{kind}.json").write_text(json.dumps(result, indent=1))
     return result
+
+
+def over_border(crop):
+    """Luminance over the median of the crop's border, the sky around the asteroid in the
+    same shot (the game's eye adaptation differs between shots)"""
+    border = np.concatenate(
+        [crop[:3].ravel(), crop[-3:].ravel(), crop[:, :3].ravel(), crop[:, -3:].ravel()]
+    )
+    return crop - np.median(border)
 
 
 def luminance(path: Path):
@@ -273,9 +275,8 @@ def analyze() -> str:
 
         # Asteroids alone on screen, real in the real run: within its replication or far plane
         eye = np.array(v["eye"])
-        sky = luminance(OUT / f"sky-{name}.png")
-        real = luminance(OUT / f"real-{name}.png") - sky
-        imp = luminance(OUT / f"impostor-{name}.png") - sky
+        real = luminance(OUT / f"real-{name}.png")
+        imp = luminance(OUT / f"impostor-{name}.png")
         everyone = [
             (float(x), float(y), float(r["radius"]))
             for r in v["impostors"].values()
@@ -307,11 +308,11 @@ def analyze() -> str:
             if (
                 box[0].start < 0
                 or box[1].start < 0
-                or box[0].stop > sky.shape[0]
-                or box[1].stop > sky.shape[1]
+                or box[0].stop > real.shape[0]
+                or box[1].stop > real.shape[1]
             ):
                 continue
-            rc, mc = real[box], imp[box]
+            rc, mc = over_border(real[box]), over_border(imp[box])
             rp, mp = int((rc > COVERED).sum()), int((mc > COVERED).sum())
             if rp < 4:
                 continue
