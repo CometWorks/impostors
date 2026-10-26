@@ -216,6 +216,9 @@ def run():
         rig.plugin_config(RebuildSeconds=10, RefreshSeconds=20, MaxQuadsPerFrame=20000)
     )
     storage().mkdir(parents=True, exist_ok=True)
+    # The client plugin keeps the values of an Impostors.cfg from an earlier run, the
+    # test goes by the defaults
+    (CLIENT.appdata / "Impostors.cfg").unlink(missing_ok=True)
     for f in cache_files() + list(storage().glob(f"{prefix()}cache-index.txt")):
         f.unlink()
 
