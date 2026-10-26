@@ -29,6 +29,12 @@ game running), and the rig's IMP_RESOLUTION and IMP_DISPLAY (see rig.py).
 An asteroid of another world, like a saved one of "Octahedron - Seed 2", goes by its path; the
 file name needs the storage size after "Asteroid", as in Asteroid512-Seed2-1023.vx2.
 
+For an asteroid it also measures every shot within the game's 50 km view distance: the
+pixels the real one and the impostor cover and their light, each over its own shot's sky
+around it, and prints the impostor's over the real one's per level (SE-722), into
+compare-<name>-measure.md. IMP_REMEASURE=1 measures the shots of the last run again,
+without the game (same target, distances and IMP_TAG).
+
 A safe zone target is an enabled admin zone: a sphere of that radius or a box of that size.
 IMP_ZONE=<radius> puts a grid inside a sphere zone of that radius around GRID_POSITION: the
 impostor shots show both, the grid's impostor tinted with the zone's color. IMP_ZONE_LOWER=1
@@ -288,7 +294,6 @@ def main() -> None:
     shots = (
         {}
     )  # (direction index, row index) -> (real row, real shot, impostor row, impostor shot)
-    backgrounds = {}  # (direction index, row index) -> sky shot
     sun = None
     try:
         SERVER.start()
@@ -352,14 +357,6 @@ def main() -> None:
                 impostor_shot = shoot(
                     api, f"compare-{NAME}-{index}-{int(distance)}-x{zoom:g}-impostor"
                 )
-                if ASTEROID and not ZOOMS:
-                    # The sky alone where both were, for measuring them: the impostor
-                    # hidden, the real one three radii to the side
-                    write_mode("real")
-                    time.sleep(1.5)
-                    backgrounds[index, row_index] = shoot(
-                        api, f"compare-{NAME}-{index}-{int(distance)}-sky"
-                    )
                 CLIENT.set_fov(None)
                 print(
                     f"{view} {far:.0f} m zoom {zoom:g}: {impostor.get('lod')}",
@@ -376,8 +373,8 @@ def main() -> None:
             SERVER.stop()
 
     compose(shots, sun, SHOTS / f"compare-{NAME}.png")
-    if backgrounds:
-        measure_shots(shots, backgrounds, SHOTS / f"compare-{NAME}-measure.md")
+    if ASTEROID and not ZOOMS:
+        measure_shots(shots, SHOTS / f"compare-{NAME}-measure.md")
     rig.write_build_times(SERVER, SHOTS / f"compare-{NAME}-build-times.md")
     # The stats of every shot, for measuring them later
     (SHOTS / f"compare-{NAME}.json").write_text(
@@ -454,12 +451,15 @@ def settle(entity_id: int, timeout: float = 20) -> dict:
     return stats_row(entity_id)
 
 
-# Luminance over the sky's, 0..1, from which a pixel counts as covered
-COVERED = 0.03
+# Luminance over the background's from which a pixel counts as covered
+COVERED = 0.04
 
 
-def luminance(path: Path, row: dict, size: int):
-    """Luminance 0..1 of the square around the target, half its side size pixels"""
+def covered(path: Path, row: dict, size: int):
+    """The pixels of the square around the target, half its side size pixels, brighter than
+    its border's median (the sky behind it, taken from the same shot, so the game's eye
+    adaptation between shots doesn't count) by COVERED: their count and their light over
+    the border's, luminance 0..1"""
     import numpy as np
     from PIL import Image
 
@@ -470,14 +470,20 @@ def luminance(path: Path, row: dict, size: int):
     cx, cy = int(x * sx), int(y * sy)
     box = (cx - size, cy - size, cx + size, cy + size)
     rgb = np.asarray(image.crop(box), dtype=np.float32) / 255
-    return rgb @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
+    lum = rgb @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
+    border = np.concatenate(
+        [lum[:3].ravel(), lum[-3:].ravel(), lum[:, :3].ravel(), lum[:, -3:].ravel()]
+    )
+    over = lum - np.median(border)
+    mask = over > COVERED
+    return int(mask.sum()), float(over[mask].sum())
 
 
-def measure_shots(shots, backgrounds, target: Path) -> None:
-    """Per shot: the pixels the real asteroid and the impostor cover (brighter than the sky
-    by COVERED) and their light over the sky's summed over them, and the impostor's over the
-    real one's; then the medians per level. Dark sides against a dark sky don't count, the
-    figures are what shows."""
+def measure_shots(shots, target: Path) -> None:
+    """Per shot the real asteroid and its impostor are measured alike, see covered: the
+    impostor's pixels and light over the real one's, then the medians per level. Dark sides
+    against a dark sky don't count, the figures are what shows. Shots farther than the
+    game's 50 km view distance have no real one and are left out."""
     import numpy as np
 
     lines = [
@@ -489,20 +495,15 @@ def measure_shots(shots, backgrounds, target: Path) -> None:
     for (index, row_index), (real, real_shot, impostor, impostor_shot) in sorted(
         shots.items()
     ):
-        sky = backgrounds.get((index, row_index))
-        if sky is None or "screen" not in real or "lod" not in impostor:
+        if "screen" not in real or "lod" not in impostor or ROWS[row_index][0] > 48000:
             continue
         radius = float(real["radius"])
         size = max(8, int(radius * 1.6))
         try:
-            base = luminance(sky, real, size)
-            r = luminance(real_shot, real, size) - base
-            m = luminance(impostor_shot, real, size) - base
-        except (KeyError, ValueError):
+            real_px, real_light = covered(real_shot, real, size)
+            imp_px, imp_light = covered(impostor_shot, real, size)
+        except (KeyError, ValueError, OSError):
             continue
-        real_px, imp_px = int((r > COVERED).sum()), int((m > COVERED).sum())
-        real_light = float(np.clip(r, 0, None)[r > COVERED].sum())
-        imp_light = float(np.clip(m, 0, None)[m > COVERED].sum())
         area = imp_px / real_px if real_px else float("nan")
         light = imp_light / real_light if real_light else float("nan")
         level = impostor["lod"]
@@ -514,15 +515,19 @@ def measure_shots(shots, backgrounds, target: Path) -> None:
             f"| {name} | {ROWS[row_index][0]:.0f} | {level} | {radius:.1f} | {real_px} "
             f"| {imp_px} | {area:.2f} | {real_light:.1f} | {imp_light:.1f} | {light:.2f} |"
         )
-    lines += ["", "| Level | Shots | Area ratio median | Light ratio median |", "|---:|---:|---:|---:|"]
+    summary = [
+        "",
+        "| Level | Shots | Area ratio median | Light ratio median |",
+        "|---:|---:|---:|---:|",
+    ]
     for level in sorted(per_level, key=int):
         values = np.array(per_level[level], dtype=float)
-        lines.append(
+        summary.append(
             f"| {level} | {len(values)} | {np.nanmedian(values[:, 0]):.2f} "
             f"| {np.nanmedian(values[:, 1]):.2f} |"
         )
-    target.write_text("\n".join(lines) + "\n")
-    print("\n".join(lines[-len(per_level) - 2 :]), flush=True)
+    target.write_text("\n".join(lines + summary) + "\n")
+    print("\n".join(summary), flush=True)
     print("measured", target, flush=True)
 
 
@@ -631,5 +636,25 @@ def compose(shots, sun, target: Path) -> None:
     print("comparison", target)
 
 
+def remeasure() -> None:
+    """measure_shots on the shots and stats of the last run of this target and tag"""
+    data = json.loads((SHOTS / f"compare-{NAME}.json").read_text())
+    shots = {}
+    for shot in data["shots"]:
+        index, distance = shot["direction"], shot["distance"]
+        row_index = next(k for k, r in enumerate(ROWS) if r[0] == distance)
+        base = SHOTS / f"compare-{NAME}-{index}-{int(distance)}"
+        shots[index, row_index] = (
+            shot["real"],
+            Path(f"{base}-real.png"),
+            shot["impostor"],
+            Path(f"{base}-x{shot['zoom']:g}-impostor.png"),
+        )
+    measure_shots(shots, SHOTS / f"compare-{NAME}-measure.md")
+
+
 if __name__ == "__main__":
-    main()
+    if os.environ.get("IMP_REMEASURE") == "1":
+        remeasure()
+    else:
+        main()
