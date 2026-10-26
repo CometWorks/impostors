@@ -177,6 +177,8 @@ def run(bench: Bench, stats_file: Path, world: Path) -> dict:
     character = bench.wait_spawned(CLIENT_ID)
     spawned = time.monotonic()
     bench.ensure_gameplay_focus(CLIENT_ID)
+    if api.get_view().get("thirdPerson"):
+        api.key("V")
     result = {
         "cluster_ready_s": ready - start,
         "client_spawned_s": spawned - ready,
@@ -203,6 +205,11 @@ def run(bench: Bench, stats_file: Path, world: Path) -> dict:
             print(f"{name}: look_at failed: {error}", flush=True)
         timing = timeline(lambda: stats(stats_file), moved, SETTLE)
         rows = stats(stats_file)
+        try:
+            header = stats_file.read_text().splitlines()[0]
+            timing["impostors"] = int(re.search(r"impostors=(\d+)", header).group(1))
+        except (OSError, IndexError, AttributeError):
+            pass
         bench.screenshot(CLIENT_ID, f"view-{name}")
         result["views"][name] = {
             "timing": timing,
@@ -211,6 +218,30 @@ def run(bench: Bench, stats_file: Path, world: Path) -> dict:
         }
         print(f"{name} (player on {node}): {json.dumps(timing)}", flush=True)
     return result
+
+
+def work(bench: Bench) -> list[str]:
+    """Per process: asteroid builds, shapes from the WA's cache, and failed requests to the WA
+    by reason"""
+    lines = [
+        "| Process | Asteroid builds | From the cache | WA requests failed |",
+        "|---|---:|---:|---|",
+    ]
+    for p in PROCESSES:
+        text = "".join(
+            log.read_text(errors="replace")
+            for log in (bench.run_root / f"{p}-data").glob(
+                "SpaceEngineersDedicated_*.log"
+            )
+        )
+        builds = len(re.findall(r"Impostor build: .*kind=Voxel", text))
+        hits = len(re.findall(r"Impostor from the cache: .*kind=Voxel", text))
+        failed: dict[str, int] = {}
+        for reason in re.findall(r"the WA failed: (\w+)", text):
+            failed[reason] = failed.get(reason, 0) + 1
+        reasons = ", ".join(f"{k} {v}" for k, v in sorted(failed.items())) or "-"
+        lines.append(f"| {p} | {builds} | {hits} | {reasons} |")
+    return lines
 
 
 def main() -> None:
@@ -231,6 +262,7 @@ def main() -> None:
         bench.cluster.prepare(wipe=True)
         stats_file = stage(bench)
         result = run(bench, stats_file, world)
+        result["work"] = work(bench)
         bench.record("views", result)
     except Exception as error:  # noqa: BLE001 -- reported as a failed check
         bench.check("no error", False, f"{type(error).__name__}: {error}")
@@ -248,6 +280,7 @@ def main() -> None:
             lines += ["", f"## {name} (player on {v['node']})", ""] + level_table(
                 v["impostors"]
             )
+        lines += ["", "## Work over the run", ""] + result.get("work", [])
     text = "\n".join(lines) + "\n"
     (bench.dir / "summary.md").write_text(text)
     print(text)

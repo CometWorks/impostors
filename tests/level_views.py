@@ -210,6 +210,7 @@ def run(kind: str) -> dict:
                 timing = {}
             time.sleep(2)
             totals, impostors = client.stats()
+            timing["impostors"] = int(totals.get("impostors", 0))
             shot = OUT / f"{kind}-{name}.png"
             shot.write_bytes(api.screenshot_bytes(ignore_sprites=True))
             if kind == "impostor":

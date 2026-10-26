@@ -93,12 +93,13 @@ def drawn_level(row: dict) -> int:
 def timing_table(timings: dict[str, dict]) -> list[str]:
     fmt = lambda v: "-" if v is None else f"{v:.1f}"
     lines = [
-        "| View | In view | Drawn | First drawn s | 90% drawn s | All drawn s | Levels settled s |",
-        "|---|---:|---:|---:|---:|---:|---:|",
+        "| View | Impostors | In view | Drawn | First drawn s | 90% drawn s | All drawn s "
+        "| Levels settled s |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for name, t in timings.items():
         lines.append(
-            f"| {name} | {t.get('inview')} | {t.get('drawn')} | {fmt(t.get('first'))} "
+            f"| {name} | {t.get('impostors', '-')} | {t.get('inview')} | {t.get('drawn')} | {fmt(t.get('first'))} "
             f"| {fmt(t.get('ninety'))} | {fmt(t.get('all'))} | {fmt(t.get('levels_settled'))} |"
         )
     return lines
