@@ -214,12 +214,7 @@ public sealed class ImpostorService : IDisposable
             return null;
         try
         {
-            var cache = DiskShapeCache.Get(
-                CacheFolder,
-                config.CacheMegabytes * 1024L * 1024,
-                config.CacheDays,
-                log
-            );
+            var cache = DiskShapeCache.Get(CacheFolder, config, log);
             log.Info(
                 $"Impostor cache: {cache.Count} entries, {cache.Bytes / 1024} KB in {cache.Folder}"
             );
@@ -567,7 +562,7 @@ public sealed class ImpostorService : IDisposable
         Send(sender);
     }
 
-    // Bounds what a client can make us keep, far more than a 64 MB cache holds
+    // Bounds what a client can make us keep, far more than a 512 MB cache holds
     private const int MaxOnDisk = 1 << 18;
 
     // The client's disk cache, in one or more messages after each Welcome of a new instance

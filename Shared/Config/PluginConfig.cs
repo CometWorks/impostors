@@ -37,8 +37,11 @@ public class PluginConfig : IPluginConfig
     private int rebuildSeconds = 60;
     private int refreshSeconds = 600;
     private float replicationMargin = 500f;
-    private int cacheMegabytes = 256;
+    private int cacheMegabytes = 1024;
     private int cacheDays = 30;
+    private int cacheBuildDays = 90;
+    private int cacheSweepMinutes = 60;
+    private int clientCacheMegabytes = 512;
     private bool asteroidPack = true;
     private ulong asteroidPackMod;
     private bool writeAsteroidPack;
@@ -138,6 +141,24 @@ public class PluginConfig : IPluginConfig
     {
         get => cacheDays;
         set => SetValue(ref cacheDays, value);
+    }
+
+    public int CacheBuildDays
+    {
+        get => cacheBuildDays;
+        set => SetValue(ref cacheBuildDays, value);
+    }
+
+    public int CacheSweepMinutes
+    {
+        get => cacheSweepMinutes;
+        set => SetValue(ref cacheSweepMinutes, value);
+    }
+
+    public int ClientCacheMegabytes
+    {
+        get => clientCacheMegabytes;
+        set => SetValue(ref clientCacheMegabytes, value);
     }
 
     public bool AsteroidPack
