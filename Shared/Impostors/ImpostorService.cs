@@ -3,7 +3,9 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using Impostors;
+using Sandbox;
 using Sandbox.Engine.Multiplayer;
 using Sandbox.Game.Multiplayer;
 using Sandbox.Game.World;
@@ -257,7 +259,11 @@ public sealed class ImpostorService : IDisposable
 
     public void Dispose()
     {
-        MyAPIGateway.Multiplayer?.UnregisterSecureMessageHandler(Protocol.Channel, OnMessage);
+        // The game allows changing message handlers on its update thread only. Plugin.Dispose
+        // runs on the unload thread at shutdown, when the game loop is gone: OnMessage ignores
+        // a stopped service, so the handler left registered there does nothing.
+        if (Thread.CurrentThread == MySandboxGame.Static?.UpdateThread)
+            MyAPIGateway.Multiplayer?.UnregisterSecureMessageHandler(Protocol.Channel, OnMessage);
         foreach (var source in sources)
             (source as IDisposable)?.Dispose();
         log.Info("Impostors service stopped");
@@ -300,9 +306,10 @@ public sealed class ImpostorService : IDisposable
 
     public static void Stop()
     {
-        instance?.Dispose();
+        var stopped = instance;
         instance = null;
         session = null;
+        stopped?.Dispose();
     }
 
     private void Update()
@@ -480,7 +487,7 @@ public sealed class ImpostorService : IDisposable
 
     private void OnMessage(ushort channel, byte[] message, ulong sender, bool fromServer)
     {
-        if (sender != Sync.MyId)
+        if (sender != Sync.MyId && this == instance)
             Receive(message, sender, false);
     }
 
