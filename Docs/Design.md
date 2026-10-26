@@ -221,6 +221,8 @@ replication cube instead of removed:
   coarser than the one the client has, and sends that shape whatever the player's shape
   debt (SE-709). At 10 km/s the approach takes a second or two and the player is often in
   debt by then, so the level from afar is a small one: level 16 or coarser for a station.
+  When the levels are over `MaxQuadsPerFrame`, the other impostors get coarser ones and the
+  held ones keep theirs.
   Held impostors sort right after the safe zones, so they get the shape credit before the
   others and `MaxImpostorsPerPlayer` doesn't drop them.
 - The client tells the server with a `Ready` message when the real entity draws itself: in

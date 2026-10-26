@@ -12,6 +12,7 @@ with the number of failures.
     uv run --no-project --with httpx --with pillow python tests/streaming.py
     IMP_WITH_PLUGIN=1 ...      # the client also runs the client plugin, which tells
                                  the mod when an asteroid's meshes show
+    IMP_ONLY=inside ...        # only the arrival inside the safe zone
 """
 
 from __future__ import annotations
@@ -119,18 +120,22 @@ def arrive(api, target, far, near, timeout=75.0, also=None):
     return lod, samples
 
 
-def ready_log(totals: dict, entity_id: int):
+def ready_log(totals: dict, entity_id: int, after: int = 0):
     """The client's ticks when the target's real entity became drawable and when it counted
-    as drawing, and whether the client plugin reported an asteroid's meshes"""
+    as drawing, and whether the client plugin reported an asteroid's meshes; the last time
+    after this tick, an entity that streamed in before has older entries"""
+    found = None
     for entry in totals.get("readylog", "").split(","):
         if entry.startswith(f"{entity_id}:"):
             _, drawable, ready, loaded = entry.split(":")
-            return int(drawable), int(ready), loaded == "1"
-    return None
+            if int(ready) >= after:
+                found = int(drawable), int(ready), loaded == "1"
+    return found
 
 
 def run(api):
-    for target, far, near in TARGETS:
+    # IMP_ONLY=inside: only the arrival inside the zone
+    for target, far, near in TARGETS if os.environ.get("IMP_ONLY") != "inside" else ():
         lod, samples = arrive(api, target, far, near)
         if not samples:
             continue
@@ -140,7 +145,7 @@ def run(api):
         )
         # Client ticks, from the first stats after the jump (up to a second late)
         jump = int(samples[0][2].get("tick", 0))
-        log = ready_log(samples[-1][2], target.entity_id)
+        log = ready_log(samples[-1][2], target.entity_id, after=jump)
         drawable, ready, loaded = log or (None, None, False)
         tick = lambda s: int(s[2].get("tick", 0))
         gone = next((tick(s) for s in samples if s[1] is None), None)
@@ -212,11 +217,18 @@ def inside_zone(api):
     lod, samples = arrive(api, ZONE, far, inside, also=SHIELDED)
     if not samples:
         return
+    scenario.SHOTS.mkdir(parents=True, exist_ok=True)
+    (scenario.SHOTS / "streaming-inside.json").write_text(json.dumps(samples, indent=1))
     afar = samples[0][3]["afar"] or {}
     check("Shielded tinted from afar", "tint" in afar, afar)
     full = expected_level(api, SHIELDED, inside)
-    log = ready_log(samples[-1][2], SHIELDED.entity_id)
+    log = ready_log(
+        samples[-1][2], SHIELDED.entity_id, after=int(samples[0][2].get("tick", 0))
+    )
     ready = log[1] if log else None
+    print(
+        f"Shielded: readylog {log}, sampled ticks {int(samples[0][2].get('tick', 0))} to {int(samples[-1][2].get('tick', 0))}"
+    )
     shielded = lambda s: s[3].get("now")
     tick = lambda s: int(s[2].get("tick", 0))
     late = [

@@ -805,7 +805,7 @@ public sealed class ImpostorService : IDisposable
         // The local player's shapes don't go over the network, they never wait
         if (viewer.Local)
             viewer.ShapeCredit = int.MaxValue;
-        var fit = FitLevels(viewer, shown, zones);
+        var fit = FitLevels(viewer, shown, zones, held);
         for (var i = 0; i < shown.Count; i++)
         {
             var (entry, _, _, distance) = shown[i];
@@ -967,11 +967,13 @@ public sealed class ImpostorService : IDisposable
     // MaxQuadsPerFrame, about half of a shape's quads face the camera: when the wanted levels
     // are over it, all of them are picked for a smaller screen, so the near ones lose detail
     // instead of the client dropping the far ones. Over an asteroid ring a few near asteroids
-    // at level 32 would take the whole budget.
+    // at level 32 would take the whole budget. Held impostors keep their full level, they
+    // stand in for the real grids right next to the player: the others make room.
     private List<(int index, byte picked, Color tint)> FitLevels(
         Viewer viewer,
         List<(ImpostorEntry entry, double pixels, double zoom, double distance)> shown,
-        List<ZoneVolume?> zones
+        List<ZoneVolume?> zones,
+        HashSet<long> held
     )
     {
         var tints = shown
@@ -981,17 +983,17 @@ public sealed class ImpostorService : IDisposable
                     : ZoneTint(zones, c.entry, viewer.Eye)
             )
             .ToList();
-        var fit = Levels(viewer, shown, tints, 1, out var quads);
+        var fit = Levels(viewer, shown, tints, held, 1, out var quads);
         if (quads <= config.MaxQuadsPerFrame)
             return fit;
 
         double low = 0,
             high = 1;
-        var best = Levels(viewer, shown, tints, 0, out _);
+        var best = Levels(viewer, shown, tints, held, 0, out _);
         for (var step = 0; step < 12; step++)
         {
             var scale = (low + high) / 2;
-            var levels = Levels(viewer, shown, tints, scale, out quads);
+            var levels = Levels(viewer, shown, tints, held, scale, out quads);
             if (quads <= config.MaxQuadsPerFrame)
             {
                 low = scale;
@@ -1012,7 +1014,8 @@ public sealed class ImpostorService : IDisposable
         Viewer viewer,
         List<(ImpostorEntry entry, double pixels, double zoom, double distance)> shown,
         List<Color> tints,
-        double scale,
+        HashSet<long> held,
+        double screen,
         out int quads
     )
     {
@@ -1028,6 +1031,7 @@ public sealed class ImpostorService : IDisposable
             }
 
             viewer.Sent.TryGetValue(entry.Id, out var sent);
+            var scale = held.Contains(entry.Id) ? 1 : screen;
             var full = scale >= 1;
             var picked = PickLod(
                 pixels * zoom * scale,
