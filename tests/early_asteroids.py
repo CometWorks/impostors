@@ -381,9 +381,7 @@ def offline_run(tag: str, early: bool) -> dict:
     jump = int(totals.get("jumptick", 0))
     voxels = [i for i in impostors.values() if i.get("kind") == "Voxel"]
     shaped = [
-        max(0, int(i["firstshape"]) - jump)
-        for i in voxels
-        if int(i["firstshape"]) >= 0
+        max(0, int(i["firstshape"]) - jump) for i in voxels if int(i["firstshape"]) >= 0
     ]
     print(
         f"{tag}: {len(voxels)} asteroids, after the teleport {percentiles(shaped)}; early "
