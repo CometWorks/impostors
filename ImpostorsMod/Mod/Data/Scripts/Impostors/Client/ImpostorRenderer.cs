@@ -114,6 +114,13 @@ namespace Impostors
         public static bool UsePack = true;
         public static ulong PackMod;
 
+        // Asteroids of the pack and the disk cache shown before the server sends them, out to
+        // the server's asteroid range (the view distance until its Welcome says) and down to
+        // its MinPixels; null without a pack or a cache, or with "noearly" in the storage
+        private EarlyAsteroids early;
+        private double asteroidRange = -1;
+        private double minPixels = 3;
+
         // In the camera's view in the last frame, before the budget (stats)
         private int inView;
         private readonly List<DrawPart> parts = new List<DrawPart>();
@@ -192,6 +199,16 @@ namespace Impostors
         private int overBudget;
         private int coarser;
 
+        // Bytes of the server's messages, and the last tick the view turned or jumped (see
+        // NoteMoves)
+        private long receivedBytes;
+        private int turnTick = -1;
+        private int jumpTick = -1;
+        private Vector3 lastForward;
+        private Vector3 restForward;
+        private int restTick;
+        private Vector3D lastEye;
+
         public override void LoadData()
         {
             if (MyAPIGateway.Utilities.IsDedicated)
@@ -231,9 +248,9 @@ namespace Impostors
                     cache = new ShapeCache(ModContext != null);
                     cache.Load(MyAPIGateway.Session.Name);
                 }
-                if (UsePack)
-                    OpenPack();
             }
+            if (UsePack)
+                OpenPack();
             MyAPIGateway.Utilities.RegisterMessageHandler(BudgetMessage, OnBudget);
             MyAPIGateway.Utilities.RegisterMessageHandler(VoxelLoadedMessage, OnVoxelLoaded);
             active = true;
@@ -241,6 +258,13 @@ namespace Impostors
             // Tests put this file into the storage (see StorageExists) to get stats.txt every
             // second and to switch between the real entities and their impostors (see ReadMode)
             debug = StorageExists("debug");
+
+            // Tests turn the early asteroids off with "noearly", for a baseline
+            if ((cache != null || pack != null) && !(debug && StorageExists("noearly")))
+            {
+                early = new EarlyAsteroids(impostors, cache, pack);
+                ReadRange();
+            }
         }
 
         private void OpenPack()
@@ -272,6 +296,79 @@ namespace Impostors
                     + ((timer.ElapsedTicks - start) * 1000 / MyGameTimer.Frequency)
                     + " ms"
             );
+        }
+
+        // The asteroid range and MinPixels of the last Welcome in this world, so the next
+        // session shows the early asteroids before the Welcome comes: a line per world, by a
+        // hash of its name, in RangeFile, in meters and thousandths of a pixel (no decimal
+        // separator, whatever the locale)
+        private const string RangeFile = "asteroid-range.txt";
+        private const int RangeWorlds = 64;
+
+        private string WorldKey
+        {
+            get { return ShapeCache.Fnv(MyAPIGateway.Session.Name).ToString("x16"); }
+        }
+
+        private List<string> RangeLines()
+        {
+            var lines = new List<string>();
+            if (!StorageExists(RangeFile))
+                return lines;
+            using (var file = ReadStorage(RangeFile))
+            {
+                string line;
+                while ((line = file.ReadLine()) != null)
+                    lines.Add(line);
+            }
+            return lines;
+        }
+
+        private void ReadRange()
+        {
+            try
+            {
+                foreach (var line in RangeLines())
+                {
+                    var words = line.Split(' ');
+                    if (words.Length == 3 && words[0] == WorldKey)
+                    {
+                        asteroidRange = long.Parse(words[1]);
+                        minPixels = long.Parse(words[2]) / 1000.0;
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                MyLog.Default.WriteLineAndConsole(
+                    "Impostors: failed to read " + RangeFile + ": " + e.Message
+                );
+            }
+        }
+
+        private void WriteRange()
+        {
+            if (early == null)
+                return;
+            try
+            {
+                var key = WorldKey;
+                var lines = RangeLines().FindAll(l => !l.StartsWith(key + " "));
+                if (lines.Count >= RangeWorlds)
+                    lines.RemoveRange(0, lines.Count - RangeWorlds + 1);
+                lines.Add(key + " " + (long)asteroidRange + " " + (long)(minPixels * 1000));
+                using (var file = WriteStorage(RangeFile))
+                {
+                    foreach (var line in lines)
+                        file.WriteLine(line);
+                }
+            }
+            catch (Exception e)
+            {
+                MyLog.Default.WriteLineAndConsole(
+                    "Impostors: failed to write " + RangeFile + ": " + e.Message
+                );
+            }
         }
 
         // The mod's files are in its local storage. Pulsar compiles the client plugin under a
@@ -329,6 +426,7 @@ namespace Impostors
             impostors.Clear();
             store.Clear();
             pack = null;
+            early = null;
             if (cache != null)
             {
                 cache.Save();
@@ -378,6 +476,9 @@ namespace Impostors
             if (cache != null)
                 cache.Update();
 
+            if (early != null)
+                UpdateEarly();
+
             // A few View messages per second at most
             if (tick % 10 == 0)
                 SendView();
@@ -395,6 +496,35 @@ namespace Impostors
                 ReadMode();
                 WriteStats();
             }
+        }
+
+        // The early asteroids out to the server's range, the view distance until it says, and
+        // with the room the server's impostors leave in the quad budget, half of their quads
+        // facing the camera. Locally not those the game draws itself, within the far plane.
+        private void UpdateEarly()
+        {
+            var camera = MyAPIGateway.Session.Camera;
+            if (camera == null)
+                return;
+            var used = 0;
+            if (tick % 10 == 0)
+            {
+                foreach (var impostor in impostors.Values)
+                {
+                    if (!impostor.Early && impostor.Shape != null)
+                        used += impostor.Shape.Count / 2;
+                }
+            }
+            early.Update(
+                camera,
+                tick,
+                asteroidRange >= 0
+                    ? asteroidRange
+                    : MyAPIGateway.Session.SessionSettings.ViewDistance,
+                minPixels,
+                local ? camera.FarPlaneDistance : 0,
+                Math.Max(0, maxQuads - used)
+            );
         }
 
         // Tells the server about a zoomed view or a spectator camera (see Protocol.View): when
@@ -485,7 +615,7 @@ namespace Impostors
         private void SendReady()
         {
             // The local player's game has every entity, the service never holds one for it
-            if (serverInstance == 0 || local)
+            if (local)
                 return;
             readyIds.Clear();
             unreadyIds.Clear();
@@ -506,10 +636,9 @@ namespace Impostors
                     : loadedVoxels.Contains(id) ? ReadyCheckTicks
                     : VoxelReadyTicks;
                 var ready = impostor.DrawableTick >= 0 && tick - impostor.DrawableTick >= wait;
-                if (ready == impostor.Ready)
-                    continue;
-                impostor.Ready = ready;
-                if (debug && ready)
+
+                // Early asteroids hide too, but the server doesn't know them
+                if (ready != impostor.Ready && debug && ready)
                 {
                     if (readyLog.Count == 8)
                         readyLog.RemoveAt(0);
@@ -523,6 +652,10 @@ namespace Impostors
                             + (loadedVoxels.Contains(id) ? 1 : 0)
                     );
                 }
+                impostor.Ready = ready;
+                if (impostor.Early || serverInstance == 0 || ready == impostor.Reported)
+                    continue;
+                impostor.Reported = ready;
                 (ready ? readyIds : unreadyIds).Add(id);
             }
             readySent += readyIds.Count;
@@ -738,6 +871,32 @@ namespace Impostors
                     + sentViewTick
                     + " zoomtick="
                     + zoomTick
+                    + " recvkb="
+                    + receivedBytes / 1024
+                    + " turntick="
+                    + turnTick
+                    + " jumptick="
+                    + jumpTick
+                    + " range="
+                    + asteroidRange.ToString("0")
+                    + (
+                        early != null
+                            ? " early="
+                                + early.Count
+                                + " earlyknown="
+                                + early.KnownCount
+                                + " earlyloads="
+                                + early.Loaded
+                                + " earlyms="
+                                + (early.LoadTicks * 1000 / MyGameTimer.Frequency)
+                                + " kept="
+                                + early.Kept
+                                + " swapped="
+                                + early.Swapped
+                                + " swaplog="
+                                + string.Join(",", early.SwapLog)
+                            : " early=off"
+                    )
             );
             foreach (var impostor in impostors.Values)
             {
@@ -766,6 +925,12 @@ namespace Impostors
                         + (impostor.Ready ? 1 : 0)
                         + " drawn="
                         + (visible.Contains(impostor) ? 1 : 0)
+                        + " early="
+                        + (impostor.Early ? 1 : 0)
+                        + " firstshape="
+                        + impostor.FirstShapeTick
+                        + " firstdrawn="
+                        + impostor.FirstDrawnTick
                         + " r="
                         + state.Radius.ToString("0.0")
                         + " pos="
@@ -832,6 +997,7 @@ namespace Impostors
         {
             if (!fromServer || message.Length == 0)
                 return;
+            receivedBytes += message.Length;
 
             try
             {
@@ -859,10 +1025,23 @@ namespace Impostors
                         return;
                     var instance = r.Long();
                     maxQuads = MathHelper.Clamp(r.Int(), 0, Protocol.BillboardLimit);
+                    if (r.Remaining >= 8)
+                    {
+                        var range = Math.Max(0, r.Float());
+                        var pixels = r.Float();
+                        if (range != asteroidRange || pixels != minPixels)
+                        {
+                            asteroidRange = range;
+                            minPixels = pixels;
+                            WriteRange();
+                        }
+                    }
                     if (instance != serverInstance)
                     {
                         impostors.Clear();
                         store.Clear();
+                        if (early != null)
+                            early.Reset();
                         serverInstance = instance;
 
                         // A new server knows nothing of the view yet
@@ -880,6 +1059,10 @@ namespace Impostors
                     {
                         var state = ImpostorState.Read(r);
                         var impostor = Get(state.Id);
+                        if (early != null)
+                            early.Served(state.Id, impostor, state.Version, tick);
+                        if (caching && state.Kind == ImpostorKind.Voxel)
+                            cache.AddState(state);
                         impostor.State = state;
                         impostor.ReceivedTick = tick;
 
@@ -896,6 +1079,8 @@ namespace Impostors
                         )
                         {
                             impostor.Shape = stored;
+                            if (impostor.FirstShapeTick < 0)
+                                impostor.FirstShapeTick = tick;
                             restoredCount++;
                         }
                     }
@@ -907,7 +1092,10 @@ namespace Impostors
                     var count = r.UShort();
                     for (var i = 0; i < count; i++)
                     {
-                        if (impostors.Remove(r.Long()))
+                        var id = r.Long();
+                        if (early != null)
+                            early.Served(id, null, 0, tick);
+                        if (impostors.Remove(id))
                             removedCount++;
                     }
                     break;
@@ -963,6 +1151,8 @@ namespace Impostors
                         var impostor = Get(id);
                         impostor.Shape = shape;
                         impostor.ShapeTick = tick;
+                        if (impostor.FirstShapeTick < 0)
+                            impostor.FirstShapeTick = tick;
                         store.Add(id, shape.Lod, version, data.Length, shape);
                     }
 
@@ -1004,6 +1194,8 @@ namespace Impostors
         {
             impostors.Clear();
             store.Clear();
+            if (early != null)
+                early.Reset();
             serverInstance = 0;
             caching = false;
             if (cache != null)
@@ -1032,11 +1224,10 @@ namespace Impostors
             visible.Clear();
             standIns = 0;
             inView = 0;
-            if (!active || impostors.Count == 0 || realOnly)
-                return;
-
             var camera = MyAPIGateway.Session.Camera;
-            if (camera == null)
+            if (debug && camera != null)
+                NoteMoves(camera);
+            if (!active || impostors.Count == 0 || realOnly || camera == null)
                 return;
             var eye = camera.Position;
             var view = MatrixD.Transpose(camera.WorldMatrix);
@@ -1144,11 +1335,40 @@ namespace Impostors
                     DrawImpostor(part.Impostor, eye, sun);
             }
             visible.RemoveRange(count, visible.Count - count);
+            foreach (var impostor in visible)
+            {
+                if (impostor.FirstDrawnTick < 0)
+                    impostor.FirstDrawnTick = tick;
+            }
+        }
+
+        // Stats: the tick the last turn of the view by over 20 degrees started, and the last
+        // tick it jumped by over a kilometer from one frame to the next, the rigs time what
+        // comes after. At rest the view moves less than half a degree per frame.
+        private void NoteMoves(VRage.ModAPI.IMyCamera camera)
+        {
+            var forward = (Vector3)camera.WorldMatrix.Forward;
+            if (lastForward == Vector3.Zero || Vector3.Dot(forward, lastForward) > 0.99996f)
+            {
+                restForward = forward;
+                restTick = tick;
+            }
+            else if (Vector3.Dot(forward, restForward) < 0.94f)
+            {
+                turnTick = restTick;
+            }
+            if (
+                lastEye != Vector3D.Zero
+                && Vector3D.DistanceSquared(camera.Position, lastEye) > 1e6
+            )
+                jumpTick = tick;
+            lastForward = forward;
+            lastEye = camera.Position;
         }
 
         // A sphere inside the four side planes of the camera's view. Not IMyCamera.IsInFrustum:
         // that frustum ends at the far plane, 20 km away, and impostors go much farther.
-        private static bool InView(
+        public static bool InView(
             VRage.ModAPI.IMyCamera camera,
             MatrixD view,
             Vector3D center,
