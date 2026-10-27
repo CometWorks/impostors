@@ -43,6 +43,11 @@ nobody edited and that the world doesn't save get no impostors anyway (see
    Windows) and publish it to the Workshop from the game, like any mod. Add the published mod
    to the world.
 
+The pack file is `ImpostorsAsteroidPack.dat`. Packs written before were named
+`ImpostorsAsteroidPack.bin`: they still load from a local mod, but the game leaves `.bin` files
+out when it publishes a mod, so the Workshop item gets no pack. Write such a pack again, or
+rename the file to `.dat`, before publishing it.
+
 Packs written before the early asteroids (formats 1 and 2) have no positions, so their asteroids
 don't show early; write the pack again to get that.
 
