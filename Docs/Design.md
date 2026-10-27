@@ -445,7 +445,7 @@ player: above the Octahedron asteroid ring that is hundreds of shapes per player
 pack is a mod with the impostors of all of a world's asteroids, at every level, built once
 (see [Asteroid pack](AsteroidPack.md) for making one).
 
-- The pack is one file, `ImpostorsAsteroidPack.bin` (`AsteroidPack` in the mod's `Common`):
+- The pack is one file, `ImpostorsAsteroidPack.dat` (`AsteroidPack` in the mod's `Common`):
   per asteroid its entity id, the hash of the content it was built from (the shape cache's
   input hash), the version and the shapes. The index is read at load; shapes are read from
   the file when needed. Since format 2 (SE-710) the header also has the asteroid settings it

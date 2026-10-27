@@ -180,7 +180,7 @@ def join(ids, tag: str, with_pack: bool, early: bool, eye, target, away) -> dict
 
 
 def start_server():
-    if not (ap.PACK / "ImpostorsAsteroidPack.bin").exists():
+    if not (ap.PACK / ap.PACK_FILE).exists():
         raise SystemExit(f"No pack in {ap.PACK}, run asteroid_pack.py write first")
     ids = ap.setup_world(True)
     SERVER.write_plugin_config(rig.plugin_config(**CONFIG))
@@ -424,7 +424,7 @@ def offline_run(tag: str, early: bool) -> dict:
 
 
 def offline() -> int:
-    if not (ap.PACK / "ImpostorsAsteroidPack.bin").exists():
+    if not (ap.PACK / ap.PACK_FILE).exists():
         raise SystemExit(f"No pack in {ap.PACK}, run asteroid_pack.py write first")
     offline_run("offline, noearly", False)
     r = offline_run("offline", True)

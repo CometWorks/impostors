@@ -53,6 +53,8 @@ import ring  # noqa: E402
 
 PACK_ID = 900000203
 PACK = rig.TEST_ROOT / f"{rig.TASK}-pack"
+# The pack file in it, as the service writes it (AsteroidPack.FileName)
+PACK_FILE = "ImpostorsAsteroidPack.dat"
 PACK_LEVEL = int(os.environ.get("IMP_PACK_LEVEL", "64"))
 HEIGHT = float(os.environ.get("IMP_HEIGHT", "10000"))
 SETTLE = float(os.environ.get("IMP_SETTLE", "240"))
@@ -268,7 +270,7 @@ def pack_index(path: Path) -> tuple[int, dict[int, tuple[int, int, list]]]:
 
 def pack_versions() -> dict[int, int]:
     """Version per asteroid id from the pack's index"""
-    _, entries = pack_index(PACK / "ImpostorsAsteroidPack.bin")
+    _, entries = pack_index(PACK / PACK_FILE)
     return {asteroid: e[1] for asteroid, e in entries.items()}
 
 
@@ -346,7 +348,7 @@ def wait_for(probe, timeout: float):
 
 
 def reset() -> int:
-    if not (PACK / "ImpostorsAsteroidPack.bin").exists():
+    if not (PACK / PACK_FILE).exists():
         raise SystemExit(f"No pack in {PACK}, run write first")
     versions = pack_versions()
     ids = setup_world(True)
@@ -573,7 +575,7 @@ def offline_run(
 
 
 def offline() -> int:
-    if not (PACK / "ImpostorsAsteroidPack.bin").exists():
+    if not (PACK / PACK_FILE).exists():
         raise SystemExit(f"No pack in {PACK}, run write first")
     runs = os.environ.get("IMP_RUNS", "nopack,pack,again,packid").split(",")
     results = {}
@@ -607,7 +609,7 @@ def offline() -> int:
 
 
 def measure() -> int:
-    if not (PACK / "ImpostorsAsteroidPack.bin").exists():
+    if not (PACK / PACK_FILE).exists():
         raise SystemExit(f"No pack in {PACK}, run write first")
     runs = os.environ.get("IMP_RUNS", "nopack,pack").split(",")
     without = run(False) if "nopack" in runs else {}

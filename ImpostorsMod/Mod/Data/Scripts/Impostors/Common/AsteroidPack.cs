@@ -27,7 +27,11 @@ namespace Impostors
     // have none and were built with flat normals.
     public class AsteroidPack
     {
-        public const string FileName = "ImpostorsAsteroidPack.bin";
+        // Not .bin: the game leaves .bin files out when it publishes a mod
+        public const string FileName = "ImpostorsAsteroidPack.dat";
+
+        // The old name: packs written under it still load from a local mod
+        private const string OldFileName = "ImpostorsAsteroidPack.bin";
         public const int Magic = 0x50414d49; // "IMAP"
         public const byte Format = 3;
 
@@ -47,6 +51,7 @@ namespace Impostors
 
         private readonly Dictionary<long, Entry> entries = new Dictionary<long, Entry>();
         private readonly MyObjectBuilder_Checkpoint.ModItem mod;
+        private readonly string file;
         private readonly object sync = new object();
         private long dataStart;
 
@@ -71,9 +76,10 @@ namespace Impostors
         }
         public long Bytes { get; private set; }
 
-        private AsteroidPack(MyObjectBuilder_Checkpoint.ModItem mod)
+        private AsteroidPack(MyObjectBuilder_Checkpoint.ModItem mod, string file)
         {
             this.mod = mod;
+            this.file = file;
         }
 
         // The pack of the session's mods: of the mod with this Workshop id, or of the first one
@@ -84,9 +90,12 @@ namespace Impostors
             {
                 if (modId != 0 && mod.PublishedFileId != modId)
                     continue;
-                if (!MyAPIGateway.Utilities.FileExistsInModLocation(FileName, mod))
+                var file = FileName;
+                if (!MyAPIGateway.Utilities.FileExistsInModLocation(file, mod))
+                    file = OldFileName;
+                if (!MyAPIGateway.Utilities.FileExistsInModLocation(file, mod))
                     continue;
-                var pack = new AsteroidPack(mod);
+                var pack = new AsteroidPack(mod, file);
                 pack.ReadIndex();
                 return pack;
             }
@@ -95,7 +104,7 @@ namespace Impostors
 
         private void ReadIndex()
         {
-            using (var reader = MyAPIGateway.Utilities.ReadBinaryFileInModLocation(FileName, mod))
+            using (var reader = MyAPIGateway.Utilities.ReadBinaryFileInModLocation(file, mod))
             {
                 if (reader.ReadInt32() != Magic)
                     throw new FormatException("not an asteroid pack");
@@ -220,9 +229,7 @@ namespace Impostors
                     return shapes;
                 }
 
-                using (
-                    var reader = MyAPIGateway.Utilities.ReadBinaryFileInModLocation(FileName, mod)
-                )
+                using (var reader = MyAPIGateway.Utilities.ReadBinaryFileInModLocation(file, mod))
                 {
                     reader.BaseStream.Position = dataStart + entry.Offsets[first];
                     for (var k = first; k <= last; k++)
