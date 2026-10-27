@@ -570,6 +570,17 @@ Each frame it:
   screenshots of real grids and asteroids from 8 directions. Under 27 pixels in radius on a
   1080p screen it brightens grids (up to 1.35 times under 13 pixels) and dims asteroids (down
   to 0.82), where the real ones carry more or less light than their impostors.
+- dims the sunlit part behind planets (SE-713), faked from the planet's size, the sun
+  direction and the impostor's position, once per impostor per frame: a ray from the
+  impostor towards the sun, and how close it passes to each planet's center. Below sea level
+  (`AverageRadius`) the impostor gets ambient light only; from there up to the top of the
+  band the sunlight fades in (smoothstep). With an atmosphere the band reaches 2.5 times the
+  hill height above sea level: the game's highest cloud layers sit about twice as high as the
+  hills (`MyRenderComponentPlanet`), plus a quarter. The mod can't read the cloud layers,
+  `MyCloudLayerSettings` isn't whitelisted. Without one it ends at the hilltops
+  (`MaximumRadius`). On the day side the ray heads away from the planet, and the distance
+  grows by how far it does, so near the ground the light fades in as the sun rises instead of
+  switching on at the terminator. The planets are looked up every 10 seconds.
 
 The client plugin compiles the same files. That copy has no mod context; on a multiplayer
 client it stands down when a session mod contains the renderer, so it only draws on servers

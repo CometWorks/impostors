@@ -138,5 +138,8 @@ namespace Impostors
         // The shape drawn this frame: Shape, or a coarser one from the store when Shape didn't
         // fit into the quad budget
         public ClientShape Drawn;
+
+        // The share of direct sunlight it got last drawn, past the planets (debug stats)
+        public float Sunlight = 1;
     }
 }
