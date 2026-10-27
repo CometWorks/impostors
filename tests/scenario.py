@@ -8,6 +8,8 @@ the number of failures. Screenshots land in ~/.se-test/<task>-shots.
     IMP_ONLY=zones ...                         # only the safe zone checks
     IMP_PLUGIN=1 ...                           # the client runs the client plugin
                                                  and the world has no mod
+    IMP_ZONE_LOWER=1 ...                       # SafeZoneLowerLevel on: impostors inside
+                                                 a zone get one level lower
 """
 
 from __future__ import annotations
@@ -23,6 +25,7 @@ import rig  # noqa: E402
 import world  # noqa: E402
 
 PLUGIN = os.environ.get("IMP_PLUGIN") == "1"
+ZONE_LOWER = os.environ.get("IMP_ZONE_LOWER") == "1"
 SERVER = rig.Server()
 CLIENT = rig.Client(1, "Alpha", plugin=PLUGIN)
 SHOTS = rig.TEST_ROOT / f"{rig.TASK}-shots"
@@ -128,7 +131,12 @@ def start():
     )
     SERVER.prepare([CLIENT.steam_id])
     SERVER.write_plugin_config(
-        rig.plugin_config(RebuildSeconds=10, RefreshSeconds=20, MaxQuadsPerFrame=20000)
+        rig.plugin_config(
+            RebuildSeconds=10,
+            RefreshSeconds=20,
+            MaxQuadsPerFrame=20000,
+            SafeZoneLowerLevel=ZONE_LOWER,
+        )
     )
     SERVER.start()
     CLIENT.launch(SERVER.port)
@@ -266,8 +274,8 @@ def run(api):
 
 
 def run_zones(api):
-    """Safe zones (SE-660): enabled ones show from afar; an impostor inside one gets one
-    level lower than outside, tinted with the zone's color"""
+    """Safe zones (SE-660): enabled ones show from afar; an impostor inside one is tinted
+    with the zone's color, and with SafeZoneLowerLevel one level lower than outside"""
     zone, box, off = world.ZONE, world.BOX_ZONE, world.OFF_ZONE
     shielded, behind, open_ = world.SHIELDED, world.BEHIND, world.OPEN
 
@@ -297,13 +305,19 @@ def run_zones(api):
         open_.entity_id, {}
     )
     lods = [2, 4, 8, 16, 32, 64]
+    level = lambda i: lods.index(int(i.get("lod", 2)))
     check(
-        "impostor Shielded inside the zone, lower level, tinted",
+        "impostor Shielded inside the zone, "
+        + ("lower level, " if ZONE_LOWER else "same level, ")
+        + "tinted",
         drawn(impostors, shielded) and "tint" in inside and "tint" not in outside
         # Lower, not exactly one level: the levels keep some hysteresis from where the
         # player was before
-        and lods.index(int(inside.get("lod", 0)))
-        < lods.index(int(outside.get("lod", 0))),
+        and (
+            level(inside) < level(outside)
+            if ZONE_LOWER
+            else level(inside) == level(outside)
+        ),
         f"inside {inside or 'missing'} outside {outside}",
     )
     # Behind is seen through the zone but not inside it: as usual
