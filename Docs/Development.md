@@ -106,6 +106,12 @@ the whitelist, loading the mod in the game does.
 - `tests/build_times.py` makes a table of the build times from the `Impostor build:` lines of
   server logs, per object and level. Any run that builds impostors writes them;
   `scenario.py` and `compare.py` save the table as `build-times.md` next to their shots.
+- `tests/planet_shadow.py` checks the planet shadow (SE-713): grids on the day side, the
+  night side and in the band around the terminator of an EarthLike planet, each shot real,
+  as its impostor, unshaded as before and against the background from 600 m and 3 km. It
+  checks every impostor's sunlight against its own ray test and that the impostors in the
+  shadow lose their sunlit part, and prints how bright the real grids are next to them and
+  what the shade costs per impostor. See its docstring.
 - `tests/zone_mesh.py` checks the safe zone meshes offline, without a game running: the
   sphere for each size on screen, up to a camera inside the zone, infinity and NaN.
 
