@@ -29,6 +29,7 @@ public class PluginConfig : IPluginConfig
     private bool asteroidOcclusion = true;
     private bool asteroidSmoothNormals = true;
     private bool safeZones = true;
+    private bool safeZoneLowerLevel;
     private int minBlocks = 8;
     private float maxDistance = 500_000f;
     private float minPixels = 3f;
@@ -82,6 +83,12 @@ public class PluginConfig : IPluginConfig
     {
         get => safeZones;
         set => SetValue(ref safeZones, value);
+    }
+
+    public bool SafeZoneLowerLevel
+    {
+        get => safeZoneLowerLevel;
+        set => SetValue(ref safeZoneLowerLevel, value);
     }
 
     public int MinBlocks

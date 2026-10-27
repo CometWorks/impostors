@@ -227,6 +227,51 @@ def write_sources(sources: Path, plugins: dict[str, tuple[Path, str]]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Levels of detail, as the service picks them
+# ---------------------------------------------------------------------------
+
+LODS = (2, 4, 8, 16, 32, 64)
+PIXELS_PER_RADIAN = 540 / 0.7002075382097097
+
+
+def full_level(kind: str, radius: float, distance: float, built: int) -> int:
+    """The level ImpostorService.PickLod gives an impostor this far, its AABB's bounding
+    sphere this large, unzoomed and without the hysteresis; the finest of its built levels
+    when none is that fine"""
+    wanted = 2 * radius / max(distance, 1) * PIXELS_PER_RADIAN / 2.5
+    if kind == "Grid" and wanted < 16:
+        wanted = min(16, wanted * 2)
+    lod = next((lod for lod in LODS if lod >= wanted), LODS[-1])
+    return min(lod, LODS[max(built, 1) - 1])
+
+
+def stand_in_reached(levels: list, full: int, delay: float) -> bool | None:
+    """Whether a stand-in shows its full level by `delay` seconds after the jump at the
+    latest and keeps it until its real entity draws. `levels`: (seconds, level) samples
+    before that. None when the real entity drew first, before `delay`: nothing to check.
+    """
+    reached = next((k for k, (_, lv) in enumerate(levels) if lv == full), None)
+    if reached is None:
+        return None if not levels or levels[-1][0] < delay else False
+    return levels[reached][0] <= delay and all(lv == full for _, lv in levels[reached:])
+
+
+def parse_near(reply: str) -> dict[int, dict]:
+    """The entries of a `!iprobe near` reply by id: kind, AABB center and radius, levels
+    built"""
+    entries = {}
+    for item in reply.removeprefix("Probe near:").split():
+        id_, kind, center, radius, built = item.split(":")
+        entries[int(id_)] = {
+            "kind": kind,
+            "center": tuple(float(v) for v in center.split(",")),
+            "radius": float(radius),
+            "built": int(built),
+        }
+    return entries
+
+
+# ---------------------------------------------------------------------------
 # Plugin config
 # ---------------------------------------------------------------------------
 

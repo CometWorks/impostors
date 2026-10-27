@@ -157,6 +157,32 @@ public sealed class ProbeCommands : CommandModule
     private static IEnumerable<long> Held(IDictionary sent) =>
         sent.Keys.Cast<long>().Where(id => (bool)Get(sent[id], "Held")).OrderBy(id => id);
 
+    [Command(
+        "near",
+        "The impostor entries within a range of a point: id, kind, the center and radius of the AABB the service sizes them by, and the shapes built."
+    )]
+    [Permission(MyPromoteLevel.Admin)]
+    public string Near(double x, double y, double z, double range)
+    {
+        var service = Service;
+        if (service == null)
+            return "Probe near: off";
+
+        var point = new Vector3D(x, y, z);
+        var entries = ((IEnumerable)Get(service, "Entries"))
+            .Cast<object>()
+            .Select(e => (e, aabb: (BoundingBoxD)Get(e, "WorldAabb")))
+            .Where(t => Vector3D.Distance(t.aabb.Center, point) <= range)
+            .Select(t =>
+            {
+                var c = t.aabb.Center;
+                var shapes = Get(t.e, "Shapes") as byte[][];
+                return $"{Get(t.e, "Id")}:{Get(t.e, "Kind")}:{F(c.X)},{F(c.Y)},{F(c.Z)}"
+                    + $":{F(t.aabb.HalfExtents.Length())}:{shapes?.Count(s => s != null) ?? 0}";
+            });
+        return $"Probe near: {string.Join(" ", entries)}";
+    }
+
     [Command("place", "Puts a grid at a position, at rest.")]
     [Permission(MyPromoteLevel.Admin)]
     public string Place(long gridId, double x, double y, double z)
