@@ -93,6 +93,18 @@ the whitelist, loading the mod in the game does.
   `VoxelShapes`, and compares the quads, bytes and build times, and how far each level's
   normals and its image, drawn at the size the level is shown at, are from the rock itself.
   It draws them next to the rock, ray marched, into one sheet.
+- `tests/asteroid_levels.py` checks how large and how bright each asteroid level is next to
+  the real asteroid, offline (SE-722). `dump` has the test probe write the voxels of every
+  20th asteroid of the "Octahedron - Seed 2" world; `voxels` builds their shapes through
+  `VoxelShapes` and compares each level's area and light with the voxels themselves, from 6
+  directions under 8 suns; `pack` does the same for an asteroid pack's levels against its
+  finest one. See its docstring.
+- `tests/level_views.py` shoots three views of the Seed 2 asteroid ring (from Gamma Station,
+  and from above the ring along it both ways), once with the impostors and once with the
+  real asteroids up to the game's 50 km, offline (`IMP_SETUP=offline`) or on a server. It
+  times how soon the impostors in view show and settle, tables the levels drawn by distance,
+  and compares the asteroids alone on screen with their real ones. `tests/cluster_views.py`
+  takes the same views across a cluster on the cluster's scenario bench.
 - `tests/build_throughput.py` measures how fast the server builds the asteroids of the
   "Octahedron - Seed 2" ring for a client that joins above it with empty caches (SE-678): the
   bursts of builds, the busiest 5 seconds and the game thread time per build. `logs <files>`

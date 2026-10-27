@@ -671,10 +671,18 @@ from afar anyway.
   so a face can't shade across itself; turning the faces of a cell with the rock is what
   brings the coarse levels closer to it. `tests/asteroid_normals.py` measures both against a
   made-up rock, ray marched, at the size each level is drawn at.
-- The coarsest level is pooled from voxels two levels finer: a cell is filled when at least
-  half of its voxels are. The game's own coarse voxels erode thin parts, and level 8 looked
-  half as large as level 16. That level also gets at least 6 cells across a rock that is
-  small for its voxel storage. Levels 4 and 2 are downsampled from 8, a cell filled when
+- The two coarsest levels read, 8 and 16, are pooled from voxels two levels finer: a cell is
+  filled when at least 30% of its voxels are (`PooledFill`). The game's coarse voxels are
+  point samples: `MyCompositeShapeProvider` evaluates the rock's shape at the voxel's corner,
+  and an edited storage's octree keeps the value of one of the 8 finer voxels
+  (`MyOctreeNode.SignedDistanceFilter`), so thin parts fall between them. Read at its own
+  voxel level, level 16 covered 0.71 of the asteroid's area and level 8 looked half as large
+  as level 16; pooled at half, levels 8 and 16 still covered 0.81 and 0.93, as the cells
+  along the silhouette hold only the rock's thin rim (SE-722, `tests/asteroid_levels.py`).
+  Level 8 also gets at least 6 cells across a rock that is small for its voxel storage. A
+  change to how the levels are read bumps `VoxelShapes.LevelsVersion`, which is in the
+  content hash and the asteroid settings, so caches, packs and known hashes of the old
+  shapes aren't used. Levels 4 and 2 are downsampled from 8, a cell filled when
   half of its 8 children are (or any, if the rock would vanish). Level 16 costs about 15
   times the quads of level 8 (513 instead of 34 for a 512 m one), so far rocks stay coarse.
 - The mod dims asteroid impostors that are small on screen: from 27 pixels in radius on a
