@@ -25,8 +25,6 @@ namespace Impostors
     [MySessionComponentDescriptor(MyUpdateOrder.BeforeSimulation)]
     public class ImpostorRenderer : MySessionComponentBase
     {
-        private const string MarkerFile = "Data/Scripts/Impostors/Client/ImpostorRenderer.cs";
-
         // Most quads drawn per frame, the server's MaxQuadsPerFrame once it welcomed us
         private int maxQuads = 16000;
 
@@ -178,6 +176,7 @@ namespace Impostors
         // plugin sets ModDrawsLocally while it loads a session with the mod
         public static Action<byte[]> ToLocalServer;
         public static bool ModDrawsLocally;
+        public static bool WorldHasMod;
         private static ImpostorRenderer localInstance;
 
         // Debug: draws the impostors in place of the real entities, which it hides
@@ -260,8 +259,11 @@ namespace Impostors
                         : "Impostors: the client plugin draws for the local player"
                 );
             }
-            else if (ModContext == null && ModLoaded())
+            else if (ModContext == null && WorldHasMod)
             {
+                MyLog.Default.WriteLineAndConsole(
+                    "Impostors: the world's mod draws; the client plugin's renderer stands down"
+                );
                 return;
             }
 
@@ -461,16 +463,6 @@ namespace Impostors
                 cache = null;
                 caching = false;
             }
-        }
-
-        private static bool ModLoaded()
-        {
-            foreach (var mod in MyAPIGateway.Session.Mods)
-            {
-                if (MyAPIGateway.Utilities.FileExistsInModLocation(MarkerFile, mod))
-                    return true;
-            }
-            return false;
         }
 
         public override void UpdateBeforeSimulation()

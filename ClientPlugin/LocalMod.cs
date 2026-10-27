@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using HarmonyLib;
 using Impostors;
 using Sandbox.Definitions;
@@ -72,6 +73,9 @@ public static class LocalMod
         {
             loading = false;
             ImpostorRenderer.ModDrawsLocally = false;
+            // Mod API file checks reject Data/Scripts; the plugin can inspect the marker.
+            ImpostorRenderer.WorldHasMod =
+                MySession.Static?.Mods?.Any(mod => Listed(mod, out _)) ?? false;
             if (MySession.Static == null || !Sync.IsServer)
                 return;
             if (Plugin.Instance?.Config is not { Enabled: true })
