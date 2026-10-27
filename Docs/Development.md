@@ -18,6 +18,11 @@ the whitelist, loading the mod in the game does.
   client joining. The world doesn't list the mod, so the plugin loads it, and the mod must
   draw instead of the plugin's copy of the renderer; `IMP_WORLD_MOD=1` lists it in the world.
   See its docstring.
+- `tests/shadow_flicker.py` compares shadowed, partly shaded, and sunlit asteroids in a
+  fixed view, offline or with `IMP_MODE=server` on Magnetar. The test probe records
+  sunlight and drawn levels every frame, checks that only one renderer draws each
+  asteroid, and compares captured pixels for flicker. Each run records the tested
+  commit, staged mod location, and source hashes.
 - `tests/compare.py` shoots a grid (from a blueprint), an asteroid or a safe zone next to its
   impostor from the 8 cube corners at a list of distances and puts the shots into one sheet,
   like the ones on the [Grids](Grids.md), [Asteroids](Asteroids.md) and
