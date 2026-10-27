@@ -44,6 +44,7 @@ public class Probe : IPlugin
     public void Update()
     {
         CameraPath.Update(++tick);
+        ShadowObservation.Update(tick);
         if (tick % 30 != 0)
             return;
 
