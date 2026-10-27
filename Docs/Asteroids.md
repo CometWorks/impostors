@@ -65,7 +65,7 @@ ambient occlusion and the impostor with it.
 |---|---|---|---|
 | 64 | 14858 | 14555 | voxels |
 | 32 | 3635 | 3416 | voxels |
-| 16 | 513 | 796 | voxels |
+| 16 | 513 | 796 | voxels two levels finer, pooled |
 | 8 | 192 | 170 | voxels two levels finer, pooled |
 | 4 | 38 | 38 | level 8 |
 | 2 | 6 | 6 | level 8 |
@@ -81,10 +81,15 @@ larger than that estimate. The mod tells the server, which sends finer levels fo
 impostors inside the view within a fraction of a second and lets them stay for 30 seconds
 after the zoom. See [Zoomed views](Zoom.md).
 
-- Level 8 pools voxels two levels finer: a cell is filled when at least half of its voxels
-  are. The game's own coarse voxels erode thin parts, and level 8 looked half as large as
-  level 16 when read directly. A rock that is small for its voxel storage gets at least 6
-  cells across.
+- Levels 8 and 16 pool voxels two levels finer: a cell is filled when at least 30% of its
+  voxels are. The game's own coarse voxels are point samples of the rock that miss its thin
+  parts: read directly, level 8 looked half as large as level 16, and level 16 covered 0.71
+  of the real asteroid's area (median over 101 asteroids of the Seed 2 ring, SE-722). A
+  threshold of half left them at 0.81 and 0.93: the cells along the silhouette hold the
+  thin rim of the rock. Pooled at 30%, levels 8, 16, 32 and 64 cover 1.00, 1.01, 0.99 and
+  1.00 of it (`tests/asteroid_levels.py`). Their light per covered pixel was the real
+  one's all along, the darker look of level 16 was the missing area. A rock that is small
+  for its voxel storage gets at least 6 cells across level 8.
 - Levels 4 and 2 are downsampled from 8, a cell filled when half of its 8 children are, or
   any of them if the rock would vanish. They are for the far ones that cover a few pixels:
   an asteroid ring shows hundreds at once, and level 16 costs 15 times the quads of level 8.
@@ -106,8 +111,9 @@ thread that builds it; they are the same, a build doesn't wait on anything.
 | All | 45.8 | 84.2 | 44.9 | 82.5 |
 
 Level 64 reads the storage voxel by voxel and makes most of the quads, so it takes most of
-the time; ambient occlusion doubles it. Level 8 reads voxels two levels finer and pools
-them. The snapshot on the game thread (the material colors) took 1.2 to 1.5 ms.
+the time; ambient occlusion doubles it. Levels 8 and 16 read voxels two levels finer and
+pool them; the table is from before SE-722, when level 16 read its own voxels: pooling them
+made the builds of `tests/asteroid_normals.py`'s rock about 15% slower. The snapshot on the game thread (the material colors) took 1.2 to 1.5 ms.
 
 ## Rebuilds
 

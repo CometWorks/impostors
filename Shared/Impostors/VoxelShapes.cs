@@ -15,9 +15,21 @@ public static class VoxelShapes
     // The game's iso level: voxels with more content are inside
     private const byte IsoLevel = 127;
 
+    // Share of its voxels inside the rock from which a pooled cell is filled. Half of them
+    // leaves the silhouette smaller: the cells along its edge hold the thin rim of the rock,
+    // and at half levels 8 and 16 covered 0.8 and 0.93 of the real asteroid's area. 0.3
+    // covers 1.00 and 1.01 of it, median over every 20th asteroid of the Seed 2 ring
+    // (tests/asteroid_levels.py).
+    private const float PooledFill = 0.3f;
+
     // Version of the smooth normals, in the content hash of smooth asteroids only: bump it when
     // they change, so caches and asteroid packs don't serve shapes of the old ones
     public const byte SmoothVersion = 1;
+
+    // Version of how the levels are read and pooled, in the content hash of every asteroid:
+    // bump it when that changes, for the same reason. 2: levels 8 and 16 pooled at PooledFill
+    // (SE-722); 1 before, when the hash had none.
+    public const byte LevelsVersion = 2;
 
     // The levels read from the storage, as (index in ImpostorEntry.Lods, voxel level of
     // detail), from 8 up to the first that reads single voxels; levels 4 and 2 are downsampled
@@ -39,16 +51,22 @@ public static class VoxelShapes
         return levels;
     }
 
-    // The voxel level of detail to read for levels[k]: the coarsest level is pooled from voxels
-    // two levels finer, see Build
-    public static int ReadLod(List<(int index, int voxelLod)> levels, int k)
-    {
-        var voxelLod = levels[k].voxelLod;
-        return Pooled(levels, k) ? Math.Max(0, voxelLod - 2) : voxelLod;
-    }
+    // The voxel level of detail to read for levels[k]: the two coarsest levels are pooled
+    // from finer voxels, see Build
+    public static int ReadLod(List<(int index, int voxelLod)> levels, int k) =>
+        Math.Max(0, levels[k].voxelLod - PoolSteps(levels, k));
+
+    // How many voxel levels of detail finer than its own a level is read at: two for the two
+    // coarsest levels. The game's coarse voxels are point samples of the rock
+    // (MyCompositeShapeProvider samples its shape at the voxel's corner, an edited storage
+    // keeps one of the 8 finer voxels), which miss the thin parts: read at their own level,
+    // level 8 looked half as large as level 16, and level 16 covered 0.7 of the real
+    // asteroid's area (tests/asteroid_levels.py).
+    private static int PoolSteps(List<(int index, int voxelLod)> levels, int k) =>
+        k <= 1 && k < levels.Count - 1 && levels[k].voxelLod > 0 ? 2 : 0;
 
     private static bool Pooled(List<(int index, int voxelLod)> levels, int k) =>
-        k == 0 && k < levels.Count - 1 && levels[k].voxelLod > 0;
+        PoolSteps(levels, k) > 0;
 
     // The voxels read at ReadLod of each level: content and material, X fastest, then Y, then Z
     public static Vector3I ReadSize(Vector3I size, int readLod) =>
@@ -70,9 +88,8 @@ public static class VoxelShapes
         var shapes = new byte[ImpostorEntry.Lods.Length][];
         var first = Array.IndexOf(ImpostorEntry.Lods, (byte)8);
 
-        // Finest first, for the extent of the content. The coarsest level is pooled from voxels
-        // two levels finer, a cell filled when at least half of them are: the game's own
-        // coarse voxels were eroded there, and level 8 looked half as large as level 16. It
+        // Finest first, for the extent of the content. The two coarsest levels are pooled from
+        // finer voxels (PoolSteps), a cell filled when PooledFill of them are. The coarsest
         // also gets at least CoarsestCells cells across a rock that is small for its storage.
         var extent = 0f;
         CellVolume level8 = null;
@@ -81,7 +98,7 @@ public static class VoxelShapes
             var (i, voxelLod) = levels[k];
             var cellSize = (float)(1 << voxelLod);
             var pooled = Pooled(levels, k);
-            if (pooled && extent > 0)
+            if (k == 0 && pooled && extent > 0)
                 cellSize = Math.Min(cellSize, extent / CoarsestCells);
             voxelLod = ReadLod(levels, k);
 
@@ -117,10 +134,9 @@ public static class VoxelShapes
                 max = Vector3I.Max(max, p);
             }
 
-            // A pooled cell is filled when at least half of its voxels are
             if (pooled)
                 volume.DropBelow(
-                    Math.Max(1, (int)Math.Round(Math.Pow(cellSize / voxelSize, 3) / 2))
+                    Math.Max(1, (int)Math.Round(Math.Pow(cellSize / voxelSize, 3) * PooledFill))
                 );
             if (extent == 0 && max.X >= min.X)
                 extent = (max - min + 1).AbsMax() * voxelSize;
