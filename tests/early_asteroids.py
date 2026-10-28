@@ -36,7 +36,9 @@ step.
 
 `offline` loads the world offline in a client with the client plugin and the pack, without
 the early asteroids and with them, and prints the same join numbers for the asteroids beyond
-the far plane, which the plugin's service sends at the pace of its build queue.
+the far plane, which the plugin's service sends at the pace of its build queue. Then
+(SE-740) the approach must settle within 0.2 s, and an asteroid cut through the client probe
+must show its new shape. `IMP_SKIP_NOEARLY=1` skips the run without the early asteroids.
 """
 
 from __future__ import annotations
@@ -424,11 +426,13 @@ def swap() -> int:
     return 0 if ok else 1
 
 
-def offline_run(tag: str, early: bool) -> dict:
-    """The world offline with the client plugin and the pack (see asteroid_pack.offline_run)"""
+def offline_run(tag: str, early: bool, cut: bool = False) -> dict:
+    """The world offline with the client plugin and the pack (see asteroid_pack.offline_run).
+    With cut, mines a drawn asteroid of the pack after the approach (see offline_cut).
+    """
     import local
 
-    client = rig.Client(2, "Viktor", plugin=True)
+    client = rig.Client(2, "Viktor", plugin=True, probe=cut)
     world_dir = client.appdata / "Saves" / ring.WORLD_NAME
     ring.PLUGIN = True
     ids = ring.copy_world(world_dir)
@@ -476,7 +480,8 @@ def offline_run(tag: str, early: bool) -> dict:
         api.character_look_at(*target, tolerance=2)
         time.sleep(max(SETTLE, 150))
         totals, impostors = client.stats()
-        approach(api, client, eye, target, tag)
+        settled = approach(api, client, eye, target, tag)
+        mined = offline_cut(client) if cut else None
     finally:
         client.stop()
         noearly.unlink(missing_ok=True)
@@ -491,20 +496,76 @@ def offline_run(tag: str, early: bool) -> dict:
         f"{totals.get('kept')}, swapped {totals.get('swapped')}",
         flush=True,
     )
-    return {"shaped": shaped, "totals": totals}
+    return {"shaped": shaped, "totals": totals, "settled": settled, "mined": mined}
+
+
+def offline_cut(client) -> bool:
+    """SE-740: cuts the largest drawn asteroid still at the pack's version through the client
+    probe; True once the impostor shows a new version, from the local service's notice
+    """
+    versions = ap.pack_versions()
+    _, impostors = client.stats()
+    drawn = [
+        (i, f)
+        for i, f in impostors.items()
+        if f.get("kind") == "Voxel"
+        and f.get("drawn") == "1"
+        and i in versions
+        and f.get("shape", "").split("/")[0] == str(versions[i])
+    ]
+    if not drawn:
+        print("FAIL offline cut: no drawn asteroid at the pack's version", flush=True)
+        return False
+    asteroid, f = max(drawn, key=lambda d: int(d[1].get("lod", 0)))
+    size = 2 * float(f["r"]) / 3**0.5
+    (client.appdata / "vcut.txt").write_text(
+        f"{asteroid} {size * 0.25:.0f} {size * 0.25:.0f}", encoding="utf-8"
+    )
+    start = time.monotonic()
+    shape = f.get("shape")
+    while time.monotonic() - start < 180:
+        time.sleep(5)
+        totals, impostors = client.stats()
+        shape = impostors.get(asteroid, {}).get("shape", "none")
+        version = shape.split("/")[0]
+        if version not in ("none", str(versions[asteroid])):
+            print(
+                f"PASS offline cut {asteroid}: pack version {versions[asteroid]}, shows "
+                f"{shape} after {time.monotonic() - start:.0f} s; {totals.get('notices')} "
+                f"notices with {totals.get('noticelevels')} levels",
+                flush=True,
+            )
+            return True
+    print(
+        f"FAIL offline cut {asteroid}: still {shape} after 180 s, pack version "
+        f"{versions[asteroid]}",
+        flush=True,
+    )
+    return False
 
 
 def offline() -> int:
     if not (ap.PACK / ap.PACK_FILE).exists():
         raise SystemExit(f"No pack in {ap.PACK}, run asteroid_pack.py write first")
-    offline_run("offline, noearly", False)
-    r = offline_run("offline", True)
+    if not os.environ.get("IMP_SKIP_NOEARLY"):
+        offline_run("offline, noearly", False)
+    r = offline_run("offline", True, cut=True)
     fast = bool(r["shaped"]) and np.percentile(r["shaped"], 90) <= 180
     print(
         f"{'PASS' if fast else 'FAIL'} offline: 90% of the asteroids within 3 s of the teleport",
         flush=True,
     )
-    return 0 if fast else 1
+    # SE-740: the local renderer picks the pack's asteroids itself, as multiplayer clients do
+    settled = bool(r["settled"]) and max(r["settled"]) <= 12
+    if APPROACH > 0:
+        print(
+            f"{'PASS' if settled else 'FAIL'} offline: the last level within 0.2 s of the "
+            f"approach",
+            flush=True,
+        )
+    else:
+        settled = True
+    return 0 if fast and settled and r["mined"] else 1
 
 
 if __name__ == "__main__":

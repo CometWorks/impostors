@@ -121,8 +121,9 @@ namespace Impostors
         // again with a state only
         private readonly ShapeStore<ClientShape> store = new ShapeStore<ClientShape>();
 
-        // The shapes of earlier sessions on disk, null for the local player; caching what it
-        // gets once the Inventory went out
+        // The shapes of earlier sessions on disk; for the local player with a pack one in memory
+        // for the changed asteroids, otherwise null. Caching what it gets once the Inventory
+        // went out.
         private ShapeCache cache;
         private bool caching;
 
@@ -297,6 +298,10 @@ namespace Impostors
             // Tests turn the early asteroids off with "noearly", for a baseline
             if ((cache != null || pack != null) && !(debug && StorageExists("noearly")))
             {
+                // Locally the pack's asteroids are ours to pick too (SE-740). A cache in memory
+                // only, never loaded or saved, keeps the levels of the asteroids that changed.
+                if (local && pack != null)
+                    cache = new ShapeCache(ModContext != null);
                 early = new EarlyAsteroids(impostors, cache, pack);
                 ReadRange();
             }
@@ -1212,7 +1217,7 @@ namespace Impostors
                             data = r.Since(start);
                             shapeCount++;
                             shapeBytes += data.Length;
-                            if (caching)
+                            if (caching && !local)
                                 cache.Add(id, version, shape.Lod, data);
                         }
 
@@ -1287,7 +1292,8 @@ namespace Impostors
         }
 
         // With the world's asteroid pack the client picks the asteroids' levels itself, from the
-        // pack and the cache, and the server sends only the asteroids that changed (SE-739)
+        // pack and the cache, and the server sends only the asteroids that changed (SE-739).
+        // The local player too, with a cache in memory (SE-740).
         private bool PicksAsteroids
         {
             get { return early != null && pack != null && cache != null; }

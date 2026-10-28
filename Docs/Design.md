@@ -319,7 +319,9 @@ Versions are content hashes of all levels, so (id, version, level) names a shape
 - Storage: one file per world, by a hash of the world's name, in the mod's local storage
   (`cache-<hash>.bin`), or in the global storage with the `Impostors.` prefix for the client
   plugin's copy. `cache-index.txt` lists the files with their size and the day they were
-  used last. The local player's renderer copy has no cache, its shapes never cross a network.
+  used last. The local player's renderer copy has no cache on disk, its shapes never cross a
+  network. With the asteroid pack it keeps the changed asteroids' levels in memory (see
+  "Client-picked asteroids").
 - The client loads the world's file while the game loads, and after every Welcome of a new
   server instance sends an `Inventory`: id, version and a mask of the levels it has, about
   13 bytes per impostor, in messages up to 16 KB. Its Hello says that one will follow, and a
@@ -522,7 +524,7 @@ cache saves the delay, the server cache saves rebuilding the levels.
   server doesn't know it.
 - Offline and on a lobby host the local player's renderer has no disk cache, so only the
   pack's asteroids show early, and not those within the camera's far plane, where the game
-  draws the real ones.
+  draws the real ones. It picks them from then on too (see "Client-picked asteroids").
 - A new server instance (a restart or another cluster node) drops every impostor as before;
   the early ones are back within a second, the server's follow.
 - The server sends what it sent before: the client still needs the states to know the
@@ -552,7 +554,12 @@ server's Welcome. Its Hello says so (a fifth byte).
   nothing for it.
 - An asteroid deleted from the world gets a Remove, as the client's pack still has it.
 - Grids, safe zones, and clients without the pack or the cache keep the server-picked path.
-  Offline and on a lobby host the local renderer has no disk cache, so nothing changes there.
+- Offline and on a lobby host the local renderer with the pack picks its asteroids the same
+  way (SE-740). It has no disk cache, so it keeps the changed asteroids' states and levels in
+  a cache in memory only, which is never loaded or saved, and its Inventory lists the pack.
+  Neither side picks the asteroids within the camera's far plane, where the game draws the
+  real ones. Before, the local service picked their levels once a second, so the right level
+  came up to a second after a move.
 - The quad budget: the client fits its asteroids into `MaxQuadsPerFrame` less half the quads
   of the server's impostors, as for the early ones; the server's own fit no longer counts them.
 - `stats.txt` adds `picks`, `notices` and `noticelevels`.
