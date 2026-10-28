@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Sandbox.Definitions;
 using Sandbox.Game;
 using Sandbox.Game.Entities;
 using Sandbox.ModAPI;
@@ -29,11 +30,20 @@ namespace Impostors
         private int maxQuads = 16000;
 
         // Fitted to screenshots of real grids and asteroids from 8 directions:
-        // sides away from the sun are nearly black in space, and the game's tone mapping makes
-        // sunlit sides brighter than plain Lambert shading would. Faces facing the sun go above
-        // 1 and saturate.
-        private const float Ambient = 0.08f;
+        // the game's tone mapping makes sunlit sides brighter than plain Lambert shading
+        // would. Faces facing the sun go above 1 and saturate.
         private const float Diffuse = 1.6f;
+
+        // Sides away from the sun and everything in a planet's shadow get only the ambient
+        // light. The game lights voxels there with its environment map, the skybox scaled by
+        // the world's EnvSkyboxBrightness and AmbientDiffuseFactor, and on screen they come
+        // out about as bright as the square of EnvSkyboxBrightness. The renderer takes both
+        // from the environment definition, times AmbientPerSkybox, fitted to screenshots of
+        // a real asteroid in shadow and on its dark side: 0.06 under the game's own
+        // environment (EnvSkyboxBrightness 2, nearly black), 0.375 under the one of
+        // Octahedron - Seed 2 (5). The skybox texture's own brightness and tint stay out.
+        private const float AmbientPerSkybox = 0.015f;
+        private float ambient = 0.06f;
 
         // Planets shade the impostors behind them, faked from a sphere per planet: the
         // sunlight fades out while the ray from the impostor to the sun passes from Top down
@@ -523,7 +533,10 @@ namespace Impostors
             }
 
             if (tick % PlanetTicks == 1)
+            {
                 FindPlanets();
+                ambient = Ambient();
+            }
 
             if (debug && tick % 60 == 0)
             {
@@ -885,6 +898,8 @@ namespace Impostors
                     + Vec(MyVisualScriptLogicProvider.GetSunDirection())
                     + " planets="
                     + Planets()
+                    + " ambient="
+                    + ambient.ToString("0.000")
                     + " shadeus="
                     + (shadeTicks * 1000000 / MyGameTimer.Frequency)
                     + " shades="
@@ -1665,6 +1680,20 @@ namespace Impostors
             return false;
         }
 
+        // See AmbientPerSkybox
+        private static float Ambient()
+        {
+            var light = MyDefinitionManager
+                .Static
+                .EnvironmentDefinition
+                .SunProperties
+                .EnvironmentLight;
+            return AmbientPerSkybox
+                * light.AmbientDiffuseFactor
+                * light.EnvSkyboxBrightness
+                * light.EnvSkyboxBrightness;
+        }
+
         // The planets, every PlanetTicks: few, and they don't move
         private void FindPlanets()
         {
@@ -1788,7 +1817,7 @@ namespace Impostors
 
                 var center = position + Vector3.TransformNormal(shape.Centers[i], rotation);
                 var light =
-                    Ambient + diffuse * Math.Max(0, Vector3.Dot(shape.Shading[i], sunLocal));
+                    ambient + diffuse * Math.Max(0, Vector3.Dot(shape.Shading[i], sunLocal));
                 var lit = shape.Colors[i] * light * brightness;
                 if (tinted)
                     lit = Vector3.Lerp(lit, tint, ZoneTint);

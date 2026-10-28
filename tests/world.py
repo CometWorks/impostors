@@ -242,11 +242,13 @@ def _set(text: str, name: str, value: str) -> str:
 
 
 def _mods_xml() -> str:
-    return (
-        '<ModItem FriendlyName="Impostors">'
-        f"<Name>{rig.MOD_ID}.sbm</Name><PublishedFileId>{rig.MOD_ID}</PublishedFileId>"
+    return "".join(
+        f'<ModItem FriendlyName="{name}">'
+        f"<Name>{mod_id}.sbm</Name><PublishedFileId>{mod_id}</PublishedFileId>"
         "<PublishedServiceName>Steam</PublishedServiceName>"
         "</ModItem>"
+        for mod_id, name in [(rig.MOD_ID, "Impostors")]
+        + [(i, str(i)) for i in rig.EXTRA_MODS]
     )
 
 
