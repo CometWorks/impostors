@@ -618,9 +618,10 @@ def drawn_levels(impostors: dict) -> dict[int, int]:
 def levels() -> int:
     """SE-744: a client with the pack and a cache from earlier joins, which has a few levels
     of the pack's asteroids, draws them at the levels offline does from the same view. The
-    cold join, without the early asteroids, fills the cache with the levels the server
-    picked; the next join picks from the pack and the cache. Offline runs with the server's
-    config. Screenshots go to IMP_SHOTS (~/.se-test/<task>-shots)."""
+    cold join, without the early asteroids and 40 km farther away, fills the cache with the
+    levels the server picked; the next join picks from the pack and the cache. Run it low over
+    the ring (IMP_HEIGHT=3000), where the game draws many real asteroids. Offline runs with
+    the server's config. Screenshots go to IMP_SHOTS (~/.se-test/<task>-shots)."""
     shots = Path(os.environ.get("IMP_SHOTS", rig.TEST_ROOT / f"{rig.TASK}-shots"))
     shots.mkdir(parents=True, exist_ok=True)
     offline_stats = offline_run("offline", True, shot=shots / "offline.png", **CONFIG)[
@@ -634,8 +635,10 @@ def levels() -> int:
     try:
         clear_cache()
         # Without the early asteroids the client doesn't pick: the server sends the levels it
-        # picks, and the cache keeps them, as before SE-739
-        join(ids, "cold", False, False, eye, target, away)
+        # picks, and the cache keeps them, as before SE-739. From 40 km farther away, so the
+        # cache gets coarser levels than this view wants.
+        far = eye + (eye - target) / np.linalg.norm(eye - target) * 40000
+        join(ids, "cold", False, False, far, target, away)
         r = join(
             ids, "warm, pack", True, True, eye, target, away, shots / "multiplayer.png"
         )

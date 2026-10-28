@@ -246,7 +246,8 @@ namespace Impostors
         }
 
         // The asteroids that would be shown from here and their levels, in view and large ones
-        // first. Not those within drawnRange, where the game draws the real ones.
+        // first. Not those within drawnRange, where the game draws the real ones, nor those
+        // whose real voxel map draws already.
         private void Pick(
             IMyCamera camera,
             int tick,
@@ -276,6 +277,14 @@ namespace Impostors
                 var pixels = radius / Math.Max(distance, 1) * Protocol.PixelsPerRadian;
                 if (2 * pixels < minPixels)
                     continue;
+                wanted.Add(id);
+
+                // The game draws the real one, the impostor hides (SE-744): its shape stays for
+                // when it unloads, but it takes no quads from the others. Near ones would want
+                // the finest levels and leave coarse ones to the rest.
+                ClientImpostor shown;
+                if (impostors.TryGetValue(id, out shown) && shown.Early && shown.Ready)
+                    continue;
                 candidates.Add(
                     new Candidate
                     {
@@ -284,7 +293,6 @@ namespace Impostors
                         InView = ImpostorRenderer.InView(camera, view, k.State.Position, radius),
                     }
                 );
-                wanted.Add(id);
             }
 
             dropped.Clear();
