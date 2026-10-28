@@ -3,7 +3,9 @@ using System.Globalization;
 using System.IO;
 using HarmonyLib;
 using Sandbox.Engine.Utils;
+using Sandbox.Game.Entities;
 using Sandbox.Game.World;
+using Sandbox.ModAPI;
 using VRage;
 using VRage.FileSystem;
 using VRage.Game;
@@ -22,6 +24,8 @@ namespace ImpostorsClientProbe;
 //   on for T ticks and off for T, always with T = 0. billboard-stats.txt then says every
 //   second what the game drew of the frames' billboards, see BillboardCheck.
 // - camera.txt ("x y z yaw pitch yawrate vx vy vz") flies the spectator camera, see CameraPath.
+// - vcut.txt ("id offset radius") cuts a sphere out of a voxel map offline, like the server
+//   probe's vcut, then the file goes.
 public class Probe : IPlugin
 {
     private int tick;
@@ -50,6 +54,7 @@ public class Probe : IPlugin
 
         BillboardStress.Read();
         BillboardCheck.Write();
+        VoxelCut();
 
         var camera = MySector.MainCamera;
         if (camera == null)
@@ -74,6 +79,24 @@ public class Probe : IPlugin
             camera.FieldOfView = original.Value;
             original = null;
         }
+    }
+
+    private static void VoxelCut()
+    {
+        var file = Path.Combine(MyFileSystem.UserDataPath, "vcut.txt");
+        if (!File.Exists(file))
+            return;
+        var parts = File.ReadAllText(file).Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        File.Delete(file);
+        if (!(MyEntities.GetEntityById(long.Parse(parts[0])) is MyVoxelBase voxel))
+            return;
+        var shape = MyAPIGateway.Session.VoxelMaps.GetSphereVoxelHand();
+        shape.Center =
+            voxel.PositionComp.WorldAABB.Center
+            + Vector3D.Right * float.Parse(parts[1], CultureInfo.InvariantCulture);
+        shape.Radius = float.Parse(parts[2], CultureInfo.InvariantCulture);
+        MyAPIGateway.Session.VoxelMaps.CutOutShape(voxel, shape);
+        MyLog.Default.WriteLine($"Impostors client probe: cut {voxel.EntityId}");
     }
 
     public void Dispose() { }

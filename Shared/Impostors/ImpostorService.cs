@@ -568,7 +568,7 @@ public sealed class ImpostorService : IDisposable
             if (message.Length > 3 && message[3] == 1)
                 viewers[sender].InventoryDue = tick + Protocol.InventoryWait * 60;
         }
-        viewers[sender].PicksAsteroids = !local && message.Length > 4 && message[4] == 1;
+        viewers[sender].PicksAsteroids = message.Length > 4 && message[4] == 1;
 
         writer.Clear();
         writer.Byte(Protocol.Welcome);
@@ -592,7 +592,7 @@ public sealed class ImpostorService : IDisposable
     // The client's disk cache, in one or more messages after each Welcome of a new instance
     private void OnInventory(ByteReader r, int length, ulong sender)
     {
-        if (length < 4 || !viewers.TryGetValue(sender, out var viewer) || viewer.Local)
+        if (length < 4 || !viewers.TryGetValue(sender, out var viewer))
             return;
         var more = r.Byte() == 1;
         var count = r.UShort();
@@ -745,6 +745,7 @@ public sealed class ImpostorService : IDisposable
                 asteroids.Add(entry.Id);
                 if (
                     distance - radius > range
+                    || viewer.Local && distance - radius <= drawn
                     || 2 * radius / Math.Max(distance, 1) * PixelsPerRadian < config.MinPixels
                 )
                     continue;
@@ -991,8 +992,14 @@ public sealed class ImpostorService : IDisposable
         {
             viewer.Store.Add(entry.Id, shape[0], entry.Version, shape.Length, true);
 
-            // The client caches every shape it gets once it sent its inventory
-            if (!cached && viewer.OnDisk != null && viewer.OnDisk.Count < MaxOnDisk)
+            // The client caches every shape it gets once it sent its inventory, the local
+            // player only the asteroids' in memory
+            if (
+                !cached
+                && viewer.OnDisk != null
+                && viewer.OnDisk.Count < MaxOnDisk
+                && (!viewer.Local || entry.Kind == ImpostorKind.Voxel)
+            )
             {
                 var key = (entry.Id, entry.Version);
                 viewer.OnDisk.TryGetValue(key, out var mask);
