@@ -14,7 +14,7 @@ The file is read only when the server starts, so changes take effect after a res
 | `SafeZones` | true | Impostors of enabled safe zones, see [Safe zones](SafeZones.md) |
 | `SafeZoneLowerLevel` | false | Grids and asteroids inside a safe zone get one level of detail lower, see [Safe zones](SafeZones.md#grids-and-asteroids-inside-a-zone) |
 | `MinBlocks` | 8 | Grid groups with fewer blocks are not shown |
-| `MaxDistance` | 300000 | Farthest impostor in meters (300 km), 0 is the world's view distance |
+| `MaxDistance` | 400000 | Farthest impostor in meters (400 km), 0 is the world's view distance |
 | `MinPixels` | 3 | Impostors less than this many pixels across on a 1080p screen are not sent |
 | `MaxImpostorsPerPlayer` | 4000 | The largest on screen win |
 | `MaxQuadsPerFrame` | 16000 | Most impostor quads a client draws per frame; the server picks coarser levels to fit |

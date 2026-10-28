@@ -16,7 +16,7 @@ default `MinPixels` drops the impostor. Rendered at 2560x1440 with `tests/compar
 - One impostor per physical grid group, so docked ships and subgrids show as one. Its frame
   and id are those of the group's largest grid.
 - Groups with fewer than `MinBlocks` blocks (8) get none, nor do projections and previews.
-- Only groups outside the player's replication range, within `MaxDistance` (300 km
+- Only groups outside the player's replication range, within `MaxDistance` (400 km
   by default) and at least `MinPixels` across on screen. The largest `MaxImpostorsPerPlayer`
   win. See [Configuration](Configuration.md).
 - The impostor arrives `ReplicationMargin` (500 m) inside the sync distance, so there is no
