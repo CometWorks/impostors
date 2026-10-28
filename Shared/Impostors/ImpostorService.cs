@@ -949,7 +949,11 @@ public sealed class ImpostorService : IDisposable
 
         // Changed asteroids of a client that picks them itself: a state and every level, the
         // nearest first, while it has shape credit
-        foreach (var entry in notices.OrderBy(e => Vector3D.DistanceSquared(viewer.Eye, e.WorldAabb.Center)))
+        foreach (
+            var entry in notices.OrderBy(e =>
+                Vector3D.DistanceSquared(viewer.Eye, e.WorldAabb.Center)
+            )
+        )
         {
             if (viewer.ShapeCredit <= 0)
             {
