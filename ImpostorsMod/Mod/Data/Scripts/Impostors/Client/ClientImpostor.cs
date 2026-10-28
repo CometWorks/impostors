@@ -124,6 +124,9 @@ namespace Impostors
         // The real entity draws: the impostor is hidden
         public bool Ready;
 
+        // Behind a planet's sea level sphere this frame, seen from the camera: not drawn
+        public bool Occluded;
+
         // What the server was told last about Ready
         public bool Reported;
 
