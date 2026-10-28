@@ -118,6 +118,39 @@ def percentiles(values) -> str:
     return f"{np.median(v):.1f}/{np.percentile(v, 90):.1f}/{v[-1]:.1f} s"
 
 
+# SE-739: after the settle, a teleport this far towards the ring (0: none), and how long after
+# it the drawn asteroids got the level they end with
+APPROACH = float(os.environ.get("IMP_APPROACH", str(HEIGHT / 2)))
+
+
+def approach(api, client, eye, target, tag: str) -> list[int]:
+    """Teleports APPROACH meters towards target, looks at it, waits, and returns per drawn
+    asteroid the ticks from the teleport to its last shape change"""
+    if APPROACH <= 0:
+        return []
+    eye, target = np.array(eye, dtype=float), np.array(target, dtype=float)
+    to = target - eye
+    api.character_teleport(*(eye + to / np.linalg.norm(to) * APPROACH))
+    time.sleep(2)
+    api.character_look_at(*target, tolerance=2)
+    time.sleep(25)
+    totals, impostors = client.stats()
+    jump = int(totals.get("jumptick", 0))
+    settled = [
+        max(0, int(i["shapetick"]) - jump)
+        for i in impostors.values()
+        if i.get("kind") == "Voxel"
+        and i.get("drawn") == "1"
+        and int(i.get("shapetick", -1)) >= 0
+    ]
+    print(
+        f"{tag}, {APPROACH:.0f} m closer: {len(settled)} drawn, at their last level "
+        f"{percentiles(settled)} after the teleport",
+        flush=True,
+    )
+    return settled
+
+
 def join(ids, tag: str, with_pack: bool, early: bool, eye, target, away) -> dict:
     """A client process joins, turns to the ring, settles, looks away and quits"""
     noearly = CLIENT.mod_storage / "noearly"
@@ -142,6 +175,9 @@ def join(ids, tag: str, with_pack: bool, early: bool, eye, target, away) -> dict
         api.character_look_at(*target, tolerance=2)
         settle()
         totals, impostors = CLIENT.stats()
+        result["approach"] = approach(api, CLIENT, eye, target, tag)
+        api.character_teleport(*eye)
+        time.sleep(2)
         api.character_look_at(*away, tolerance=2)
     finally:
         CLIENT.stop()
@@ -159,21 +195,31 @@ def join(ids, tag: str, with_pack: bool, early: bool, eye, target, away) -> dict
         for i in voxels
         if i.get("drawn") == "1" and int(i["firstdrawn"]) >= 0
     ]
+    # When the drawn ones got the level they end with, after the turn (SE-739)
+    settled = [
+        max(0, int(i["shapetick"]) - turn)
+        for i in voxels
+        if i.get("drawn") == "1" and int(i.get("shapetick", -1)) >= 0
+    ]
     result.update(
         totals=totals,
         voxels=len(voxels),
         shaped=shaped,
         drawn=drawn,
+        settled=settled,
         moved=moved,
         turn_s=(turn - base) / 60,
     )
     print(
         f"{tag}: {len(voxels)} asteroids{' (teleported)' if moved else ''}, join {percentiles(shaped)}, "
-        f"turned at {result['turn_s']:.1f} s, {len(drawn)} drawn {percentiles(drawn)} after it; "
+        f"turned at {result['turn_s']:.1f} s, {len(drawn)} drawn {percentiles(drawn)} after it, "
+        f"at their last level {percentiles(settled)}; "
         f"server sent {totals.get('recvkb')} KB: {totals.get('shapes')} shapes "
         f"({totals.get('shapekb')} KB), {totals.get('cached')} from the cache or pack "
         f"({totals.get('packed')} pack); early {totals.get('earlyloads')} loads in "
-        f"{totals.get('earlyms')} ms, kept {totals.get('kept')}, swapped {totals.get('swapped')}",
+        f"{totals.get('earlyms')} ms, kept {totals.get('kept')}, swapped {totals.get('swapped')}; "
+        f"client picks {totals.get('picks', '0')}, {totals.get('notices', '0')} changed asteroids "
+        f"with {totals.get('noticelevels', '0')} levels",
         flush=True,
     )
     return result
@@ -227,6 +273,10 @@ RUNS = [
 ]
 
 
+# IMP_RUNS: only these tags of RUNS, comma separated, for example "pack"
+RUN_TAGS = [t for t in os.environ.get("IMP_RUNS", "").split(",") if t]
+
+
 def measure() -> int:
     series = os.environ.get("IMP_SERIES", "running,restarted").split(",")
     ids = start_server()
@@ -236,6 +286,8 @@ def measure() -> int:
         fill(ids, eye, target, away)
         for name in series:
             for tag, pack, early, clear in RUNS:
+                if RUN_TAGS and tag not in RUN_TAGS:
+                    continue
                 if clear:
                     clear_cache()
                 # A server that just started has no asteroid's shapes yet: it takes two
@@ -251,7 +303,12 @@ def measure() -> int:
         SERVER.stop()
 
     ok = True
-    for key in [(name, tag) for name in series for tag in ("warm", "pack")]:
+    for key in [
+        (name, tag)
+        for name in series
+        for tag in ("warm", "pack")
+        if (name, tag) in results
+    ]:
         r = results[key]
         fast = (
             r["shaped"]
@@ -326,14 +383,26 @@ def swap() -> int:
         swapped = [e for e in logged if int(e[0]) == asteroid]
         _, impostors = CLIENT.stats()
         final = impostors.get(asteroid, {})
-        ok &= ap.check(
-            bool(swapped)
-            and int(swapped[0][1]) == versions[asteroid]
-            and int(swapped[0][2]) == mined
-            and final.get("shape", "").split("/")[0] == str(mined),
-            f"early pack shape {versions[asteroid]} swapped to {mined}: swap log {swapped}, "
-            f"shape at the end {final.get('shape')}",
-        )
+        picks = totals.get("picks") == "1"
+        if picks:
+            # SE-739: the server announces the changed asteroid with all of its levels, the
+            # client keeps picking it itself
+            ok &= ap.check(
+                int(totals.get("notices", 0)) >= 1
+                and int(totals.get("noticelevels", 0)) >= 1
+                and final.get("shape", "").split("/")[0] == str(mined),
+                f"changed {asteroid} announced: {totals.get('notices')} notices with "
+                f"{totals.get('noticelevels')} levels, shape at the end {final.get('shape')}",
+            )
+        else:
+            ok &= ap.check(
+                bool(swapped)
+                and int(swapped[0][1]) == versions[asteroid]
+                and int(swapped[0][2]) == mined
+                and final.get("shape", "").split("/")[0] == str(mined),
+                f"early pack shape {versions[asteroid]} swapped to {mined}: swap log {swapped}, "
+                f"shape at the end {final.get('shape')}",
+            )
 
         # The cache has the server's version now: early with it, kept
         second = join(ids, "swap, cached", True, True, eye, target, away)
@@ -344,9 +413,10 @@ def swap() -> int:
         ok &= ap.check(
             not [e for e in logged if int(e[0]) == asteroid]
             and final.get("shape", "").split("/")[0] == str(mined)
-            and int(totals.get("swapped", 1)) == 0,
+            and int(totals.get("swapped", 1)) == 0
+            and int(totals.get("notices", 0)) == 0,
             f"next join from the cache: no swap of {asteroid} ({totals.get('swapped')} swaps, "
-            f"{totals.get('kept')} kept), shape {final.get('shape')}",
+            f"{totals.get('kept')} kept, {totals.get('notices')} notices), shape {final.get('shape')}",
         )
     finally:
         CLIENT.stop()
@@ -399,13 +469,14 @@ def offline_run(tag: str, early: bool) -> dict:
         rig.wait_world(api, timeout=1200)
         rig.focus_gameplay(api)
         base = center + side * 120000
-        api.character_teleport(*(base + normal * (HEIGHT + 300)))
+        eye = base + normal * (HEIGHT + 300)
+        target = base + np.cross(normal, side) * (HEIGHT + 5000)
+        api.character_teleport(*eye)
         time.sleep(5)
-        api.character_look_at(
-            *(base + np.cross(normal, side) * (HEIGHT + 5000)), tolerance=2
-        )
+        api.character_look_at(*target, tolerance=2)
         time.sleep(max(SETTLE, 150))
         totals, impostors = client.stats()
+        approach(api, client, eye, target, tag)
     finally:
         client.stop()
         noearly.unlink(missing_ok=True)

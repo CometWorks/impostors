@@ -18,7 +18,10 @@ namespace Impostors
         // client was moved to learns that this client draws impostors. A server that knew the
         // client already starts over with it on a 1. Then byte 1 when the client has a disk
         // cache: a server that starts over with it holds its impostors back until the
-        // Inventory arrived, InventoryWait at most.
+        // Inventory arrived, InventoryWait at most. Then byte 1 when the client picks the
+        // levels of the asteroids its pack and cache have itself (SE-739): the server sends no
+        // states or shapes for those, and for an asteroid whose version the client doesn't have
+        // at every level one state and all of its levels at once. Older servers ignore it.
         public const byte Hello = 1;
 
         // Server to client: byte version, long server instance id, int most impostor quads the

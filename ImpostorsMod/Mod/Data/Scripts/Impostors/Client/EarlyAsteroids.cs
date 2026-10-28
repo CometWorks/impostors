@@ -38,6 +38,9 @@ namespace Impostors
             public byte[] Lods;
             public int[] Lengths;
             public bool Cached;
+
+            // A changed asteroid the server announced, its levels still arriving
+            public bool Noticed;
         }
 
         private struct Candidate
@@ -72,6 +75,10 @@ namespace Impostors
         public long LoadTicks { get; private set; }
         public int Kept { get; private set; }
         public int Swapped { get; private set; }
+
+        // Changed asteroids the server announced, and the levels of them it sent
+        public int Notices { get; private set; }
+        public int NoticeLevels { get; private set; }
         public readonly List<string> SwapLog = new List<string>();
 
         public int KnownCount
@@ -118,6 +125,46 @@ namespace Impostors
                 Lengths = lengths,
                 Cached = cached,
             };
+        }
+
+        // The server announced a changed asteroid when the client picks the asteroids itself
+        // (SE-739): all of its levels follow, the cache keeps them, and the client shows that
+        // version from then on, the old one until the levels it picks arrive
+        public void Notice(ImpostorState state)
+        {
+            known[state.Id] = new Known
+            {
+                State = state,
+                Lods = new byte[0],
+                Lengths = new int[0],
+                Cached = true,
+                Noticed = true,
+            };
+            Notices++;
+            due = true;
+        }
+
+        public bool Noticed(long id, int version)
+        {
+            Known k;
+            return known.TryGetValue(id, out k) && k.Noticed && k.State.Version == version;
+        }
+
+        public void AddLevel(long id, byte lod, int length)
+        {
+            var k = known[id];
+            if (Array.IndexOf(k.Lods, lod) >= 0)
+                return;
+            var lods = new byte[k.Lods.Length + 1];
+            var lengths = new int[lods.Length];
+            Array.Copy(k.Lods, lods, k.Lods.Length);
+            Array.Copy(k.Lengths, lengths, k.Lengths.Length);
+            lods[k.Lods.Length] = lod;
+            lengths[k.Lods.Length] = length;
+            k.Lods = lods;
+            k.Lengths = lengths;
+            NoticeLevels++;
+            due = true;
         }
 
         // The server sent a state for this id, or removed it: the impostor is the server's
@@ -206,7 +253,7 @@ namespace Impostors
             foreach (var k in known.Values)
             {
                 var id = k.State.Id;
-                if (served.Contains(id))
+                if (served.Contains(id) || k.Lods.Length == 0)
                     continue;
                 var radius = k.State.Radius;
                 var distance = Vector3D.Distance(pickEye, k.State.Position);

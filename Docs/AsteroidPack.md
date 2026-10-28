@@ -9,7 +9,9 @@ the players with the world's other mods. Then:
 - players with the pack get no asteroid shapes over the network, only a 14 byte reference
   per shape, which the Impostors mod reads from the pack,
 - players with the pack see its asteroids as soon as the world is loaded, before the server
-  sends them (see [Early asteroids](#early-asteroids)),
+  sends them (see [Early asteroids](#early-asteroids)), and pick their levels themselves: the
+  server sends them an asteroid only when it changed, all of its levels at once (see
+  [Design](Design.md#client-picked-asteroids-se-739)),
 - players without it, and asteroids somebody mined, work as before.
 
 To find an asteroid's pack entry the server hashes its voxels, which takes about 40% of a
