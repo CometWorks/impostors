@@ -129,6 +129,12 @@ the whitelist, loading the mod in the game does.
   checks every impostor's sunlight against its own ray test and that the impostors in the
   shadow lose their sunlit part, and prints how bright the real grids are next to them and
   what the shade costs per impostor. See its docstring.
+- `tests/asteroid_lighting.py` checks the ambient light of asteroid impostors (SE-745): a
+  512 m asteroid around the EarthLike planet, in sunlight, in the shadow's band and in the
+  shadow, from its sunlit and its dark side at 3 and 8 km, real and as its impostor beside
+  it. It compares their luminance and color in the middle of the asteroid.
+  `IMP_EXTRA_MODS=3415912276:<folder>` loads Seed 2's environment mod as a world mod (the
+  rig's `IMP_EXTRA_MODS` stages any mod folder under its Workshop id). See its docstring.
 - `tests/zone_mesh.py` checks the safe zone meshes offline, without a game running: the
   sphere for each size on screen, up to a camera inside the zone, infinity and NaN.
 

@@ -601,8 +601,14 @@ Each frame it:
   draws: those on the faces towards the camera, all of a safe zone's,
 - draws them far to near, each with its back faces culled and its quads sorted back to front
   for the current view direction (re-sorted when the view turns by about 3°),
-- shades each quad with its normal: `0.08 + 1.6 × max(0, n·sun)`, fitted to
-  screenshots of real grids and asteroids from 8 directions. Under 27 pixels in radius on a
+- shades each quad with its normal: `ambient + 1.6 × max(0, n·sun)`, fitted to
+  screenshots of real grids and asteroids from 8 directions. The ambient light stands in for
+  the environment map the game lights voxels with on their dark side and in a planet's
+  shadow: `0.015 × AmbientDiffuseFactor × EnvSkyboxBrightness²`, read from the world's
+  environment definition (SE-745). That is 0.06 under the game's own environment, where dark
+  sides are nearly black, and 0.375 under the brighter one of Octahedron - Seed 2
+  (EnvSkyboxBrightness 5). The skybox texture's own brightness and tint aren't readable and
+  stay out. Under 27 pixels in radius on a
   1080p screen it brightens grids (up to 1.35 times under 13 pixels) and dims asteroids (down
   to 0.82), where the real ones carry more or less light than their impostors.
 - dims the sunlit part behind planets (SE-713), faked from the planet's size, the sun

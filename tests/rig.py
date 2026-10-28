@@ -109,6 +109,14 @@ CLIENT_PROBE_ID = "7B028E03-D161-477F-BF54-F6B8AD94BFDE"
 
 # Stand-in Workshop id of the Impostors mod in the test world
 MOD_ID = 900000199
+# More world mods, IMP_EXTRA_MODS="id:folder;...", like a Workshop environment mod, staged
+# and listed the same way under their own ids
+EXTRA_MODS = {
+    int(i): Path(f).expanduser()
+    for i, f in (
+        m.split(":", 1) for m in os.environ.get("IMP_EXTRA_MODS", "").split(";") if m
+    )
+}
 
 # Measured RSS (testing/parallel-test-work/README.md): rendering headless
 # client, the server is a guess
@@ -335,6 +343,11 @@ def stage_mod(mods_folder: Path) -> None:
     if link.is_symlink() or link.exists():
         link.unlink()
     link.symlink_to(MOD_FOLDER)
+    for mod_id, folder in EXTRA_MODS.items():
+        link = mods_folder / f"{mod_id}.sbm"
+        if link.is_symlink() or link.exists():
+            link.unlink()
+        link.symlink_to(folder)
 
 
 # ---------------------------------------------------------------------------
