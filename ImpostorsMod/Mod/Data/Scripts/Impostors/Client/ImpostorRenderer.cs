@@ -489,6 +489,7 @@ namespace Impostors
                 writer.Byte(Protocol.Version);
                 writer.Byte((byte)(serverInstance == 0 ? 1 : 0));
                 writer.Byte((byte)(cache != null ? 1 : 0));
+                writer.Byte((byte)(PicksAsteroids ? 1 : 0));
                 SendToServer();
             }
 
@@ -927,6 +928,12 @@ namespace Impostors
                                 + early.Swapped
                                 + " swaplog="
                                 + string.Join(",", early.SwapLog)
+                                + " picks="
+                                + (PicksAsteroids ? 1 : 0)
+                                + " notices="
+                                + early.Notices
+                                + " noticelevels="
+                                + early.NoticeLevels
                             : " early=off"
                     )
             );
@@ -1094,6 +1101,15 @@ namespace Impostors
                     for (var i = 0; i < count; i++)
                     {
                         var state = ImpostorState.Read(r);
+
+                        // A changed asteroid, all of its levels follow: ours to pick from then on
+                        if (PicksAsteroids && state.Kind == ImpostorKind.Voxel)
+                        {
+                            if (caching)
+                                cache.AddState(state);
+                            early.Notice(state);
+                            continue;
+                        }
                         var impostor = Get(state.Id);
                         if (early != null)
                             early.Served(state.Id, impostor, state.Version, tick);
@@ -1184,6 +1200,15 @@ namespace Impostors
                                 cache.Add(id, version, shape.Lod, data);
                         }
 
+                        if (PicksAsteroids && early.Noticed(id, version))
+                        {
+                            // From the pack or inline: the cache keeps every level of the version
+                            if (caching)
+                                cache.Add(id, version, shape.Lod, data);
+                            early.AddLevel(id, shape.Lod, data.Length);
+                            continue;
+                        }
+
                         var impostor = Get(id);
                         impostor.Shape = shape;
                         impostor.ShapeTick = tick;
@@ -1241,7 +1266,15 @@ namespace Impostors
             writer.Byte(Protocol.Version);
             writer.Byte(1);
             writer.Byte(1);
+            writer.Byte((byte)(PicksAsteroids ? 1 : 0));
             SendToServer();
+        }
+
+        // With the world's asteroid pack the client picks the asteroids' levels itself, from the
+        // pack and the cache, and the server sends only the asteroids that changed (SE-739)
+        private bool PicksAsteroids
+        {
+            get { return early != null && pack != null && cache != null; }
         }
 
         private ClientImpostor Get(long id)

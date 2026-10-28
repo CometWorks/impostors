@@ -85,6 +85,11 @@ public sealed class ImpostorService : IDisposable
         // The tick until which the player's impostors wait for an Inventory the Hello announced
         public int InventoryDue;
 
+        // The client picks the levels of the asteroids it has at every level itself (SE-739),
+        // and the ids of those it drew last, to remove one deleted from the world
+        public bool PicksAsteroids;
+        public readonly HashSet<long> Asteroids = new();
+
         // Where the server picked for this player last
         public Vector3D Eye;
 
@@ -563,6 +568,7 @@ public sealed class ImpostorService : IDisposable
             if (message.Length > 3 && message[3] == 1)
                 viewers[sender].InventoryDue = tick + Protocol.InventoryWait * 60;
         }
+        viewers[sender].PicksAsteroids = !local && message.Length > 4 && message[4] == 1;
 
         writer.Clear();
         writer.Byte(Protocol.Welcome);
@@ -724,10 +730,30 @@ public sealed class ImpostorService : IDisposable
         var candidates =
             new List<(ImpostorEntry entry, double pixels, double zoom, double distance)>();
         var held = new HashSet<long>();
+        var notices = new List<ImpostorEntry>();
+        var asteroids = new HashSet<long>();
         foreach (var entry in registry.Entries)
         {
             var radius = entry.WorldAabb.HalfExtents.Length();
             var distance = Vector3D.Distance(viewer.Eye, entry.WorldAabb.Center);
+
+            // The client picks the asteroid's level itself, by the same range and MinPixels it
+            // got with the Welcome. It needs nothing from us while it has the current version at
+            // every level, from its pack or its cache; otherwise all levels go at once.
+            if (viewer.PicksAsteroids && viewer.OnDisk != null && entry.Kind == ImpostorKind.Voxel)
+            {
+                asteroids.Add(entry.Id);
+                if (
+                    distance - radius > range
+                    || 2 * radius / Math.Max(distance, 1) * PixelsPerRadian < config.MinPixels
+                )
+                    continue;
+                entry.Wanted = true;
+                entry.Viewed = true;
+                if (entry.Shapes != null && Built(entry) > 0 && !HasAll(viewer, entry))
+                    notices.Add(entry);
+                continue;
+            }
 
             // The client has the real entity, or will have it soon. Another node's entities are
             // never replicated to this node's players. One the client already has stays until
@@ -921,6 +947,44 @@ public sealed class ImpostorService : IDisposable
             sent.Velocity = state.Velocity;
         }
 
+        // Changed asteroids of a client that picks them itself: a state and every level, the
+        // nearest first, while it has shape credit
+        foreach (
+            var entry in notices.OrderBy(e =>
+                Vector3D.DistanceSquared(viewer.Eye, e.WorldAabb.Center)
+            )
+        )
+        {
+            if (viewer.ShapeCredit <= 0)
+            {
+                viewer.Waiting++;
+                continue;
+            }
+            var built = Built(entry);
+            for (var index = 0; index < built; index++)
+            {
+                var shape = entry.Shapes[index];
+                if (OnDisk(viewer, entry, index))
+                {
+                    viewer.FromDisk++;
+                    shapes.Add((entry, shape, true));
+                    continue;
+                }
+                viewer.ShapeCredit -= shape.Length;
+                viewer.Shapes++;
+                viewer.ShapeBytes += shape.Length;
+                shapes.Add((entry, shape, false));
+            }
+            states.Add(entry.State(entry.Shapes[built - 1][0]));
+        }
+
+        // Deleted from the world: the client still has the asteroid in its pack or cache
+        var deleted = viewer.Asteroids.Where(id => !asteroids.Contains(id)).ToList();
+        SendRemove(viewer.SteamId, deleted);
+        viewer.Removed += deleted.Count;
+        viewer.Asteroids.Clear();
+        viewer.Asteroids.UnionWith(asteroids);
+
         // After the lookups above and in the order of the ShapeData messages, as the client
         // adds them
         foreach (var (entry, shape, cached) in shapes)
@@ -954,6 +1018,26 @@ public sealed class ImpostorService : IDisposable
         return viewer.OnDisk != null
             && viewer.OnDisk.TryGetValue((entry.Id, entry.Version), out var mask)
             && (mask & Protocol.LodBit(entry.Shapes[index][0])) != 0;
+    }
+
+    // The client's disk cache or pack has every level of the entry's current version
+    private static bool HasAll(Viewer viewer, ImpostorEntry entry)
+    {
+        for (var index = 0; index < Built(entry); index++)
+        {
+            if (!OnDisk(viewer, entry, index))
+                return false;
+        }
+        return true;
+    }
+
+    // The entry's levels built so far, coarse to fine
+    private static int Built(ImpostorEntry entry)
+    {
+        var count = 0;
+        while (count < entry.Shapes.Length && entry.Shapes[count] != null)
+            count++;
+        return count;
     }
 
     // In the client's store or in its disk cache

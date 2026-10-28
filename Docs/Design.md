@@ -533,6 +533,30 @@ cache saves the delay, the server cache saves rebuilding the levels.
 
 `tests/early_asteroids.py` measures them, see [Asteroid pack](AsteroidPack.md#early-asteroids).
 
+## Client-picked asteroids (SE-739)
+
+With the early asteroids the client already picks levels the way the server does, yet the
+server still picked every asteroid for every player and streamed its states and levels, so the
+right level came late. A client with the world's asteroid pack and a disk cache now picks the
+asteroids' levels itself, every time it would pick early ones, and keeps doing so after the
+server's Welcome. Its Hello says so (a fifth byte).
+
+- The server sends such a client nothing for an asteroid whose current version its Inventory
+  (pack and cache) has at every level built. It still builds or takes from the pack the
+  asteroids within the range and `MinPixels`, to learn their versions.
+- An asteroid whose version the client lacks at some level (cut, mined, built with other
+  settings than the pack) gets one state and all of its levels in one go, the nearest first,
+  while the player has shape credit. Levels the client's cache has go as 14 byte references.
+  The client caches them with the state and shows that version from then on, the old one until
+  the levels it picks have arrived. The next join takes it from the cache, and the server sends
+  nothing for it.
+- An asteroid deleted from the world gets a Remove, as the client's pack still has it.
+- Grids, safe zones, and clients without the pack or the cache keep the server-picked path.
+  Offline and on a lobby host the local renderer has no disk cache, so nothing changes there.
+- The quad budget: the client fits its asteroids into `MaxQuadsPerFrame` less half the quads
+  of the server's impostors, as for the early ones; the server's own fit no longer counts them.
+- `stats.txt` adds `picks`, `notices` and `noticelevels`.
+
 ## Protocol
 
 Mod networking on channel 47213, reliable messages up to 16 KB:
