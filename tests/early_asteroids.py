@@ -43,7 +43,9 @@ must show its new shape. `IMP_SKIP_NOEARLY=1` skips the run without the early as
 
 `levels` (SE-744) compares the levels drawn offline with those of a multiplayer join that
 has the pack and the cache of an earlier join without it, from the same view. PASS when 90%
-of the asteroids drawn in both are at the same level.
+of the asteroids drawn in both are at the same level and the levels are at least 0.92 times
+offline's: multiplayer shows near asteroids that are real offline as impostors, from the
+same quad budget.
 """
 
 from __future__ import annotations
@@ -657,12 +659,24 @@ def levels() -> int:
     same = sum(mp[i] == offline[i] for i in common)
     coarser = sum(mp[i] < offline[i] for i in common)
     ratio = np.exp(np.mean([np.log(mp[i] / offline[i]) for i in common]))
-    ok = same >= 0.9 * len(common) and ratio >= 0.95
+    # Near asteroids the game draws offline, but not in multiplayer until they replicate,
+    # are impostors in multiplayer only: their quads come out of the same budget, so a few
+    # of the others get a level coarser
+    extra = sum(
+        int(f["shape"].split("/")[2]) // 2
+        for i, f in r["impostors"].items()
+        if f.get("kind") == "Voxel"
+        and f.get("shape") != "none"
+        and f.get("ready") != "1"
+        and i not in offline_stats
+    )
+    ok = same >= 0.9 * len(common) and ratio >= 0.92
     print(
         f"{'PASS' if ok else 'FAIL'} levels: {len(common)} asteroids drawn offline and in "
         f"multiplayer, {same} at the same level, {coarser} coarser in multiplayer, its "
         f"levels {ratio:.2f} times offline's (geometric mean); offline draws {len(offline)}, "
-        f"multiplayer {len(mp)}",
+        f"multiplayer {len(mp)}; {extra} of the {CONFIG['MaxQuadsPerFrame']} quads go to "
+        f"asteroids that only multiplayer shows as impostors",
         flush=True,
     )
     return 0 if ok else 1
