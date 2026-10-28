@@ -586,6 +586,10 @@ Each frame it:
 - skips impostors whose real entity draws on the client (see "Streaming in" above): within
   the replication range the real grid draws itself, but while it streams in the impostor
   stands in for it,
+- skips impostors whose center is behind a planet's sea level sphere (`AverageRadius`) seen
+  from the camera (SE-738): the billboards are depth tested and would not show anyway, but
+  they would take the quad budget. Terrain above sea level doesn't count, so only fully hidden
+  ones go. About 0.08 µs per impostor (`tests/planet_occlusion.py`),
 - keeps the nearest impostors within the quad budget, counting the quads each one really
   draws: those on the faces towards the camera, all of a safe zone's,
 - draws them far to near, each with its back faces culled and its quads sorted back to front

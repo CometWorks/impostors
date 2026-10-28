@@ -191,6 +191,12 @@ namespace Impostors
         private long shadeTicks;
         private int shadeCount;
 
+        // Impostors behind a planet this frame, and the time of the occlusion tests and their
+        // count since the last stats (SE-738)
+        private int occluded;
+        private long occlusionTicks;
+        private int occlusionCount;
+
         // Debug: draws the impostors moved by this much, next to the real entities (voxel
         // maps can't be hidden on the client)
         private Vector3D shift;
@@ -878,6 +884,12 @@ namespace Impostors
                     + (shadeTicks * 1000000 / MyGameTimer.Frequency)
                     + " shades="
                     + shadeCount
+                    + " occluded="
+                    + occluded
+                    + " occlusionus="
+                    + (occlusionTicks * 1000000 / MyGameTimer.Frequency)
+                    + " occlusions="
+                    + occlusionCount
                     + " tick="
                     + tick
                     + " fov="
@@ -964,6 +976,8 @@ namespace Impostors
                         + (impostor.Ready ? 1 : 0)
                         + " drawn="
                         + (visible.Contains(impostor) ? 1 : 0)
+                        + " occluded="
+                        + (impostor.Occluded ? 1 : 0)
                         + " early="
                         + (impostor.Early ? 1 : 0)
                         + " firstshape="
@@ -992,6 +1006,8 @@ namespace Impostors
             readyTicks = 0;
             shadeTicks = 0;
             shadeCount = 0;
+            occlusionTicks = 0;
+            occlusionCount = 0;
             using (var file = WriteStorage("stats.txt"))
                 file.Write(text.ToString());
         }
@@ -1307,6 +1323,7 @@ namespace Impostors
             // culled: the ones outside the camera's view would take the budget for nothing.
             foreach (var impostor in impostors.Values)
             {
+                impostor.Occluded = false;
                 if (impostor.Shape == null || impostor.State.Id == 0)
                     continue;
 
@@ -1334,6 +1351,30 @@ namespace Impostors
                 }
 
                 visible.Add(impostor);
+            }
+
+            // Behind a planet: its sea level sphere hides the impostor's center from the camera.
+            // The billboards are depth tested, but culled here they don't take the budget.
+            occluded = 0;
+            if (planets.Count > 0)
+            {
+                var start = debug ? timer.ElapsedTicks : 0;
+                var kept = 0;
+                for (var i = 0; i < visible.Count; i++)
+                {
+                    var impostor = visible[i];
+                    impostor.Occluded = BehindPlanet(eye, impostor.State.Position + shift);
+                    if (impostor.Occluded)
+                        occluded++;
+                    else
+                        visible[kept++] = impostor;
+                }
+                visible.RemoveRange(kept, visible.Count - kept);
+                if (debug)
+                {
+                    occlusionTicks += timer.ElapsedTicks - start;
+                    occlusionCount += kept + occluded;
+                }
             }
 
             inView = visible.Count;
@@ -1593,6 +1634,29 @@ namespace Impostors
             return Vector3.Normalize(
                 Vector3.TransformNormal((Vector3)(position - eye), Matrix.Transpose(rotation))
             );
+        }
+
+        // The segment from the eye to the point passes through a planet's sea level sphere.
+        // Terrain above sea level is left out: only full occlusion counts. An eye below sea
+        // level occludes nothing.
+        private bool BehindPlanet(Vector3D eye, Vector3D point)
+        {
+            var segment = point - eye;
+            var squared = segment.LengthSquared();
+            foreach (var planet in planets)
+            {
+                var toCenter = planet.Center - eye;
+                var ground = planet.Ground * planet.Ground;
+                if (toCenter.LengthSquared() <= ground)
+                    continue;
+                var t =
+                    squared > 0
+                        ? MathHelper.Clamp(Vector3D.Dot(toCenter, segment) / squared, 0, 1)
+                        : 0;
+                if (Vector3D.DistanceSquared(eye + segment * t, planet.Center) < ground)
+                    return true;
+            }
+            return false;
         }
 
         // The planets, every PlanetTicks: few, and they don't move
