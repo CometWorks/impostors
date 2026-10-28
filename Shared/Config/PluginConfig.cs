@@ -31,7 +31,7 @@ public class PluginConfig : IPluginConfig
     private bool safeZones = true;
     private bool safeZoneLowerLevel;
     private int minBlocks = 8;
-    private float maxDistance = 500_000f;
+    private float maxDistance = 300_000f;
     private float minPixels = 3f;
     private int maxImpostorsPerPlayer = 4000;
     private int maxQuadsPerFrame = 16000;
