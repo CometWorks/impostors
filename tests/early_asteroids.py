@@ -48,6 +48,7 @@ of the asteroids drawn in both are at the same level.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -111,6 +112,12 @@ def stage_client(ids, with_pack: bool) -> None:
     if link.is_symlink() or link.exists():
         link.unlink()
     link.symlink_to(ap.PACK if with_pack else EMPTY_PACK)
+    # A published pack the world lists too (Seed 2 has one since SE-739) goes empty with it
+    if not with_pack:
+        for i in ids:
+            if (ring.WORKSHOP / str(i) / ap.PACK_FILE).exists():
+                (mods / f"{i}.sbm").unlink()
+                (mods / f"{i}.sbm").symlink_to(EMPTY_PACK)
 
 
 def clear_cache() -> None:
@@ -616,9 +623,10 @@ def levels() -> int:
     config. Screenshots go to IMP_SHOTS (~/.se-test/<task>-shots)."""
     shots = Path(os.environ.get("IMP_SHOTS", rig.TEST_ROOT / f"{rig.TASK}-shots"))
     shots.mkdir(parents=True, exist_ok=True)
-    offline = drawn_levels(
-        offline_run("offline", True, shot=shots / "offline.png", **CONFIG)["impostors"]
-    )
+    offline_stats = offline_run("offline", True, shot=shots / "offline.png", **CONFIG)[
+        "impostors"
+    ]
+    offline = drawn_levels(offline_stats)
     # The offline run's world has no Impostors mod, the server's needs it
     ring.PLUGIN = False
     ids = start_server()
@@ -634,6 +642,8 @@ def levels() -> int:
     finally:
         CLIENT.stop()
         SERVER.stop()
+    for name, stats in (("offline", offline_stats), ("multiplayer", r["impostors"])):
+        (shots / f"{name}.json").write_text(json.dumps(stats))
     mp = drawn_levels(r["impostors"])
     common = sorted(set(offline) & set(mp))
     if not common:
