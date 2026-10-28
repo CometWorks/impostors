@@ -37,7 +37,6 @@ namespace Impostors
             public ImpostorState State;
             public byte[] Lods;
             public int[] Lengths;
-            public bool Cached;
 
             // A changed asteroid the server announced, its levels still arriving
             public bool Noticed;
@@ -109,21 +108,32 @@ namespace Impostors
             due = true;
             known.Clear();
             if (pack != null)
-                pack.ForEachFrame((state, lods, lengths) => Add(state, lods, lengths, false));
+                pack.ForEachFrame(Add);
 
-            // The cache's state is the one the server sent last, it wins over the pack's
+            // The cache's state is the one the server sent last, it wins over the pack's. Of the
+            // pack's version the cache usually has a few levels only, those received before
+            // the client picked the levels itself (SE-744): they add to the pack's.
             if (cache != null)
-                cache.ForEachAsteroid((state, lods, lengths) => Add(state, lods, lengths, true));
+                cache.ForEachAsteroid(Add);
         }
 
-        private void Add(ImpostorState state, byte[] lods, int[] lengths, bool cached)
+        private void Add(ImpostorState state, byte[] lods, int[] lengths)
         {
+            Known k;
+            if (known.TryGetValue(state.Id, out k) && k.State.Version == state.Version)
+            {
+                foreach (var lod in lods)
+                {
+                    if (Array.IndexOf(k.Lods, lod) < 0)
+                        AddLevel(k, lod, lengths[Array.IndexOf(lods, lod)]);
+                }
+                return;
+            }
             known[state.Id] = new Known
             {
                 State = state,
                 Lods = lods,
                 Lengths = lengths,
-                Cached = cached,
             };
         }
 
@@ -137,7 +147,6 @@ namespace Impostors
                 State = state,
                 Lods = new byte[0],
                 Lengths = new int[0],
-                Cached = true,
                 Noticed = true,
             };
             Notices++;
@@ -155,6 +164,13 @@ namespace Impostors
             var k = known[id];
             if (Array.IndexOf(k.Lods, lod) >= 0)
                 return;
+            AddLevel(k, lod, length);
+            NoticeLevels++;
+            due = true;
+        }
+
+        private static void AddLevel(Known k, byte lod, int length)
+        {
             var lods = new byte[k.Lods.Length + 1];
             var lengths = new int[lods.Length];
             Array.Copy(k.Lods, lods, k.Lods.Length);
@@ -163,8 +179,6 @@ namespace Impostors
             lengths[k.Lods.Length] = length;
             k.Lods = lods;
             k.Lengths = lengths;
-            NoticeLevels++;
-            due = true;
         }
 
         // The server sent a state for this id, or removed it: the impostor is the server's
@@ -376,9 +390,10 @@ namespace Impostors
                 )
                     continue;
 
-                var data = c.Known.Cached
-                    ? cache.Get(state.Id, state.Version, c.Lod)
-                    : pack.Get(state.Id, state.Version, c.Lod);
+                // The pack has the levels of its version, the cache the others
+                var data = pack != null ? pack.Get(state.Id, state.Version, c.Lod) : null;
+                if (data == null && cache != null)
+                    data = cache.Get(state.Id, state.Version, c.Lod);
                 if (data == null)
                     continue;
                 var shape = ClientShape.Read(new ByteReader(data), state.Version);

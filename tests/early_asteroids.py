@@ -8,6 +8,7 @@ asteroids have shapes and are drawn, with and without the early asteroids.
     ... python tests/early_asteroids.py measure              # the joins below
     ... python tests/early_asteroids.py swap                 # a mined asteroid's early shape
     ... python tests/early_asteroids.py offline              # offline with the client plugin
+    ... python tests/early_asteroids.py levels               # MP levels match offline's
     IMP_HEIGHT=10000 IMP_SETTLE=60 ...                       # meters above the ring, seconds
 
 `measure` starts the server once, with the pack in the world, and lets a first client fill
@@ -39,6 +40,10 @@ the early asteroids and with them, and prints the same join numbers for the aste
 the far plane, which the plugin's service sends at the pace of its build queue. Then
 (SE-740) the approach must settle within 0.2 s, and an asteroid cut through the client probe
 must show its new shape. `IMP_SKIP_NOEARLY=1` skips the run without the early asteroids.
+
+`levels` (SE-744) compares the levels drawn offline with those of a multiplayer join that
+has the pack and the cache of an earlier join without it, from the same view. PASS when 90%
+of the asteroids drawn in both are at the same level.
 """
 
 from __future__ import annotations
@@ -153,8 +158,18 @@ def approach(api, client, eye, target, tag: str) -> list[int]:
     return settled
 
 
-def join(ids, tag: str, with_pack: bool, early: bool, eye, target, away) -> dict:
-    """A client process joins, turns to the ring, settles, looks away and quits"""
+def join(
+    ids,
+    tag: str,
+    with_pack: bool,
+    early: bool,
+    eye,
+    target,
+    away,
+    shot: Path | None = None,
+) -> dict:
+    """A client process joins, turns to the ring, settles, looks away and quits. With shot,
+    a screenshot after the settle goes there."""
     noearly = CLIENT.mod_storage / "noearly"
     CLIENT.mod_storage.mkdir(parents=True, exist_ok=True)
     if early:
@@ -177,6 +192,8 @@ def join(ids, tag: str, with_pack: bool, early: bool, eye, target, away) -> dict
         api.character_look_at(*target, tolerance=2)
         settle()
         totals, impostors = CLIENT.stats()
+        if shot:
+            shot.write_bytes(api.screenshot_bytes(ignore_sprites=True))
         result["approach"] = approach(api, CLIENT, eye, target, tag)
         api.character_teleport(*eye)
         time.sleep(2)
@@ -205,6 +222,7 @@ def join(ids, tag: str, with_pack: bool, early: bool, eye, target, away) -> dict
     ]
     result.update(
         totals=totals,
+        impostors=impostors,
         voxels=len(voxels),
         shaped=shaped,
         drawn=drawn,
@@ -426,9 +444,12 @@ def swap() -> int:
     return 0 if ok else 1
 
 
-def offline_run(tag: str, early: bool, cut: bool = False) -> dict:
+def offline_run(
+    tag: str, early: bool, cut: bool = False, shot: Path | None = None
+) -> dict:
     """The world offline with the client plugin and the pack (see asteroid_pack.offline_run).
-    With cut, mines a drawn asteroid of the pack after the approach (see offline_cut).
+    With cut, mines a drawn asteroid of the pack after the approach (see offline_cut). With
+    shot, a screenshot after the settle goes there.
     """
     import local
 
@@ -480,6 +501,8 @@ def offline_run(tag: str, early: bool, cut: bool = False) -> dict:
         api.character_look_at(*target, tolerance=2)
         time.sleep(max(SETTLE, 150))
         totals, impostors = client.stats()
+        if shot:
+            shot.write_bytes(api.screenshot_bytes(ignore_sprites=True))
         settled = approach(api, client, eye, target, tag)
         mined = offline_cut(client) if cut else None
     finally:
@@ -496,7 +519,13 @@ def offline_run(tag: str, early: bool, cut: bool = False) -> dict:
         f"{totals.get('kept')}, swapped {totals.get('swapped')}",
         flush=True,
     )
-    return {"shaped": shaped, "totals": totals, "settled": settled, "mined": mined}
+    return {
+        "shaped": shaped,
+        "totals": totals,
+        "impostors": impostors,
+        "settled": settled,
+        "mined": mined,
+    }
 
 
 def offline_cut(client) -> bool:
@@ -568,9 +597,62 @@ def offline() -> int:
     return 0 if fast and settled and r["mined"] else 1
 
 
+def drawn_levels(impostors: dict) -> dict[int, int]:
+    """The level of the shape each drawn asteroid shows"""
+    return {
+        i: int(f["shape"].split("/")[1])
+        for i, f in impostors.items()
+        if f.get("kind") == "Voxel"
+        and f.get("drawn") == "1"
+        and f.get("shape") != "none"
+    }
+
+
+def levels() -> int:
+    """SE-744: a client with the pack and a cache from earlier joins, which has a few levels
+    of the pack's asteroids, draws them at the levels offline does from the same view. The
+    cold join fills the cache with the levels the server picked; the next join has the pack
+    too. Screenshots go to IMP_SHOTS (~/.se-test/<task>-shots)."""
+    shots = Path(os.environ.get("IMP_SHOTS", rig.TEST_ROOT / f"{rig.TASK}-shots"))
+    shots.mkdir(parents=True, exist_ok=True)
+    offline = drawn_levels(
+        offline_run("offline", True, shot=shots / "offline.png")["impostors"]
+    )
+    ids = start_server()
+    eye, target, away = geometry()
+    try:
+        clear_cache()
+        join(ids, "cold", False, True, eye, target, away)
+        r = join(
+            ids, "warm, pack", True, True, eye, target, away, shots / "multiplayer.png"
+        )
+    finally:
+        CLIENT.stop()
+        SERVER.stop()
+    mp = drawn_levels(r["impostors"])
+    common = sorted(set(offline) & set(mp))
+    if not common:
+        print(
+            f"FAIL levels: no asteroid drawn in both ({len(offline)} offline, {len(mp)} MP)"
+        )
+        return 1
+    same = sum(mp[i] == offline[i] for i in common)
+    coarser = sum(mp[i] < offline[i] for i in common)
+    ratio = np.exp(np.mean([np.log(mp[i] / offline[i]) for i in common]))
+    ok = same >= 0.9 * len(common) and ratio >= 0.95
+    print(
+        f"{'PASS' if ok else 'FAIL'} levels: {len(common)} asteroids drawn offline and in "
+        f"multiplayer, {same} at the same level, {coarser} coarser in multiplayer, its "
+        f"levels {ratio:.2f} times offline's (geometric mean); offline draws {len(offline)}, "
+        f"multiplayer {len(mp)}",
+        flush=True,
+    )
+    return 0 if ok else 1
+
+
 if __name__ == "__main__":
     mode = sys.argv[1] if len(sys.argv) > 1 else ""
-    modes = {"measure": measure, "swap": swap, "offline": offline}
+    modes = {"measure": measure, "swap": swap, "offline": offline, "levels": levels}
     if mode not in modes:
         raise SystemExit(__doc__)
     sys.exit(modes[mode]())
