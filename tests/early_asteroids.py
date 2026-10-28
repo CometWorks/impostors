@@ -445,11 +445,11 @@ def swap() -> int:
 
 
 def offline_run(
-    tag: str, early: bool, cut: bool = False, shot: Path | None = None
+    tag: str, early: bool, cut: bool = False, shot: Path | None = None, **config
 ) -> dict:
     """The world offline with the client plugin and the pack (see asteroid_pack.offline_run).
     With cut, mines a drawn asteroid of the pack after the approach (see offline_cut). With
-    shot, a screenshot after the settle goes there.
+    shot, a screenshot after the settle goes there; config goes into the plugin config.
     """
     import local
 
@@ -470,7 +470,7 @@ def offline_run(
     center, normal, side, _ = ring.ring_geometry(world_dir)
     client.appdata.mkdir(parents=True, exist_ok=True)
     (client.appdata / "Impostors.cfg").write_text(
-        rig.plugin_config(AsteroidPack=True), encoding="utf-8"
+        rig.plugin_config(AsteroidPack=True, **config), encoding="utf-8"
     )
     shutil.rmtree(client.appdata / "Storage/Impostors/Cache", ignore_errors=True)
     noearly = client.loaded_mod_storage / "noearly"
@@ -611,18 +611,23 @@ def drawn_levels(impostors: dict) -> dict[int, int]:
 def levels() -> int:
     """SE-744: a client with the pack and a cache from earlier joins, which has a few levels
     of the pack's asteroids, draws them at the levels offline does from the same view. The
-    cold join fills the cache with the levels the server picked; the next join has the pack
-    too. Screenshots go to IMP_SHOTS (~/.se-test/<task>-shots)."""
+    cold join, without the early asteroids, fills the cache with the levels the server
+    picked; the next join picks from the pack and the cache. Offline runs with the server's
+    config. Screenshots go to IMP_SHOTS (~/.se-test/<task>-shots)."""
     shots = Path(os.environ.get("IMP_SHOTS", rig.TEST_ROOT / f"{rig.TASK}-shots"))
     shots.mkdir(parents=True, exist_ok=True)
     offline = drawn_levels(
-        offline_run("offline", True, shot=shots / "offline.png")["impostors"]
+        offline_run("offline", True, shot=shots / "offline.png", **CONFIG)["impostors"]
     )
+    # The offline run's world has no Impostors mod, the server's needs it
+    ring.PLUGIN = False
     ids = start_server()
     eye, target, away = geometry()
     try:
         clear_cache()
-        join(ids, "cold", False, True, eye, target, away)
+        # Without the early asteroids the client doesn't pick: the server sends the levels it
+        # picks, and the cache keeps them, as before SE-739
+        join(ids, "cold", False, False, eye, target, away)
         r = join(
             ids, "warm, pack", True, True, eye, target, away, shots / "multiplayer.png"
         )
