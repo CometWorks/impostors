@@ -31,7 +31,7 @@ public interface IPluginConfig : INotifyPropertyChanged
     // Grid groups with fewer blocks are not shown
     int MinBlocks { get; set; }
 
-    // Impostors farther than this are not shown, meters (500 km); 0 means the world's view
+    // Impostors farther than this are not shown, meters (400 km); 0 means the world's view
     // distance
     float MaxDistance { get; set; }
 
