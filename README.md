@@ -23,6 +23,7 @@ Safe zones show from afar too, as translucent bubbles in their color.
    [Configuration](Docs/Configuration.md).
 4. Optionally make an asteroid pack for the world, so clients get the asteroid impostors
    with the world's mods instead of over the network: see [Asteroid pack](Docs/AsteroidPack.md).
+   A [grid pack](Docs/GridPack.md) does the same for its stations and the encounters of its mods.
 
 ## Documentation
 
@@ -36,6 +37,7 @@ Safe zones show from afar too, as translucent bubbles in their color.
   asteroids inside them.
 - [Asteroid pack](Docs/AsteroidPack.md): asteroid impostors built in advance for a world,
   shipped as a mod.
+- [Grid pack](Docs/GridPack.md): the same for the world's own grids and the prefabs of its mods.
 - [Configuration](Docs/Configuration.md): the options of `Impostors.cfg`.
 - [Design](Docs/Design.md): how it works inside, the protocol, clusters and the limits.
 - [Development](Docs/Development.md): building, deployment, debugging and tests.

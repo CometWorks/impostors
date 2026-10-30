@@ -27,6 +27,8 @@ The file is read only when the server starts, so changes take effect after a res
 | `CacheBuildDays` | 90 | Cached shapes built this many days ago are dropped even while in use, 0 for no limit |
 | `CacheSweepMinutes` | 60 | Minutes between two background sweeps that drop what the cache limits say, 0 turns them off |
 | `ClientCacheMegabytes` | 512 | Client plugin only: disk space for the shapes received from servers; 0 turns that cache off |
+| `GridPack` | true | Takes grid shapes from the world's grid pack mod, see [Grid pack](GridPack.md) |
+| `WriteGridPack` | false | Builds the world's grids and the prefabs of its mods and writes its grid pack mod, once per start. Only on a copy of the world |
 | `AsteroidPack` | true | Takes asteroid shapes from the world's asteroid pack mod, see [Asteroid pack](AsteroidPack.md) |
 | `AsteroidPackMod` | 0 | Workshop id of the mod with the asteroid pack, 0 for any of the world's mods that has one |
 | `WriteAsteroidPack` | false | Builds every asteroid of the world and writes its asteroid pack mod, once per start |

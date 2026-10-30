@@ -72,6 +72,11 @@ namespace Impostors
         // client never sends them, so the protocol version stays.
         public const byte Inventory = 8;
 
+        // Client to server, right before the Inventory: long id of the world's grid pack the
+        // client has (see GridPack). A server with the same one sends FromCache for the shapes
+        // in it. Older servers ignore the message, older clients don't send it.
+        public const byte GridPack = 9;
+
         // Most seconds a server waits for an announced Inventory
         public const int InventoryWait = 10;
 

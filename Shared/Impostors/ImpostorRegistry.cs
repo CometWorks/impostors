@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Impostors;
 using Sandbox.Game.Entities;
 using Shared.Logging;
 
@@ -275,7 +276,10 @@ public sealed class ImpostorRegistry
             else if (shapes != null && build.Cached)
             {
                 // What a cache hit costs: the snapshot, the input hash and the read
-                var from = build.Packed ? "the asteroid pack" : "the cache";
+                var from =
+                    !build.Packed ? "the cache"
+                    : entry.Kind == ImpostorKind.Voxel ? "the asteroid pack"
+                    : "the grid pack";
                 log.Info(
                     $"Impostor from {from}: id={entry.Id} kind={entry.Kind} {size} snapshot={snapshotMs:0.00}{timing}"
                 );

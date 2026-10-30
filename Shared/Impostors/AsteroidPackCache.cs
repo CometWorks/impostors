@@ -10,7 +10,7 @@ namespace Shared.Impostors;
 // The world's asteroid pack (see AsteroidPack) in front of the shape cache: an asteroid whose
 // content hash matches its pack entry takes the pack's shapes, the rest go to the cache as
 // before. Nothing from the pack is written to the cache, the pack is there on every start.
-public sealed class AsteroidPackCache : IShapeCache
+public sealed class AsteroidPackCache : IPackedShapeCache
 {
     private readonly AsteroidPack pack;
     private readonly IShapeCache inner;

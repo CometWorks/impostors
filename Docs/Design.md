@@ -485,6 +485,14 @@ pack is a mod with the impostors of all of a world's asteroids, at every level, 
 - A pack written with `AsteroidPackMaxLevel` below 64 has entries without their finest levels.
   Clients use what is there, the server builds those asteroids itself.
 
+## Grid pack (SE-774)
+
+The same idea for grids, keyed by content instead of id since encounters spawn with new ids: see
+[Grid pack](GridPack.md). `GridPack` in the mod's `Common` reads `ImpostorsGridPack.dat`,
+`GridPackCache` sits in front of the other caches on the server. A shape's version finds it on the
+client, so a viewer that announced the same pack id counts every version in the pack as cached.
+Two different shapes with the same 32 bit version can't both be in a pack; the writer keeps the first.
+
 ## Early asteroids (SE-712)
 
 Over an asteroid ring the client used to wait for the server for every asteroid: the server
@@ -577,6 +585,7 @@ Mod networking on channel 47213, reliable messages up to 16 KB:
 | ShapeData | server to client | count, then id, version and shape per impostor; or a 1 and the level for a shape in the client's disk cache |
 | View | client to server | field of view with zoom, viewport width and height, view direction, spectator camera and its position; while zoomed or spectating |
 | Ready | client to server | ids of impostors whose real entity started drawing, then those whose entity stopped |
+| GridPack | client to server | the id of the world's grid pack the client has, right before the Inventory; see [Grid pack](GridPack.md) |
 | Inventory | client to server | whether more follow, count, then id, version and level mask per impostor in the client's disk cache or the world's asteroid pack; after each Welcome of a new server instance |
 
 The repeated hello means the server needs no state about clients across restarts, and a

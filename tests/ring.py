@@ -7,6 +7,7 @@ save (se1/worlds/octahedron/build_world.py --seed 2) and its Workshop mods downl
     IMP_PLUGIN=1 ...          # the client runs the client plugin, the world has no mod
     IMP_QUALITY=extreme ...   # the client's graphics preset (minimal)
     IMP_MOD_FOLDER=<path>     # the mod to stage instead of this working copy's
+    IMP_SAVE=<path>           # the save, instead of the shared install's
     IMP_TAG=<name>            # names the run in the output and the screenshots
 
 Prints one line per height with the replicated voxel maps the client has near and far, then
@@ -43,7 +44,12 @@ HEIGHTS = [
 SETTLE = float(os.environ.get("IMP_SETTLE", "60"))
 
 HOME = Path.home()
-SAVE = HOME / ".config/SpaceEngineers/Saves/76561198223054696/Octahedron - Seed 2"
+SAVE = Path(
+    os.environ.get(
+        "IMP_SAVE",
+        HOME / ".config/SpaceEngineers/Saves/76561198223054696/Octahedron - Seed 2",
+    )
+)
 ORE_MOD = HOME / ".config/SpaceEngineers/Mods/OctahedronOres-Seed2"
 WORKSHOP = HOME / ".steam/steam/steamapps/workshop/content/244850"
 ORE_MOD_ID = 900000202

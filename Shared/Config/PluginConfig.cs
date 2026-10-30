@@ -44,6 +44,8 @@ public class PluginConfig : IPluginConfig
     private int cacheBuildDays = 90;
     private int cacheSweepMinutes = 60;
     private int clientCacheMegabytes = 512;
+    private bool gridPack = true;
+    private bool writeGridPack;
     private bool asteroidPack = true;
     private ulong asteroidPackMod;
     private bool writeAsteroidPack;
@@ -173,6 +175,18 @@ public class PluginConfig : IPluginConfig
     {
         get => clientCacheMegabytes;
         set => SetValue(ref clientCacheMegabytes, value);
+    }
+
+    public bool GridPack
+    {
+        get => gridPack;
+        set => SetValue(ref gridPack, value);
+    }
+
+    public bool WriteGridPack
+    {
+        get => writeGridPack;
+        set => SetValue(ref writeGridPack, value);
     }
 
     public bool AsteroidPack
