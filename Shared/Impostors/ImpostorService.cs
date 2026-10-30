@@ -57,6 +57,8 @@ public sealed class ImpostorService : IDisposable
     private readonly long instanceId = DateTime.UtcNow.Ticks ^ Environment.TickCount;
     private readonly ByteWriter writer = new(Protocol.MaxMessageSize + 1024);
     private bool packWritten;
+    private readonly GridPack grids;
+    private GridPackWriter gridWriter;
     private int tick;
 
     // Game thread time of the registry's updates since the last minute's log line, all of it
@@ -81,6 +83,9 @@ public sealed class ImpostorService : IDisposable
         // The level masks of the shapes in the client's disk cache by id and version, from its
         // Inventory and every shape sent since; null for a client without the cache
         public Dictionary<(long id, int version), byte> OnDisk;
+
+        // The world's grid pack, when the client has the same one
+        public GridPack GridPack;
 
         // The tick until which the player's impostors wait for an Inventory the Hello announced
         public int InventoryDue;
@@ -188,6 +193,9 @@ public sealed class ImpostorService : IDisposable
                 : null;
         if (asteroids != null)
             cache = new AsteroidPackCache(asteroids, cache);
+        grids = config.Grids && config.GridPack ? GridPackCache.Open(log) : null;
+        if (grids != null)
+            cache = new GridPackCache(grids, cache);
         registry = new ImpostorRegistry(log, cache);
         if (config.WriteAsteroidPack)
         {
@@ -196,6 +204,11 @@ public sealed class ImpostorService : IDisposable
         }
         if (config.Grids)
             sources.Add(new GridSource(config));
+        if (config.WriteGridPack)
+        {
+            registry.MaxBuilds = Math.Max(2, Environment.ProcessorCount / 2);
+            gridWriter = new GridPackWriter(log);
+        }
         if (config.Asteroids)
         {
             var voxels = new VoxelSource(config, log);
@@ -362,7 +375,8 @@ public sealed class ImpostorService : IDisposable
             entry.Wanted =
                 BuildAll && !entry.Source.Remote
                 || entry.Kind == ImpostorKind.SafeZone
-                || WritingPack && entry.Kind == ImpostorKind.Voxel;
+                || WritingPack && entry.Kind == ImpostorKind.Voxel
+                || gridWriter is { BuildGrids: true } && entry.Kind == ImpostorKind.Grid;
             entry.Viewed = false;
         }
 
@@ -384,6 +398,11 @@ public sealed class ImpostorService : IDisposable
 
         if (WritingPack)
             TryWritePack();
+        if (gridWriter != null && gridWriter.Update(registry, WriteGridPack))
+        {
+            registry.MaxBuilds = ImpostorRegistry.DefaultMaxBuilds;
+            gridWriter = null;
+        }
 
         if (tick % 3600 == 0)
         {
@@ -394,7 +413,7 @@ public sealed class ImpostorService : IDisposable
             var ms = 1000.0 / Stopwatch.Frequency;
             if (built + cached + packed + unchanged > 0)
                 log.Info(
-                    $"Impostor shapes in the last minute: {built} built, {cached} from the cache, {packed} from the asteroid pack, {unchanged} unchanged; "
+                    $"Impostor shapes in the last minute: {built} built, {cached} from the cache, {packed} from a pack, {unchanged} unchanged; "
                         + $"the reused ones took {reusedCpuMs:0} ms CPU; "
                         + $"starting the builds took {buildTicks * ms:0.0} ms on the game thread, {maxBuildTicks * ms:0.00} ms the most in a tick"
                 );
@@ -464,6 +483,29 @@ public sealed class ImpostorService : IDisposable
             log.Error(e, "Failed to write the asteroid pack");
         }
         registry.MaxBuilds = ImpostorRegistry.DefaultMaxBuilds;
+    }
+
+    // Into Storage/Impostors/GridPack/<world> in the user data folder, next to the cache
+    private long WriteGridPack()
+    {
+        var world = MySession.Static.Name;
+        var name = string.Concat(
+            world.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c)
+        );
+        var folder = Path.Combine(
+            MyFileSystem.UserDataPath,
+            "Storage",
+            "Impostors",
+            "GridPack",
+            name
+        );
+        Directory.CreateDirectory(folder);
+        log.Info($"Grid pack folder: {folder}");
+        return GridPackCache.Write(
+            Path.Combine(folder, GridPack.FileName),
+            world,
+            gridWriter.Shapes
+        );
     }
 
     // What a player got in the last minute: picks and their time on the game thread, shapes,
@@ -541,6 +583,19 @@ public sealed class ImpostorService : IDisposable
         if (message[0] == Protocol.Inventory)
         {
             OnInventory(new ByteReader(message, 1), message.Length, sender);
+            return;
+        }
+
+        if (message[0] == Protocol.GridPack)
+        {
+            if (message.Length >= 9 && viewers.TryGetValue(sender, out var packViewer))
+            {
+                var id = new ByteReader(message, 1).Long();
+                packViewer.GridPack = grids != null && grids.Id == id ? grids : null;
+                log.Info(
+                    $"Player {sender} has the grid pack {id:x16}, {(packViewer.GridPack != null ? "the same as ours" : "not ours")}"
+                );
+            }
             return;
         }
 
@@ -1019,12 +1074,16 @@ public sealed class ImpostorService : IDisposable
         return viewer.Store.TryGet(entry.Id, entry.Shapes[index][0], entry.Version, out _);
     }
 
-    // The client's disk cache has this level of the entry's current version
+    // The client's disk cache or grid pack has this level of the entry's current version
     private static bool OnDisk(Viewer viewer, ImpostorEntry entry, int index)
     {
-        return viewer.OnDisk != null
-            && viewer.OnDisk.TryGetValue((entry.Id, entry.Version), out var mask)
-            && (mask & Protocol.LodBit(entry.Shapes[index][0])) != 0;
+        if (viewer.OnDisk == null)
+            return false;
+        var lod = entry.Shapes[index][0];
+        if (entry.Kind == ImpostorKind.Grid && viewer.GridPack?.Has(entry.Version, lod) == true)
+            return true;
+        return viewer.OnDisk.TryGetValue((entry.Id, entry.Version), out var mask)
+            && (mask & Protocol.LodBit(lod)) != 0;
     }
 
     // The client's disk cache or pack has every level of the entry's current version

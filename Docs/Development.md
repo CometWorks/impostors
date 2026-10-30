@@ -82,6 +82,8 @@ the whitelist, loading the mod in the game does.
   bursts of changes faster than the rebuild interval, a client killed while its cache saves,
   the server killed during rebuilds, and at the end a rebuild with the cache wiped that must
   match what the cache served. `IMP_ROUNDS` sets the rounds (4).
+- `tests/grid_pack.py` writes the grid pack of the "Octahedron - Seed 2" world and checks it: hit rate,
+  a join with and without it, prefabs spawned in play, the fallback, offline and a lobby game.
 - `tests/asteroid_pack.py` writes the asteroid pack of the "Octahedron - Seed 2" world
   (`write`), then joins above its asteroid ring with empty shape caches without and with the
   pack (`measure`) and compares the asteroid builds and the shape bytes. `reset` follows one

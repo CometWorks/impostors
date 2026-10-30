@@ -141,6 +141,11 @@ namespace Impostors
         // AsteroidPack); null without one. The client plugin turns it off with UsePack, and
         // names the mod with PackMod (0 for any of the world's mods).
         private AsteroidPack pack;
+
+        // The world's grid pack, its id told to the server with the Inventory; null without one.
+        // The client plugin turns it off with UseGridPack.
+        private GridPack gridPack;
+        public static bool UseGridPack = true;
         public static bool UsePack = true;
         public static ulong PackMod;
 
@@ -297,6 +302,8 @@ namespace Impostors
             }
             if (UsePack)
                 OpenPack();
+            if (UseGridPack)
+                OpenGridPack();
             MyAPIGateway.Utilities.RegisterMessageHandler(BudgetMessage, OnBudget);
             MyAPIGateway.Utilities.RegisterMessageHandler(VoxelLoadedMessage, OnVoxelLoaded);
             active = true;
@@ -315,6 +322,33 @@ namespace Impostors
                 early = new EarlyAsteroids(impostors, cache, pack);
                 ReadRange();
             }
+        }
+
+        private void OpenGridPack()
+        {
+            try
+            {
+                gridPack = GridPack.Open();
+            }
+            catch (Exception e)
+            {
+                MyLog.Default.WriteLineAndConsole(
+                    "Impostors: failed to read the grid pack: " + e.Message
+                );
+                return;
+            }
+            if (gridPack != null)
+                MyLog.Default.WriteLineAndConsole(
+                    "Impostors: grid pack of mod "
+                        + gridPack.ModName
+                        + " for \""
+                        + gridPack.World
+                        + "\": "
+                        + gridPack.Count
+                        + " shapes, "
+                        + gridPack.Bytes / 1024
+                        + " KB"
+                );
         }
 
         private void OpenPack()
@@ -476,6 +510,7 @@ namespace Impostors
             impostors.Clear();
             store.Clear();
             pack = null;
+            gridPack = null;
             early = null;
             if (cache != null)
             {
@@ -1209,6 +1244,12 @@ namespace Impostors
                                 if (data != null)
                                     packedCount++;
                             }
+                            if (data == null && gridPack != null && caching)
+                            {
+                                data = gridPack.Get(version, lod);
+                                if (data != null)
+                                    packedCount++;
+                            }
                             if (data == null)
                             {
                                 // Not where the server counted on it: start over with it
@@ -1273,6 +1314,13 @@ namespace Impostors
         {
             if (cache == null)
                 return;
+            if (gridPack != null)
+            {
+                writer.Clear();
+                writer.Byte(Protocol.GridPack);
+                writer.Long(gridPack.Id);
+                SendToServer();
+            }
             var versions = cache.Inventory(writer, SendToServer, pack);
             caching = true;
             MyLog.Default.WriteLineAndConsole(

@@ -13,6 +13,12 @@ namespace Shared.Impostors;
 // Built shapes kept for later, keyed by entity id and the hash of the content they were built
 // from (ShapeBuild.Input), so a restart or a refresh of unchanged content doesn't build them
 // again
+// A cache with a pack of a mod in front: tells whether the shapes came from it
+public interface IPackedShapeCache : IShapeCache
+{
+    byte[][] Get(long id, long input, out bool fromPack);
+}
+
 public interface IShapeCache
 {
     // Background thread: the shapes built from this input, or null

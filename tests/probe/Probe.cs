@@ -248,6 +248,29 @@ public sealed class ProbeCommands : CommandModule
         return $"Probe near: {string.Join(" ", entries)}";
     }
 
+    [Command(
+        "prefab",
+        "Spawns the n-th largest prefab of the world's mods at a position, replies its name."
+    )]
+    [Permission(MyPromoteLevel.Admin)]
+    public string Prefab(int n, double x, double y, double z)
+    {
+        var prefab = Sandbox
+            .Definitions.MyDefinitionManager.Static.GetPrefabDefinitions()
+            .Values.Where(p => p.Context != null && !p.Context.IsBaseGame)
+            .OrderByDescending(p => p.CubeGrids?.Sum(g => g.CubeBlocks.Count) ?? 0)
+            .ThenBy(p => p.Id.SubtypeName, StringComparer.Ordinal)
+            .ElementAt(n);
+        Sandbox.Game.World.MyPrefabManager.Static.SpawnPrefab(
+            prefab.Id.SubtypeName,
+            new Vector3D(x, y, z),
+            Vector3.Forward,
+            Vector3.Up,
+            callbacks: new Stack<Action>()
+        );
+        return "Probe prefab: " + prefab.Id.SubtypeName;
+    }
+
     [Command("place", "Puts a grid at a position, at rest.")]
     [Permission(MyPromoteLevel.Admin)]
     public string Place(long gridId, double x, double y, double z)

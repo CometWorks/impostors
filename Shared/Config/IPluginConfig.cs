@@ -79,6 +79,13 @@ public interface IPluginConfig : INotifyPropertyChanged
     // them before the real entity leaves its replication range
     float ReplicationMargin { get; set; }
 
+    // Takes grid shapes from the world's grid pack mod (see GridPack) where the grid is unchanged
+    bool GridPack { get; set; }
+
+    // Builds the world's grids and the prefabs of its mods and writes the grid pack mod into
+    // Storage/Impostors/GridPack in the user data folder, once per session
+    bool WriteGridPack { get; set; }
+
     // Takes asteroid shapes from the world's asteroid pack mod (see AsteroidPack) where the
     // asteroid is unchanged, on the server and, with the client plugin, on the client
     bool AsteroidPack { get; set; }

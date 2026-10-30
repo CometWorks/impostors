@@ -387,7 +387,7 @@ def reset() -> int:
             and not builds(asteroid, log_text()),
             f"unedited {asteroid}: version {version}, pack {versions[asteroid]}, changed={changed}",
         )
-        reused = re.findall(r"from the asteroid pack.*took (\d+) ms CPU", log_text())
+        reused = re.findall(r"from a pack.*took (\d+) ms CPU", log_text())
         print(
             f"  pack hits took {sum(map(int, reused))} ms CPU in the whole minutes so far",
             flush=True,
@@ -551,7 +551,7 @@ def offline_run(
             float(c)
             for c in re.findall(r"Impostor build: .*kind=Voxel .* cpu=([0-9.]+)", text)
         ]
-        packed = re.findall(r"(\d+) from the asteroid pack", text)
+        packed = re.findall(r"(\d+) from a pack", text)
         reused = re.findall(r"the reused ones took (\d+) ms CPU", text)
         pack_line = re.search(r"Asteroid pack of mod .*", text)
         result.update(

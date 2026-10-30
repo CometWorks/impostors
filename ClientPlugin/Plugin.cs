@@ -75,6 +75,7 @@ public class Plugin : IPlugin, ICommonPlugin
         // copy always does
         ImpostorRenderer.UsePack = Config.AsteroidPack;
         ImpostorRenderer.PackMod = Config.AsteroidPackMod;
+        ImpostorRenderer.UseGridPack = Config.GridPack;
 
         // Its copy of the received-shape cache keeps to the config's retention, the mod's own
         // copy to the defaults
