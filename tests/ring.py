@@ -47,7 +47,7 @@ HOME = Path.home()
 SAVE = Path(
     os.environ.get(
         "IMP_SAVE",
-        HOME / ".config/SpaceEngineers/Saves/76561198223054696/Octahedron - Seed 2",
+        HOME / ".config/SpaceEngineers/Saves/76561198223054696/Octahedron",
     )
 )
 ORE_MOD = HOME / ".config/SpaceEngineers/Mods/OctahedronOres-Seed2"
