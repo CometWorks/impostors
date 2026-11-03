@@ -72,14 +72,21 @@ public sealed class AsteroidPackCache : IPackedShapeCache
 
     // Writes the pack of these asteroids, built with these asteroid settings
     // (VoxelSource.Settings): (id, content hash, shapes in the places of ImpostorEntry.Lods,
-    // the state with the frame clients show them at). Levels finer than maxLod are left out,
+    // the state with the frame clients show them at, the voxel materials, see
+    // VoxelSource.Materials). Levels finer than maxLod are left out,
     // those entries then serve
     // only clients. Returns the file's size.
     public static long Write(
         string path,
         string world,
         long settings,
-        IEnumerable<(long id, long input, byte[][] shapes, ImpostorState frame)> asteroids,
+        IEnumerable<(
+            long id,
+            long input,
+            byte[][] shapes,
+            ImpostorState frame,
+            (string[] names, int[] counts) materials
+        )> asteroids,
         byte maxLod
     )
     {
@@ -93,7 +100,7 @@ public sealed class AsteroidPackCache : IPackedShapeCache
             writer.Write(settings);
             writer.Write(list.Count);
             var kept = new List<byte[][]>();
-            foreach (var (id, input, shapes, frame) in list)
+            foreach (var (id, input, shapes, frame, materials) in list)
             {
                 var levels = shapes.Where(s => s != null && s.Length > 0).ToArray();
                 var packed = levels.Where(s => s[0] <= maxLod).ToArray();
@@ -110,6 +117,12 @@ public sealed class AsteroidPackCache : IPackedShapeCache
                 writer.Write(frame.Orientation.Y);
                 writer.Write(frame.Orientation.Z);
                 writer.Write(frame.Orientation.W);
+                writer.Write((byte)materials.names.Length);
+                for (var m = 0; m < materials.names.Length; m++)
+                {
+                    writer.Write(materials.names[m]);
+                    writer.Write(materials.counts[m]);
+                }
                 writer.Write((byte)packed.Length);
                 foreach (var shape in packed)
                 {

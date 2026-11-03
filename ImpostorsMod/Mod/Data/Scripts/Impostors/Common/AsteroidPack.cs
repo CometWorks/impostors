@@ -19,7 +19,9 @@ namespace Impostors
     //
     // File: magic, format, world name, the asteroid settings (format 2 on), count, then per
     // asteroid long id, long content hash, int version, byte complete, the frame (format 3 on:
-    // float radius, double position x, y, z, float orientation x, y, z, w), byte level count,
+    // float radius, double position x, y, z, float orientation x, y, z, w), the voxel materials
+    // (format 4 on: byte count, then string material name and int voxel count each, see
+    // Materials), byte level count,
     // byte level and int length per level, and after the index the shapes in the same order.
     // "Complete" is 0 when levels were left out of the pack: only clients can use such an
     // entry, the server builds those asteroids. The settings are the hash of the server's
@@ -33,7 +35,7 @@ namespace Impostors
         // The old name: packs written under it still load from a local mod
         private const string OldFileName = "ImpostorsAsteroidPack.bin";
         public const int Magic = 0x50414d49; // "IMAP"
-        public const byte Format = 3;
+        public const byte Format = 4;
 
         private class Entry
         {
@@ -47,6 +49,10 @@ namespace Impostors
 
             // Where the asteroid is, Id and Version filled in; Kind 0 before format 3
             public ImpostorState Frame;
+
+            // Voxel counts by material name, null before format 4
+            public string[] Materials;
+            public int[] Counts;
         }
 
         private readonly Dictionary<long, Entry> entries = new Dictionary<long, Entry>();
@@ -146,6 +152,17 @@ namespace Impostors
                             ),
                         };
                     }
+                    if (format >= 4)
+                    {
+                        var n = reader.ReadByte();
+                        entry.Materials = new string[n];
+                        entry.Counts = new int[n];
+                        for (var m = 0; m < n; m++)
+                        {
+                            entry.Materials[m] = reader.ReadString();
+                            entry.Counts[m] = reader.ReadInt32();
+                        }
+                    }
                     var levels = reader.ReadByte();
                     entry.Lods = new byte[levels];
                     entry.Offsets = new long[levels];
@@ -190,6 +207,23 @@ namespace Impostors
                 if (entry.Frame.Kind == ImpostorKind.Voxel)
                     visit(entry.Frame, entry.Lods, entry.Lengths);
             }
+        }
+
+        // Client: the voxel materials of the asteroid of this version into counts, by material
+        // name, as Radio Spectrometry reads them from a loaded asteroid (see Docs/RadioSpectrometry.md).
+        // False when the pack has none for it.
+        public bool Materials(long id, int version, Dictionary<string, int> counts)
+        {
+            Entry entry;
+            if (
+                !entries.TryGetValue(id, out entry)
+                || entry.Version != version
+                || entry.Materials == null
+            )
+                return false;
+            for (var m = 0; m < entry.Materials.Length; m++)
+                counts[entry.Materials[m]] = entry.Counts[m];
+            return true;
         }
 
         // Client: one level of the asteroid's shapes of this version, or null

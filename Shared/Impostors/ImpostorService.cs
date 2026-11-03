@@ -7,6 +7,7 @@ using System.Threading;
 using Impostors;
 using Sandbox;
 using Sandbox.Engine.Multiplayer;
+using Sandbox.Game.Entities;
 using Sandbox.Game.Multiplayer;
 using Sandbox.Game.World;
 using Sandbox.ModAPI;
@@ -456,15 +457,26 @@ public sealed class ImpostorService : IDisposable
         {
             var folder = PackFolder("AsteroidPack");
             var path = Path.Combine(folder, AsteroidPack.FileName);
+            var start = Stopwatch.GetTimestamp();
+            var materials = asteroids
+                .AsParallel()
+                .AsOrdered()
+                .Select(e =>
+                    e.Tag is MyVoxelBase map && !map.Closed && map.Storage != null
+                        ? VoxelSource.Materials(map)
+                        : (new string[0], new int[0])
+                )
+                .ToList();
+            var materialsSeconds = (Stopwatch.GetTimestamp() - start) / (double)Stopwatch.Frequency;
             var bytes = AsteroidPackCache.Write(
                 path,
                 MySession.Static.Name,
                 sources.OfType<VoxelSource>().First().Settings,
-                asteroids.Select(e => (e.Id, e.Input, e.Shapes, e.State(0))),
+                asteroids.Select((e, i) => (e.Id, e.Input, e.Shapes, e.State(0), materials[i])),
                 (byte)config.AsteroidPackMaxLevel
             );
             log.Info(
-                $"Asteroid pack written: {asteroids.Count} asteroids, {bytes / 1024} KB, levels up to {config.AsteroidPackMaxLevel}, in {folder}"
+                $"Asteroid pack written: {asteroids.Count} asteroids, {bytes / 1024} KB, levels up to {config.AsteroidPackMaxLevel}, materials read in {materialsSeconds:0.0} s, in {folder}"
             );
         }
         catch (Exception e)

@@ -262,6 +262,9 @@ def pack_index(path: Path) -> tuple[int, dict[int, tuple[int, int, list]]]:
             )
             if fmt >= 3:
                 data.read(44)  # the frame
+            if fmt >= 4:
+                for _ in range(data.read(1)[0]):  # the materials
+                    data.read(data.read(1)[0] + 4)
             levels = data.read(1)[0]
             lengths = [struct.unpack("<Bi", data.read(5)) for _ in range(levels)]
             entries[asteroid] = (content, version, lengths)

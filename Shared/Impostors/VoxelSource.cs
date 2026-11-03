@@ -265,6 +265,43 @@ public sealed class VoxelSource : ImpostorSource, IDisposable
             ? $"voxels={map.Storage.Size.X}x{map.Storage.Size.Y}x{map.Storage.Size.Z} occlusion={config.AsteroidOcclusion} smooth={config.AsteroidSmoothNormals}"
             : "";
 
+    // The voxel counts by material name that Radio Spectrometry gets from a loaded asteroid, for
+    // the asteroid pack (see Docs/RadioSpectrometry.md). Read the way it reads them: level of
+    // detail 2 into a buffer 7 voxels larger per axis than the range read, counting the whole
+    // buffer, so the material at index 0 gets the unread voxels too.
+    public static (string[] names, int[] counts) Materials(MyVoxelBase map)
+    {
+        const int lod = 2;
+        var read = new MyStorageData();
+        read.Resize((map.Storage.Size >> lod) + 7);
+        map.Storage.PinAndExecute(() =>
+            map.Storage.ReadRange(
+                read,
+                MyStorageDataTypeFlags.Material,
+                lod,
+                map.StorageMin,
+                map.StorageMax >> lod
+            )
+        );
+        var counts = new int[256];
+        var size = read.Size3D;
+        var linear = size.X * size.Y * size.Z;
+        for (var i = 0; i < linear; i++)
+            counts[read.Get(MyStorageDataTypeEnum.Material, i)]++;
+        var found = Enumerable
+            .Range(0, 255)
+            .Where(i => counts[i] > 0)
+            .Select(i =>
+                (MyDefinitionManager.Static.GetVoxelMaterialDefinition((byte)i), counts[i])
+            )
+            .Where(m => m.Item1 != null)
+            .ToArray();
+        return (
+            found.Select(m => m.Item1.Id.SubtypeName).ToArray(),
+            found.Select(m => m.Item2).ToArray()
+        );
+    }
+
     // Colors by voxel material index, looked up on the game thread
     private static Vector3I[] MaterialColors()
     {

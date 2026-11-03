@@ -59,6 +59,11 @@ rename the file to `.dat`, before publishing it.
 Packs written before the early asteroids (formats 1 and 2) have no positions, so their asteroids
 don't show early; write the pack again to get that.
 
+Since format 4 the pack also has the voxel materials of every asteroid, which other mods can
+ask the Impostors mod for, like [Radio Spectrometry](RadioSpectrometry.md) for the asteroids
+the game hasn't loaded. Writing them takes about 25 s more for "Octahedron - Seed 2" and adds
+about 250 KB. Older packs have none; write the pack again to get them.
+
 The pack belongs to that world: it is keyed by the asteroids' entity ids and the voxels they
 were built from. Make it again after changing the world's asteroids, after changing
 `AsteroidOcclusion` or `AsteroidSmoothNormals` and after an Impostors update that changes how

@@ -42,7 +42,7 @@ def read_index(path: Path):
     """Positions, radii and per asteroid {level: quads} of the pack's entries"""
     with path.open("rb") as f:
         magic, fmt = struct.unpack("<iB", f.read(5))
-        assert magic == 0x50414D49 and fmt == 3, (magic, fmt)
+        assert magic == 0x50414D49 and fmt in (3, 4), (magic, fmt)
         n = shift = 0
         while True:
             b = f.read(1)[0]
@@ -57,6 +57,9 @@ def read_index(path: Path):
             f.read(8 + 8 + 4 + 1)
             r, x, y, z = struct.unpack("<fddd", f.read(28))
             f.read(16)
+            if fmt >= 4:
+                for _ in range(f.read(1)[0]):  # the materials
+                    f.read(f.read(1)[0] + 4)
             lv = {}
             for _ in range(f.read(1)[0]):
                 lod, length = struct.unpack("<Bi", f.read(5))
