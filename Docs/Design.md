@@ -601,7 +601,28 @@ Now, each time the client looks its asteroids up:
 
 From the same camera spots over the Seed 2 ring, at 1920x1080 (`tests/ring_levels.py`):
 
-RESULTS
+| Spot | Zoom | In view | Quads drawn | Level 2 | Level 2 that want 8 or finer |
+|---|---|---:|---:|---:|---:|
+| along | 1x | 489 | 6017 → 14886 | 414 → 230 | 152 → 19 |
+| along | 2x | 325 | 4434 → 14223 | 259 → 92 | 218 → 62 |
+| along | 8x | 48 | 758 → 10754 | 37 → 0 | 37 → 0 |
+| along-back | 1x | 494 | 5816 → 15339 | 427 → 266 | 134 → 18 |
+| along-back | 2x | 321 | 4253 → 14962 | 262 → 121 | 220 → 84 |
+| along-back | 8x | 46 | 557 → 10241 | 30 → 0 | 30 → 0 |
+| above-30 | 1x | 355 | 5111 → 14554 | 294 → 136 | 156 → 29 |
+| above-30 | 2x | 82 | 2434 → 13813 | 42 → 1 | 42 → 1 |
+| above-30 | 8x | 5 | 337 → 9543 | 1 → 0 | 1 → 0 |
+| inside | 1x | 108 | 2716 → 12742 | 40 → 1 | 40 → 1 |
+| inside | 2x | 58 | 1846 → 15207 | 15 → 0 | 15 → 0 |
+| inside | 8x | 15 | 694 → 12076 | 1 → 0 | 1 → 0 |
+| outside | 1x | 1059 | 13720 → 13828 | 786 → 655 | 51 → 43 |
+| outside | 2x | 466 | 6840 → 10720 | 332 → 201 | 185 → 60 |
+| outside | 8x | 55 | 1770 → 12476 | 21 → 0 | 21 → 0 |
+
+`along` and `along-back` look along the ring 2 km above it, `above-30` from 10 km above it
+30° down, `inside` from 20 km inside it outwards, `outside` from 60 km outside it inwards.
+Looking straight down from 10 km the game draws the near rocks itself. The quads are those
+drawn, the budget 16000.
 
 `tests/ring_budget.py` replays the pick from the pack's index alone, in half a second.
 

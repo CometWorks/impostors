@@ -9,11 +9,12 @@ and zoom, once the drawn levels stopped changing: a screenshot and the stats.
         uv run --no-project --with httpx --with pillow --with numpy \\
         python tests/ring_levels.py <tag>
     ... python tests/ring_levels.py --table <tag>   # the table of a finished run only
+    ... python tests/ring_levels.py --sheets <before> <after>   # comparison sheets
 
 The pack is taken from ~/.se-test/<task>-pack (tests/asteroid_pack.py). Files in
 ~/.se-test/<task>-levels/<tag>: <spot>-<zoom>x.png and .json, and table.md with the same
-columns as ring_budget.py: the asteroids in view, drawn, the quads, the drawn ones per level
-and the level-2 cubes whose size on screen wants level 8 or finer. Exits with 0; the
+columns as ring_budget.py: the asteroids in view, drawn, the quads, the impostors left out
+over the budget, the drawn ones per level level 8 or finer. Exits with 0; the
 numbers are for reading.
 """
 
@@ -91,14 +92,14 @@ def row(name: str, zoom: int, totals: dict, impostors: dict, settled: float) -> 
             starved += 1
     return (
         f"| {name} | {zoom}x | {totals.get('inview')} | {len(shown)} | "
-        f"{totals.get('quads')} | "
+        f"{totals.get('quads')} | {totals.get('overbudget')} | "
         + " | ".join(str(hist[l]) for l in rb.LODS)
         + f" | {starved} | {settled:.0f} |"
     )
 
 
 HEADER = [
-    "| spot | zoom | in view | drawn | quads |"
+    "| spot | zoom | in view | drawn | quads | over budget |"
     + "".join(f" L{l} |" for l in rb.LODS)
     + " cubes that want 8+ | settled s |",
     "|---" * (8 + len(rb.LODS)) + "|",
@@ -116,6 +117,96 @@ def table(out: Path) -> str:
     text = "\n".join(lines) + "\n"
     (out / "table.md").write_text(text)
     return text
+
+
+def starved_center(impostors: dict, size: tuple[int, int]) -> tuple[int, int]:
+    """Screen point amid the drawn level-2 cubes that want level 8 or finer, or the center"""
+    points = []
+    for r in drawn(impostors).values():
+        if r["shape"].split("/")[1] != "2" or "screen" not in r:
+            continue
+        height = float(r["viewport"].split("x")[1])
+        if 2 * float(r["radius"]) * 1080 / height * rb.CELLS_PER_PIXEL > 4:
+            points.append([float(v) for v in r["screen"].split(",")])
+    if not points:
+        return size[0] // 2, size[1] // 2
+    x, y = np.median(points, axis=0)
+    return int(x), int(y)
+
+
+def sheets(before: Path, after: Path, out: Path) -> None:
+    """Per spot: for each zoom both screenshots, then both cropped to a quarter around the
+    starved cubes of the run before and enlarged twice, pixel for pixel"""
+    from PIL import Image, ImageDraw, ImageFont
+
+    font = ImageFont.load_default(size=22)
+    out.mkdir(parents=True, exist_ok=True)
+    spots = dict.fromkeys(
+        f.stem.rsplit("-", 1)[0] for f in sorted(before.glob("*.png"))
+    )
+    for spot in spots:
+        rows = []
+        for zoom in rb.ZOOMS:
+            name = f"{spot}-{zoom}x"
+            if not (after / f"{name}.png").exists():
+                continue
+            images = [
+                Image.open(d / f"{name}.png").convert("RGB") for d in (before, after)
+            ]
+            stats = [
+                json.loads((d / f"{name}.json").read_text()) for d in (before, after)
+            ]
+            w, h = images[0].size
+            cx, cy = starved_center(stats[0]["impostors"], (w, h))
+            cw, ch = w // 4, h // 4
+            left = min(max(cx - cw // 2, 0), w - cw)
+            top = min(max(cy - ch // 2, 0), h - ch)
+            labels = []
+            for d in stats:
+                cubes = (
+                    row("", 0, d["totals"], d["impostors"], 0).split("|")[-3].strip()
+                )
+                labels.append(
+                    f"{d['totals'].get('quads')} quads, {cubes} starved cubes"
+                )
+            rows.append(
+                (
+                    f"{zoom}x",
+                    [i.resize((w // 2, h // 2), Image.LANCZOS) for i in images],
+                    [
+                        i.crop((left, top, left + cw, top + ch)).resize(
+                            (w // 2, h // 2), Image.NEAREST
+                        )
+                        for i in images
+                    ],
+                    labels,
+                )
+            )
+        if not rows:
+            continue
+        cw, ch = rows[0][1][0].size
+        bar = 34
+        sheet = Image.new("RGB", (2 * cw + 10, len(rows) * 2 * (ch + bar)), "white")
+        draw = ImageDraw.Draw(sheet)
+        y = 0
+        for zoom, full, crop, labels in rows:
+            for k, (tag, label) in enumerate(zip(("before", "after"), labels)):
+                draw.text(
+                    (k * (cw + 10) + 8, y + 6),
+                    f"{spot} {zoom} {tag}: {label}",
+                    fill="black",
+                    font=font,
+                )
+                sheet.paste(full[k], (k * (cw + 10), y + bar))
+                draw.text(
+                    (k * (cw + 10) + 8, y + ch + bar + 6),
+                    f"{spot} {zoom} {tag}, cropped, 2x",
+                    fill="black",
+                    font=font,
+                )
+                sheet.paste(crop[k], (k * (cw + 10), y + ch + 2 * bar))
+            y += 2 * (ch + bar)
+        sheet.save(out / f"{spot}.jpg", quality=88)
 
 
 def run(out: Path) -> None:
@@ -177,6 +268,10 @@ def run(out: Path) -> None:
 
 
 def main() -> int:
+    if sys.argv[1:2] == ["--sheets"] and len(sys.argv) == 4:
+        before, after = OUT / sys.argv[2], OUT / sys.argv[3]
+        sheets(before, after, OUT / "sheets")
+        return 0
     args = [a for a in sys.argv[1:] if a != "--table"]
     if len(args) != 1:
         raise SystemExit(__doc__)
