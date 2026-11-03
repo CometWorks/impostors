@@ -569,8 +569,41 @@ server's Welcome. Its Hello says so (a fifth byte).
   real ones. Before, the local service picked their levels once a second, so the right level
   came up to a second after a move.
 - The quad budget: the client fits its asteroids into `MaxQuadsPerFrame` less half the quads
-  of the server's impostors, as for the early ones; the server's own fit no longer counts them.
+  of the server's impostors in view, as for the early ones; the server's own fit no longer
+  counts them. See "Client-picked levels" below.
 - `stats.txt` adds `picks`, `notices` and `noticelevels`.
+
+## Client-picked levels (SE-971)
+
+Over the Octahedron ring the client drew most asteroids as level 2 cubes, with half of the
+quad budget unused. Its fit came from the server's: every asteroid in range counted, also the
+two thirds outside the view, and when they didn't fit all levels were picked for one smaller
+screen. A level has 4 to 5 times the quads of the one below, so that scale ended near 0.2 and
+dropped nearly everything to level 2. The size ignored the zoom too, and since SE-739 the
+server's zoom handling no longer reached these asteroids.
+
+Now, each time the client looks its asteroids up:
+
+- Only those in the view, widened by the eighth of the field of view that makes it look them
+  up again, take from the budget, and so do only the server's impostors in it. The others
+  get their coarsest level.
+- Those in view are sized for the zoomed view: the camera's `FovWithZoom` and screen height
+  against the server's 1080p, 70° estimate, 32 times at most. That covers the rifle's sight,
+  camera blocks and turrets. A change of the field of view by 5% looks them up again.
+- When the levels their size wants fit the budget, half of each shape's quads facing the
+  camera, they get those, with the hysteresis as before. Otherwise all start at their
+  coarsest level and get one level finer at a time, the step that takes the most off the
+  on-screen error per quad it adds first, while it fits. The error of a level is its cell
+  size on screen times the asteroid's area, wanted³/level for the cells its size wants, so a
+  step from level 2 to 4 of a small far asteroid, 22 quads, usually comes before the 2900
+  quads from 16 to 32 of a near one. A step back to the level the asteroid shows counts
+  twice, so a small turn doesn't swap levels back and forth.
+
+From the same camera spots over the Seed 2 ring, at 1920x1080 (`tests/ring_levels.py`):
+
+RESULTS
+
+`tests/ring_budget.py` replays the pick from the pack's index alone, in half a second.
 
 ## Protocol
 

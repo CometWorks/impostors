@@ -106,6 +106,11 @@ the whitelist, loading the mod in the game does.
   `VoxelShapes` and compares each level's area and light with the voxels themselves, from 6
   directions under 8 suns; `pack` does the same for an asteroid pack's levels against its
   finest one. See its docstring.
+- `tests/ring_budget.py <pack> old|new` replays the client's pick of the ring asteroids'
+  levels from an asteroid pack's index, no game: per camera spot and zoom the asteroids in
+  view, the quads and the levels, before SE-971 (`old`) or since (`new`).
+  `tests/ring_levels.py <tag>` takes the same spots and zooms in the game, offline with the
+  client plugin and the pack, and saves a screenshot and the stats of each (SE-971).
 - `tests/level_views.py` shoots three views of the Seed 2 asteroid ring (from Gamma Station,
   and from above the ring along it both ways), once with the impostors and once with the
   real asteroids up to the game's 50 km, offline (`IMP_SETUP=offline`) or on a server. It

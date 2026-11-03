@@ -74,7 +74,10 @@ Counts with ambient occlusion off; with it on they are about 3% higher. Each qua
 bytes, so level 64 is about 150 KB. The server sends one level per impostor
 and player, about one cell per 2.5 pixels of the impostor's size on a 1080p screen. When a
 player's impostors would be over `MaxQuadsPerFrame` together, as above an asteroid ring, all
-of them get coarser levels.
+of them get coarser levels. A client with the world's asteroid pack picks the asteroids'
+levels itself: only those in its view count, and the budget goes one level at a time to
+those whose cells look largest for the quads (see
+[Design](Design.md#client-picked-levels-se-971)).
 
 A zoomed view, like the rifle's iron sight or a camera or telescope mod, shows impostors
 larger than that estimate. The mod tells the server, which sends finer levels for the

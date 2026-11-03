@@ -581,8 +581,9 @@ namespace Impostors
         }
 
         // The early asteroids out to the server's range, the view distance until it says, and
-        // with the room the server's impostors leave in the quad budget, half of their quads
-        // facing the camera. Locally not those the game draws itself, within the far plane.
+        // with the room the server's impostors in view leave in the quad budget, half of their
+        // quads facing the camera. Locally not those the game draws itself, within the far
+        // plane.
         private void UpdateEarly()
         {
             var camera = MyAPIGateway.Session.Camera;
@@ -591,9 +592,20 @@ namespace Impostors
             var used = 0;
             if (tick % 10 == 0)
             {
+                var view = MatrixD.Transpose(camera.WorldMatrix);
                 foreach (var impostor in impostors.Values)
                 {
-                    if (!impostor.Early && impostor.Shape != null)
+                    if (
+                        !impostor.Early
+                        && impostor.Shape != null
+                        && InView(
+                            camera,
+                            view,
+                            impostor.State.Position + shift,
+                            impostor.State.Radius,
+                            EarlyAsteroids.ViewMargin(camera)
+                        )
+                    )
                         used += impostor.Shape.Count / 2;
                 }
             }
@@ -1545,19 +1557,26 @@ namespace Impostors
             lastEye = camera.Position;
         }
 
-        // A sphere inside the four side planes of the camera's view. Not IMyCamera.IsInFrustum:
-        // that frustum ends at the far plane, 20 km away, and impostors go much farther.
+        // A sphere inside the four side planes of the camera's view, each turned out by margin
+        // radians. Not IMyCamera.IsInFrustum: that frustum ends at the far plane, 20 km away,
+        // and impostors go much farther.
         public static bool InView(
             VRage.ModAPI.IMyCamera camera,
             MatrixD view,
             Vector3D center,
-            double radius
+            double radius,
+            double margin = 0
         )
         {
             var local = Vector3D.TransformNormal(center - camera.Position, view);
             var depth = -local.Z;
             var tanY = Math.Tan(camera.FovWithZoom / 2);
             var tanX = tanY * camera.ViewportSize.X / camera.ViewportSize.Y;
+            if (margin > 0)
+            {
+                tanX = Math.Tan(Math.Atan(tanX) + margin);
+                tanY = Math.Tan(Math.Atan(tanY) + margin);
+            }
             return Math.Abs(local.X) - depth * tanX <= radius * Math.Sqrt(1 + tanX * tanX)
                 && Math.Abs(local.Y) - depth * tanY <= radius * Math.Sqrt(1 + tanY * tanY);
         }
