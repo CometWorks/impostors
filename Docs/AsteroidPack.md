@@ -45,7 +45,13 @@ nobody edited and that the world doesn't save get no impostors anyway (see
    Windows) and publish it to the Workshop from the game, like any mod. Add the published mod
    to the world.
 
-The pack file is `ImpostorsAsteroidPack.dat`. Packs written before were named
+The pack file is `ImpostorsAsteroidPack.dat`, next to a `Data` folder with a readme in it.
+The game fails to load a mod without a `Data` folder, and a player whose client doesn't run on
+Linux gets a message box saying the pack wasn't loaded. The pack still works, but for a pack
+written without that folder, add a `Data` folder with any file in it (not an `.sbc`) and
+publish it again.
+
+Packs written before were named
 `ImpostorsAsteroidPack.bin`: they still load from a local mod, but the game leaves `.bin` files
 out when it publishes a mod, so the Workshop item gets no pack. Write such a pack again, or
 rename the file to `.dat`, before publishing it.

@@ -452,24 +452,13 @@ public sealed class ImpostorService : IDisposable
             return;
 
         packWritten = true;
-        var world = MySession.Static.Name;
-        var name = string.Concat(
-            world.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c)
-        );
         try
         {
-            var folder = Path.Combine(
-                MyFileSystem.UserDataPath,
-                "Storage",
-                "Impostors",
-                "AsteroidPack",
-                name
-            );
-            Directory.CreateDirectory(folder);
+            var folder = PackFolder("AsteroidPack");
             var path = Path.Combine(folder, AsteroidPack.FileName);
             var bytes = AsteroidPackCache.Write(
                 path,
-                world,
+                MySession.Static.Name,
                 sources.OfType<VoxelSource>().First().Settings,
                 asteroids.Select(e => (e.Id, e.Input, e.Shapes, e.State(0))),
                 (byte)config.AsteroidPackMaxLevel
@@ -488,24 +477,30 @@ public sealed class ImpostorService : IDisposable
     // Into Storage/Impostors/GridPack/<world> in the user data folder, next to the cache
     private long WriteGridPack()
     {
-        var world = MySession.Static.Name;
-        var name = string.Concat(
-            world.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c)
-        );
-        var folder = Path.Combine(
-            MyFileSystem.UserDataPath,
-            "Storage",
-            "Impostors",
-            "GridPack",
-            name
-        );
-        Directory.CreateDirectory(folder);
+        var folder = PackFolder("GridPack");
         log.Info($"Grid pack folder: {folder}");
         return GridPackCache.Write(
             Path.Combine(folder, GridPack.FileName),
-            world,
+            MySession.Static.Name,
             gridWriter.Shapes
         );
+    }
+
+    // Storage/Impostors/<kind>/<world> in the user data folder, a mod folder to publish. It
+    // gets a Data folder with a readme in it: the game fails to load the definitions of a mod
+    // without one, and a client not on Linux shows that as a mod that failed to load (SE-954).
+    private static string PackFolder(string kind)
+    {
+        var name = string.Concat(
+            MySession.Static.Name.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c)
+        );
+        var folder = Path.Combine(MyFileSystem.UserDataPath, "Storage", "Impostors", kind, name);
+        var data = Directory.CreateDirectory(Path.Combine(folder, "Data")).FullName;
+        File.WriteAllText(
+            Path.Combine(data, "README.txt"),
+            "Impostors pack, read by the Impostors mod. Space Engineers fails to load a mod without a Data folder.\n"
+        );
+        return folder;
     }
 
     // What a player got in the last minute: picks and their time on the game thread, shapes,

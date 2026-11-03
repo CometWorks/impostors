@@ -48,7 +48,8 @@ Some spawned groups miss the pack and are built as before:
 3. Copy `Storage/Impostors/GridPack/<world name>` from the server's data folder into the game's
    local mods folder and publish it from the game like any mod. The file is
    `ImpostorsGridPack.dat`: `.dat` is not on the list of extensions the game leaves out when it
-   publishes a mod.
+   publishes a mod. Keep the `Data` folder with the readme: without it the game reports the mod
+   as failed to load (see [Asteroid pack](AsteroidPack.md#making-one)).
 4. Add the published mod to the world.
 
 Make it again after changing the world's grids or its mods' prefabs, and after an Impostors
