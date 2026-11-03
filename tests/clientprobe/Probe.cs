@@ -1,9 +1,11 @@
 using System;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using HarmonyLib;
 using Sandbox.Engine.Utils;
 using Sandbox.Game.Entities;
+using Sandbox.Game.Gui;
 using Sandbox.Game.World;
 using Sandbox.ModAPI;
 using VRage;
@@ -24,6 +26,8 @@ namespace ImpostorsClientProbe;
 //   on for T ticks and off for T, always with T = 0. billboard-stats.txt then says every
 //   second what the game drew of the frames' billboards, see BillboardCheck.
 // - camera.txt ("x y z yaw pitch yawrate vx vy vz") flies the spectator camera, see CameraPath.
+// - look.txt ("x y z yaw pitch") holds the character there, looking that way in first person
+//   with the HUD hidden, see CharacterView.
 // - vcut.txt ("id offset radius") cuts a sphere out of a voxel map offline, like the server
 //   probe's vcut, then the file goes.
 public class Probe : IPlugin
@@ -48,6 +52,7 @@ public class Probe : IPlugin
     public void Update()
     {
         CameraPath.Update(++tick);
+        CharacterView.Update(tick);
         ShadowObservation.Update(tick);
         if (tick % 30 != 0)
             return;
@@ -297,5 +302,76 @@ public static class CameraPath
         values = new double[9];
         for (var i = 0; i < 9 && i < words.Length; i++)
             values[i] = double.Parse(words[i], CultureInfo.InvariantCulture);
+    }
+}
+
+// Holds the local character at x y z (meters), looking at yaw and pitch (degrees, as in
+// camera.txt), in first person and with the HUD hidden, so a screenshot shows the view only:
+// no body, no spectator text. Set again every tick from look.txt; without the file the HUD
+// comes back.
+public static class CharacterView
+{
+    private static string current;
+    private static MatrixD? matrix;
+
+    public static void Update(int tick)
+    {
+        if (tick % 10 == 0)
+            Read();
+        var character = MySession.Static?.LocalCharacter;
+        if (matrix == null || character == null)
+            return;
+
+        var target = matrix.Value;
+        var world = character.WorldMatrix;
+        if (
+            Vector3D.DistanceSquared(world.Translation, target.Translation) > 0.01
+            || Vector3D.Dot(world.Forward, target.Forward) < 0.99999
+        )
+        {
+            character.Teleport(target);
+            character.Physics?.ClearSpeed();
+        }
+        character.SetHeadLocalXAngle(0);
+        if (MySession.Static.CameraController != character)
+            MySession.Static.SetCameraController(MyCameraControllerEnum.Entity, character);
+        if (!character.IsInFirstPersonView)
+            character.IsInFirstPersonView = true;
+        MyHud.MinimalHud = true;
+    }
+
+    private static void Read()
+    {
+        var file = Path.Combine(MyFileSystem.UserDataPath, "look.txt");
+        var text = File.Exists(file) ? File.ReadAllText(file).Trim() : null;
+        if (text == current)
+            return;
+        current = text;
+        if (text == null)
+        {
+            if (matrix != null)
+                MyHud.MinimalHud = false;
+            matrix = null;
+            return;
+        }
+        var v = text.Split((char[])null, StringSplitOptions.RemoveEmptyEntries)
+            .Select(w => double.Parse(w, CultureInfo.InvariantCulture))
+            .ToArray();
+        var yaw = MathHelper.ToRadians(v[3]);
+        var pitch = MathHelper.ToRadians(v[4]);
+        var forward = new Vector3D(
+            Math.Cos(pitch) * Math.Sin(yaw),
+            Math.Sin(pitch),
+            -Math.Cos(pitch) * Math.Cos(yaw)
+        );
+        var right = Vector3D.Cross(forward, Vector3D.Up);
+        if (right.LengthSquared() < 1e-6)
+            right = Vector3D.Cross(forward, Vector3D.Forward);
+        right.Normalize();
+        matrix = MatrixD.CreateWorld(
+            new Vector3D(v[0], v[1], v[2]),
+            forward,
+            Vector3D.Cross(right, forward)
+        );
     }
 }

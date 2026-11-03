@@ -35,9 +35,10 @@ Billboard facts this design depends on (decompiled game 1.210):
   vertices are made camera relative in double precision.
 - 32768 billboards per frame for everything, vanilla effects included. The overflow is
   dropped silently, the last blend types first (see [Billboard limit](#billboard-limit-se-664)).
-  The renderer caps itself at `MaxQuadsPerFrame` quads (16000 by default), which the server
-  sends with its Welcome. It counts only the impostors in the camera's frustum, nearest
-  first, and skips one that doesn't fit while farther ones still may.
+  The renderer caps itself at `MaxQuadsPerFrame` quads (16384 by default), which the server
+  sends with its Welcome. It counts only the impostors in the camera's frustum, the largest
+  on screen first (towards the screen's edge they count less), and skips one that doesn't
+  fit while smaller ones still may.
 - Billboards are depth tested against the scene but never write depth. The `Standard` blend
   is weighted blended OIT, so overlapping opaque quads mix and look see-through. The `LDR`
   blend draws in submission order with premultiplied alpha after tone mapping. Impostors use
@@ -569,8 +570,69 @@ server's Welcome. Its Hello says so (a fifth byte).
   real ones. Before, the local service picked their levels once a second, so the right level
   came up to a second after a move.
 - The quad budget: the client fits its asteroids into `MaxQuadsPerFrame` less half the quads
-  of the server's impostors, as for the early ones; the server's own fit no longer counts them.
+  of the server's impostors in view, as for the early ones; the server's own fit no longer
+  counts them. See "Client-picked levels" below.
 - `stats.txt` adds `picks`, `notices` and `noticelevels`.
+
+## Client-picked levels (SE-971)
+
+Over the Octahedron ring the client drew most asteroids as level 2 cubes, with half of the
+quad budget unused. Its fit came from the server's: every asteroid in range counted, also the
+two thirds outside the view, and when they didn't fit all levels were picked for one smaller
+screen. A level has 4 to 5 times the quads of the one below, so that scale ended near 0.2 and
+dropped nearly everything to level 2. The size ignored the zoom too, and since SE-739 the
+server's zoom handling no longer reached these asteroids.
+
+Now, each time the client looks its asteroids up:
+
+- Only those in the view, widened by the eighth of the field of view that makes it look them
+  up again, take from the budget, and so do only the server's impostors in it. The others
+  get their coarsest level.
+- Those in view are sized for the zoomed view: the camera's `FovWithZoom` and screen height
+  against the server's 1080p, 70° estimate, 32 times at most. That covers the rifle's sight,
+  camera blocks and turrets. A change of the field of view by 5% looks them up again.
+- When the levels their size wants fit the budget, half of each shape's quads facing the
+  camera, they get those, with the hysteresis as before. Otherwise all start at their
+  coarsest level and get one level finer at a time, the step that takes the most off the
+  on-screen error per quad it adds first, while it fits. The error of a level is its cell
+  size on screen times the asteroid's area, wanted³/level for the cells its size wants, so a
+  step from level 2 to 4 of a small far asteroid, 22 quads, usually comes before the 2900
+  quads from 16 to 32 of a near one. A step back to the level the asteroid shows counts
+  twice, so a small turn doesn't swap levels back and forth.
+- The error counts less the farther off the view's center the asteroid is: fully in the
+  center, three quarters at the screen's edge and half at the margin's outer edge, by the
+  asteroid's point nearest to the center. The margin took 1000 to 6000 quads of the budget
+  before; with the weight more of them go to what is on screen.
+
+From the same spots over the Seed 2 ring, in first person with the HUD hidden, at 1920x1080
+(`tests/ring_levels.py`):
+
+| Spot | Zoom | In view | Quads drawn | Level 2 | Level 2 that want 8 or finer |
+|---|---|---:|---:|---:|---:|
+| along | 1x | 483 | 5980 → 15268 | 408 → 227 | 152 → 20 |
+| along | 2x | 318 | 4374 → 14928 | 252 → 79 | 214 → 51 |
+| along | 8x | 50 | 920 → 13872 | 36 → 0 | 36 → 0 |
+| along-back | 1x | 494 | 5816 → 15724 | 427 → 261 | 134 → 16 |
+| along-back | 2x | 321 | 4253 → 15356 | 262 → 121 | 220 → 83 |
+| along-back | 8x | 46 | 557 → 14597 | 30 → 0 | 30 → 0 |
+| above-30 | 1x | 355 | 5593 → 14945 | 276 → 132 | 138 → 26 |
+| above-30 | 2x | 82 | 2434 → 14481 | 42 → 1 | 42 → 1 |
+| above-30 | 8x | 5 | 337 → 9543 | 1 → 0 | 1 → 0 |
+| inside | 1x | 108 | 2716 → 13251 | 40 → 1 | 40 → 1 |
+| inside | 2x | 58 | 1846 → 15555 | 15 → 0 | 15 → 0 |
+| inside | 8x | 15 | 694 → 13694 | 1 → 0 | 1 → 0 |
+| outside | 1x | 1059 | 13720 → 14209 | 786 → 664 | 51 → 50 |
+| outside | 2x | 466 | 6840 → 11313 | 332 → 200 | 185 → 58 |
+| outside | 8x | 55 | 1770 → 12856 | 21 → 0 | 21 → 0 |
+
+`along` and `along-back` look along the ring 2 km above it, `above-30` from 10 km above it
+30° down, `inside` from 20 km inside it outwards, `outside` from 60 km outside it inwards.
+Looking straight down from 10 km the game draws the near rocks itself. The quads are those
+drawn, the budget 16000 before and 16384 after. They stay below it because the margin's asteroids take some of it
+and the pick counts half of each shape's quads, while the draw counts the faces that turn to
+the camera.
+
+`tests/ring_budget.py` replays the pick from the pack's index alone, in half a second.
 
 ## Protocol
 
@@ -606,7 +668,8 @@ Each frame it:
   from the camera (SE-738): the billboards are depth tested and would not show anyway, but
   they would take the quad budget. Terrain above sea level doesn't count, so only fully hidden
   ones go. About 0.08 µs per impostor (`tests/planet_occlusion.py`),
-- keeps the nearest impostors within the quad budget, counting the quads each one really
+- keeps the largest impostors on screen within the quad budget, their size weighted by how
+  far off the view's center they are (SE-971), counting the quads each one really
   draws: those on the faces towards the camera, all of a safe zone's,
 - draws them far to near, each with its back faces culled and its quads sorted back to front
   for the current view direction (re-sorted when the view turns by about 3°),
@@ -662,10 +725,10 @@ components were registered, not by their `Priority`.
 What each client gets:
 
 - The mod and the client plugin draw at most the budget, `MaxQuadsPerFrame` from the server.
-  They count the quads that really face the camera and keep the nearest impostors that fit,
-  while still drawing far to near. A vanilla client with the mod only relies on this: other
-  billboards are safe up to `32768 - MaxQuadsPerFrame` of them. The mod can't see how many
-  the frame has (`MyRenderProxy` isn't whitelisted), so it can't do more.
+  They count the quads that really face the camera and keep the largest impostors on screen
+  that fit, while still drawing far to near. A vanilla client with the mod only relies on
+  this: other billboards are safe up to `32768 - MaxQuadsPerFrame` of them. The mod can't
+  see how many the frame has (`MyRenderProxy` isn't whitelisted), so it can't do more.
 - The client plugin patches `PrepareList`. When a frame is over the limit, it takes as many
   impostor quads out of the `LDR` bucket as the frame is over, the first ones (the farthest,
   as they are drawn far to near), so every other billboard moves into the drawn range. It
@@ -848,7 +911,7 @@ one message under the SDK's 64 KiB payload limit.
 | Server game thread | one scan per second; a build's snapshot copies every cube of the group, 2 ms of snapshots per tick |
 | Server background | a quarter of the cores at a time (2 to 4), half the cores while writing the asteroid pack |
 | Network per player | `ShapeBytesPerSecond` (32 KB/s) for shapes, about 74 bytes per moving impostor per second |
-| Client | `MaxQuadsPerFrame` quads per frame (16000) |
+| Client | `MaxQuadsPerFrame` quads per frame (16384) |
 | Client plugin, render thread | its `PrepareList` patch: 7 µs per frame, 25 µs while every 14th frame is over the limit by 1182 impostor quads, 0.7 ms at most (`tests/billboards.py`, about 33000 billboards, Ryzen 9800X3D) |
 
 Typical shapes, measured on the test grids: see the test results in the ticket.

@@ -44,6 +44,9 @@ Level 64 is the finest there is, so zooms beyond about 4 times show no more deta
   rocks kept so many quads that a wide view after a zoom dropped most of the others.)
 - The server's cone is a quarter of the field of view wider than the view, so what a turn
   brings in is mostly there already. The client draws only what is inside its own view.
+- A client with the world's asteroid pack picks the asteroids' levels itself and sizes those
+  in its view for the zoom the same way, without the server (see
+  [Design](Design.md#client-picked-levels-se-971)).
 
 How fast: `tests/zoom.py` aims down the rifle's iron sight (70° to 40°) at a 512 m asteroid
 13 km away, and level 64 arrives 0.05 seconds after the zoom starts. A shape larger than the

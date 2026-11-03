@@ -27,7 +27,7 @@ namespace Impostors
     public class ImpostorRenderer : MySessionComponentBase
     {
         // Most quads drawn per frame, the server's MaxQuadsPerFrame once it welcomed us
-        private int maxQuads = 16000;
+        private int maxQuads = 16384;
 
         // Fitted to screenshots of real grids and asteroids from 8 directions:
         // the game's tone mapping makes sunlit sides brighter than plain Lambert shading
@@ -581,8 +581,9 @@ namespace Impostors
         }
 
         // The early asteroids out to the server's range, the view distance until it says, and
-        // with the room the server's impostors leave in the quad budget, half of their quads
-        // facing the camera. Locally not those the game draws itself, within the far plane.
+        // with the room the server's impostors in view leave in the quad budget, half of their
+        // quads facing the camera. Locally not those the game draws itself, within the far
+        // plane.
         private void UpdateEarly()
         {
             var camera = MyAPIGateway.Session.Camera;
@@ -591,9 +592,20 @@ namespace Impostors
             var used = 0;
             if (tick % 10 == 0)
             {
+                var view = MatrixD.Transpose(camera.WorldMatrix);
                 foreach (var impostor in impostors.Values)
                 {
-                    if (!impostor.Early && impostor.Shape != null)
+                    if (
+                        !impostor.Early
+                        && impostor.Shape != null
+                        && InView(
+                            camera,
+                            view,
+                            impostor.State.Position + shift,
+                            impostor.State.Radius,
+                            EarlyAsteroids.ViewMargin(camera)
+                        )
+                    )
                         used += impostor.Shape.Count / 2;
                 }
             }
@@ -1388,8 +1400,8 @@ namespace Impostors
             culled = 0;
             overBudget = 0;
 
-            // Nearest first while counting the budget, so the far ones are dropped. Frustum
-            // culled: the ones outside the camera's view would take the budget for nothing.
+            // Frustum culled: the ones outside the camera's view would take the budget for
+            // nothing.
             foreach (var impostor in impostors.Values)
             {
                 impostor.Occluded = false;
@@ -1446,13 +1458,20 @@ namespace Impostors
                 }
             }
 
+            // The largest on screen first while counting the budget, so the small ones get
+            // coarser or are dropped: the size times its weight, less towards the screen's edge
+            // (SE-971). By distance a near pebble would go before a far moon-sized asteroid.
             inView = visible.Count;
-            visible.Sort(
-                (a, b) =>
-                    Vector3D
-                        .DistanceSquared(eye, a.State.Position)
-                        .CompareTo(Vector3D.DistanceSquared(eye, b.State.Position))
-            );
+            var margin = EarlyAsteroids.ViewMargin(camera);
+            foreach (var impostor in visible)
+            {
+                var center = impostor.State.Position + shift;
+                impostor.Rank =
+                    impostor.State.Radius
+                    / Math.Max(Vector3D.Distance(eye, center), 1)
+                    * Weight(camera, view, center, impostor.State.Radius, margin);
+            }
+            visible.Sort((a, b) => b.Rank.CompareTo(a.Rank));
 
             // The client plugin's budget while it keeps sending it, the server's otherwise
             budget = maxQuads;
@@ -1545,21 +1564,55 @@ namespace Impostors
             lastEye = camera.Position;
         }
 
-        // A sphere inside the four side planes of the camera's view. Not IMyCamera.IsInFrustum:
-        // that frustum ends at the far plane, 20 km away, and impostors go much farther.
+        // A sphere inside the four side planes of the camera's view, each turned out by margin
+        // radians. Not IMyCamera.IsInFrustum: that frustum ends at the far plane, 20 km away,
+        // and impostors go much farther.
         public static bool InView(
             VRage.ModAPI.IMyCamera camera,
             MatrixD view,
             Vector3D center,
-            double radius
+            double radius,
+            double margin = 0
         )
         {
             var local = Vector3D.TransformNormal(center - camera.Position, view);
             var depth = -local.Z;
             var tanY = Math.Tan(camera.FovWithZoom / 2);
             var tanX = tanY * camera.ViewportSize.X / camera.ViewportSize.Y;
+            if (margin > 0)
+            {
+                tanX = Math.Tan(Math.Atan(tanX) + margin);
+                tanY = Math.Tan(Math.Atan(tanY) + margin);
+            }
             return Math.Abs(local.X) - depth * tanX <= radius * Math.Sqrt(1 + tanX * tanX)
                 && Math.Abs(local.Y) - depth * tanY <= radius * Math.Sqrt(1 + tanY * tanY);
+        }
+
+        // 1 in the view's center, 3/4 at the screen's edge and 1/2 at the margin's outer edge,
+        // by the impostor's point nearest to the center (SE-971)
+        public static double Weight(
+            VRage.ModAPI.IMyCamera camera,
+            MatrixD view,
+            Vector3D center,
+            double radius,
+            double margin
+        )
+        {
+            var local = Vector3D.TransformNormal(center - camera.Position, view);
+            var size = Math.Asin(Math.Min(1, radius / Math.Max(local.Length(), radius)));
+            var halfY = camera.FovWithZoom / 2;
+            var halfX = Math.Atan(Math.Tan(halfY) * camera.ViewportSize.X / camera.ViewportSize.Y);
+            var x = Math.Atan2(Math.Abs(local.X), -local.Z) - size;
+            var y = Math.Atan2(Math.Abs(local.Y), -local.Z) - size;
+            return 1 - Math.Max(Off(x, halfX, margin), Off(y, halfY, margin));
+        }
+
+        // 0 in the center, 1/4 at the screen's edge, 1/2 at the margin's outer edge
+        private static double Off(double angle, double half, double margin)
+        {
+            if (angle <= half)
+                return Math.Max(0, angle) / half / 4;
+            return Math.Min(0.25 + (angle - half) / margin / 4, 0.5);
         }
 
         private struct DrawPart
