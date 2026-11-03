@@ -42,6 +42,8 @@ OUT = rig.TEST_ROOT / f"{rig.TASK}-levels"
 # Seconds per view at most, and how long the drawn levels must stay the same
 SETTLE = float(os.environ.get("IMP_SETTLE", "60"))
 STABLE = 8.0
+# Only these spots (IMP_SPOTS, comma separated), to spread a run over hosts
+SPOTS = set(filter(None, os.environ.get("IMP_SPOTS", "").split(",")))
 rig.CLIENT_GIB = 10.0
 
 
@@ -251,6 +253,8 @@ def run(out: Path) -> None:
         rig.wait_world(api, timeout=1200)
         rig.focus_gameplay(api)
         for name, eye, forward in rb.spots(pos):
+            if SPOTS and name not in SPOTS:
+                continue
             look(client, eye, forward)
             for zoom in rb.ZOOMS:
                 client.set_fov(math.degrees(rb.fov_for(zoom)))

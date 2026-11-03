@@ -1,7 +1,7 @@
 """The asteroid levels a client picks over the Octahedron ring, from the asteroid pack's index
 alone (SE-971), no game: replays EarlyAsteroids' pick (the levels of the pack's asteroids in
-range, fitted into the quad budget) and the renderer's draw (the ones in view, nearest first,
-within the budget) for fixed camera spots, with and without zoom. Per spot: the ring
+range, fitted into the quad budget) and the renderer's draw (the ones in view, the largest on
+screen first, within the budget) for fixed camera spots, with and without zoom. Per spot: the ring
 asteroids in view, their levels and the quads.
 
     uv run --no-project --with numpy python tests/ring_budget.py <pack.dat> [old|new]
@@ -27,7 +27,7 @@ import numpy as np
 PIXELS_PER_RADIAN = 540 / 0.7002075382097097
 CELLS_PER_PIXEL = 1 / 2.5
 HEADER, QUAD = 19, 10
-BUDGET = 16000
+BUDGET = 16384
 MIN_PIXELS = 3.0
 RANGE = 400000.0
 # The game draws the asteroids within its voxel replication range itself: ViewDistance/sqrt(3)
@@ -199,11 +199,15 @@ def greedy(idx, counted, size, levels, w):
 
 
 def draw(eye, forward, up, fov, pos, rad, levels, picked):
-    """The renderer: in view, nearest first, half of each shape's quads within the budget"""
+    """The renderer: in view, the largest on screen first (weighted by the view's center),
+    half of each shape's quads within the budget"""
     view = in_view(eye, forward, up, fov, pos, rad)
-    ids = sorted(
-        (i for i in picked if view[i]), key=lambda i: np.sum((pos[i] - eye) ** 2)
+    rank = (
+        rad
+        / np.maximum(np.linalg.norm(pos - eye, axis=1), 1)
+        * weight(eye, forward, up, fov, pos, rad, fov / 8)
     )
+    ids = sorted((i for i in picked if view[i]), key=lambda i: -rank[i])
     quads, drawn, dropped = 0, [], 0
     for i in ids:
         cost = levels[i][picked[i]] // 2

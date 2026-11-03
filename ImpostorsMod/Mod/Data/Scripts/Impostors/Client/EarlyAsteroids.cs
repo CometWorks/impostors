@@ -278,33 +278,6 @@ namespace Impostors
             return camera.FovWithZoom / 8;
         }
 
-        // 1 in the view's center, 3/4 at the screen's edge and 1/2 at the margin's outer edge,
-        // by the point of the asteroid nearest to the center
-        private static double Weight(
-            IMyCamera camera,
-            MatrixD view,
-            Vector3D center,
-            double radius,
-            double margin
-        )
-        {
-            var local = Vector3D.TransformNormal(center - camera.Position, view);
-            var size = Math.Asin(Math.Min(1, radius / Math.Max(local.Length(), radius)));
-            var halfY = camera.FovWithZoom / 2;
-            var halfX = Math.Atan(Math.Tan(halfY) * camera.ViewportSize.X / camera.ViewportSize.Y);
-            var x = Math.Atan2(Math.Abs(local.X), -local.Z) - size;
-            var y = Math.Atan2(Math.Abs(local.Y), -local.Z) - size;
-            return 1 - Math.Max(Off(x, halfX, margin), Off(y, halfY, margin));
-        }
-
-        // 0 in the center, 1/4 at the screen's edge, 1/2 at the margin's outer edge
-        private static double Off(double angle, double half, double margin)
-        {
-            if (angle <= half)
-                return Math.Max(0, angle) / half / 4;
-            return Math.Min(0.25 + (angle - half) / margin / 4, 0.5);
-        }
-
         // The asteroids that would be shown from here and their levels, in view and large ones
         // first. Not those within drawnRange, where the game draws the real ones, nor those
         // whose real voxel map draws already. Those in view are sized for the zoomed view, the
@@ -367,7 +340,13 @@ namespace Impostors
                         Pixels = inView ? pixels * zoom : pixels,
                         InView = inView,
                         Weight = inView
-                            ? Weight(camera, view, k.State.Position, radius, margin)
+                            ? ImpostorRenderer.Weight(
+                                camera,
+                                view,
+                                k.State.Position,
+                                radius,
+                                margin
+                            )
                             : 0,
                     }
                 );

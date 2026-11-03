@@ -138,6 +138,10 @@ namespace Impostors
         public int FirstShapeTick = -1;
         public int FirstDrawnTick = -1;
 
+        // Its size on screen times its weight by the view's center, this frame: the larger
+        // ones take the quad budget first
+        public double Rank;
+
         // The shape drawn this frame: Shape, or a coarser one from the store when Shape didn't
         // fit into the quad budget
         public ClientShape Drawn;

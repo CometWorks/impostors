@@ -35,9 +35,10 @@ Billboard facts this design depends on (decompiled game 1.210):
   vertices are made camera relative in double precision.
 - 32768 billboards per frame for everything, vanilla effects included. The overflow is
   dropped silently, the last blend types first (see [Billboard limit](#billboard-limit-se-664)).
-  The renderer caps itself at `MaxQuadsPerFrame` quads (16000 by default), which the server
-  sends with its Welcome. It counts only the impostors in the camera's frustum, nearest
-  first, and skips one that doesn't fit while farther ones still may.
+  The renderer caps itself at `MaxQuadsPerFrame` quads (16384 by default), which the server
+  sends with its Welcome. It counts only the impostors in the camera's frustum, the largest
+  on screen first (towards the screen's edge they count less), and skips one that doesn't
+  fit while smaller ones still may.
 - Billboards are depth tested against the scene but never write depth. The `Standard` blend
   is weighted blended OIT, so overlapping opaque quads mix and look see-through. The `LDR`
   blend draws in submission order with premultiplied alpha after tone mapping. Impostors use
@@ -600,7 +601,7 @@ Now, each time the client looks its asteroids up:
   twice, so a small turn doesn't swap levels back and forth.
 - The error counts less the farther off the view's center the asteroid is: fully in the
   center, three quarters at the screen's edge and half at the margin's outer edge, by the
-  asteroid's point nearest to the center. The margin took 1000 to 6000 quads of the 16000
+  asteroid's point nearest to the center. The margin took 1000 to 6000 quads of the budget
   before; with the weight more of them go to what is on screen.
 
 From the same spots over the Seed 2 ring, in first person with the HUD hidden, at 1920x1080
@@ -667,7 +668,8 @@ Each frame it:
   from the camera (SE-738): the billboards are depth tested and would not show anyway, but
   they would take the quad budget. Terrain above sea level doesn't count, so only fully hidden
   ones go. About 0.08 µs per impostor (`tests/planet_occlusion.py`),
-- keeps the nearest impostors within the quad budget, counting the quads each one really
+- keeps the largest impostors on screen within the quad budget, their size weighted by how
+  far off the view's center they are (SE-971), counting the quads each one really
   draws: those on the faces towards the camera, all of a safe zone's,
 - draws them far to near, each with its back faces culled and its quads sorted back to front
   for the current view direction (re-sorted when the view turns by about 3°),
@@ -723,10 +725,10 @@ components were registered, not by their `Priority`.
 What each client gets:
 
 - The mod and the client plugin draw at most the budget, `MaxQuadsPerFrame` from the server.
-  They count the quads that really face the camera and keep the nearest impostors that fit,
-  while still drawing far to near. A vanilla client with the mod only relies on this: other
-  billboards are safe up to `32768 - MaxQuadsPerFrame` of them. The mod can't see how many
-  the frame has (`MyRenderProxy` isn't whitelisted), so it can't do more.
+  They count the quads that really face the camera and keep the largest impostors on screen
+  that fit, while still drawing far to near. A vanilla client with the mod only relies on
+  this: other billboards are safe up to `32768 - MaxQuadsPerFrame` of them. The mod can't
+  see how many the frame has (`MyRenderProxy` isn't whitelisted), so it can't do more.
 - The client plugin patches `PrepareList`. When a frame is over the limit, it takes as many
   impostor quads out of the `LDR` bucket as the frame is over, the first ones (the farthest,
   as they are drawn far to near), so every other billboard moves into the drawn range. It
@@ -909,7 +911,7 @@ one message under the SDK's 64 KiB payload limit.
 | Server game thread | one scan per second; a build's snapshot copies every cube of the group, 2 ms of snapshots per tick |
 | Server background | a quarter of the cores at a time (2 to 4), half the cores while writing the asteroid pack |
 | Network per player | `ShapeBytesPerSecond` (32 KB/s) for shapes, about 74 bytes per moving impostor per second |
-| Client | `MaxQuadsPerFrame` quads per frame (16000) |
+| Client | `MaxQuadsPerFrame` quads per frame (16384) |
 | Client plugin, render thread | its `PrepareList` patch: 7 µs per frame, 25 µs while every 14th frame is over the limit by 1182 impostor quads, 0.7 ms at most (`tests/billboards.py`, about 33000 billboards, Ryzen 9800X3D) |
 
 Typical shapes, measured on the test grids: see the test results in the ticket.
