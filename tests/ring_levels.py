@@ -1,8 +1,9 @@
 """The asteroid levels drawn over the Octahedron ring in the game (SE-971): the "Octahedron -
 Seed 2" world offline with the client plugin and the world's asteroid pack, so the client
-picks the asteroids' levels itself as multiplayer clients with the pack do. The spectator
-camera stops at tests/ring_budget.py's spots, each at the zooms 1x, 2x and 8x (the client
-probe's fov.txt, as the rifle's sight, a camera block or a turret narrow the view). Per spot
+picks the asteroids' levels itself as multiplayer clients with the pack do. The character
+stops at tests/ring_budget.py's spots in first person with the HUD hidden (the client probe's
+look.txt), each at the zooms 1x, 2x and 8x (its fov.txt, as the rifle's sight, a camera block
+or a turret narrow the view). Per spot
 and zoom, once the drawn levels stopped changing: a screenshot and the stats.
 
     IMP_TASK=se971 IMP_RESOLUTION=1920x1080 IMP_SAVE=<"Octahedron - Seed 2" save> \\
@@ -44,11 +45,11 @@ STABLE = 8.0
 rig.CLIENT_GIB = 10.0
 
 
-def camera(client, eye, forward) -> None:
+def look(client, eye, forward) -> None:
     yaw = math.degrees(math.atan2(forward[0], -forward[2]))
     pitch = math.degrees(math.asin(forward[1]))
-    (client.appdata / "camera.txt").write_text(
-        f"{eye[0]:.1f} {eye[1]:.1f} {eye[2]:.1f} {yaw:.4f} {pitch:.4f} 0 0 0 0"
+    (client.appdata / "look.txt").write_text(
+        f"{eye[0]:.1f} {eye[1]:.1f} {eye[2]:.1f} {yaw:.4f} {pitch:.4f}"
     )
 
 
@@ -233,7 +234,8 @@ def run(out: Path) -> None:
     )
     shutil.rmtree(client.appdata / "Storage/Impostors/Cache", ignore_errors=True)
     (client.loaded_mod_storage / "noearly").unlink(missing_ok=True)
-    (client.appdata / "camera.txt").unlink(missing_ok=True)
+    for name in ("camera.txt", "look.txt"):
+        (client.appdata / name).unlink(missing_ok=True)
     client.set_fov(None)
     args = client.args
     client.args = lambda _port: [
@@ -249,8 +251,7 @@ def run(out: Path) -> None:
         rig.wait_world(api, timeout=1200)
         rig.focus_gameplay(api)
         for name, eye, forward in rb.spots(pos):
-            api.character_teleport(*eye)
-            camera(client, eye, forward)
+            look(client, eye, forward)
             for zoom in rb.ZOOMS:
                 client.set_fov(math.degrees(rb.fov_for(zoom)))
                 totals, impostors, settled = settle(client)

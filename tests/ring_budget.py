@@ -9,7 +9,8 @@ asteroids in view, their levels and the quads.
 `old` is the pick before SE-971: every asteroid in range takes from the budget, all levels
 are picked for one smaller screen, and the size ignores the zoom. `new` is the pick since:
 only those in view take from it, sized for the zoomed view, one level finer at a time where
-that takes the most off the on-screen error per quad, while the budget lasts. Asteroids within
+that takes the most off the on-screen error per quad, while the budget lasts, the error
+counting less the farther off the view's center the asteroid is. Asteroids within
 the voxel replication range are left out, the game draws them. Exits with 0; the numbers are
 for reading.
 """
@@ -91,6 +92,29 @@ def in_view(eye, forward, up, fov, pos, rad, margin=0.0):
     )
 
 
+def weight(eye, forward, up, fov, pos, rad, margin):
+    """EarlyAsteroids.Weight: 1 in the view's center, 3/4 at the screen's edge and 1/2 at
+    the margin's outer edge, by the asteroid's point nearest to the center"""
+    right = unit(np.cross(forward, up))
+    up = np.cross(right, forward)
+    d = pos - eye
+    depth = d @ forward
+    size = np.arcsin(np.minimum(1, rad / np.maximum(np.linalg.norm(d, axis=1), rad)))
+    half_y = fov / 2
+    half_x = math.atan(math.tan(half_y) * WIDTH / HEIGHT)
+
+    def off(angle, half):
+        return np.where(
+            angle <= half,
+            np.maximum(0, angle) / half / 4,
+            np.minimum(0.25 + (angle - half) / margin / 4, 0.5),
+        )
+
+    x = np.arctan2(np.abs(d @ right), depth) - size
+    y = np.arctan2(np.abs(d @ up), depth) - size
+    return 1 - np.maximum(off(x, half_x), off(y, half_y))
+
+
 def pick(mode, eye, forward, up, fov, pos, rad, levels):
     """Level per asteroid in range, as the client picks them, and the scale it took"""
     dist = np.linalg.norm(pos - eye, axis=1)
@@ -107,7 +131,8 @@ def pick(mode, eye, forward, up, fov, pos, rad, levels):
         counted = ok & view
     idx = np.nonzero(ok)[0]
     if mode == "new":
-        return greedy(idx, counted, size, levels), ok, 0.0, size
+        w = weight(eye, forward, up, fov, pos, rad, fov / 8)
+        return greedy(idx, counted, size, levels, w), ok, 0.0, size
 
     def levels_at(scale):
         out, quads = {}, 0
@@ -133,9 +158,10 @@ def pick(mode, eye, forward, up, fov, pos, rad, levels):
     return picked, ok, scale, size
 
 
-def greedy(idx, counted, size, levels):
+def greedy(idx, counted, size, levels, w):
     """EarlyAsteroids.Fill: all at their coarsest level, then one level finer at a time, the
-    step that takes the most off the on-screen error per quad first, while the budget lasts.
+    step that takes the most off the on-screen error per quad first, the error weighted by
+    how far off the view's center the asteroid is, while the budget lasts.
     Those not counted stay at the coarsest. The levels they want when those fit."""
     if (
         sum(levels[i][level(levels[i], size[i])] // 2 for i in idx if counted[i])
@@ -156,7 +182,7 @@ def greedy(idx, counted, size, levels):
         for a, b in zip(lods, lods[1:]):
             if a >= want:
                 break
-            gain = wanted**3 / a / max(1, levels[i][b] // 2 - levels[i][a] // 2)
+            gain = w[i] * wanted**3 / a / max(1, levels[i][b] // 2 - levels[i][a] // 2)
             steps.append((-gain, i, a, b))
     steps.sort()
     stuck = set()
