@@ -609,26 +609,26 @@ From the same spots over the Seed 2 ring, in first person with the HUD hidden, a
 
 | Spot | Zoom | In view | Quads drawn | Level 2 | Level 2 that want 8 or finer |
 |---|---|---:|---:|---:|---:|
-| along | 1x | 483 | 5980 → 14888 | 408 → 233 | 152 → 21 |
-| along | 2x | 318 | 4374 → 14547 | 252 → 85 | 214 → 57 |
-| along | 8x | 50 | 920 → 13486 | 36 → 0 | 36 → 0 |
-| along-back | 1x | 494 | 5816 → 15352 | 427 → 267 | 134 → 18 |
-| along-back | 2x | 321 | 4253 → 14973 | 262 → 122 | 220 → 84 |
-| along-back | 8x | 46 | 557 → 12231 | 30 → 0 | 30 → 0 |
-| above-30 | 1x | 355 | 5111 → 14574 | 294 → 145 | 156 → 33 |
-| above-30 | 2x | 82 | 2434 → 14014 | 42 → 1 | 42 → 1 |
+| along | 1x | 483 | 5980 → 15268 | 408 → 227 | 152 → 20 |
+| along | 2x | 318 | 4374 → 14928 | 252 → 79 | 214 → 51 |
+| along | 8x | 50 | 920 → 13872 | 36 → 0 | 36 → 0 |
+| along-back | 1x | 494 | 5816 → 15724 | 427 → 261 | 134 → 16 |
+| along-back | 2x | 321 | 4253 → 15356 | 262 → 121 | 220 → 83 |
+| along-back | 8x | 46 | 557 → 14597 | 30 → 0 | 30 → 0 |
+| above-30 | 1x | 355 | 5593 → 14945 | 276 → 132 | 138 → 26 |
+| above-30 | 2x | 82 | 2434 → 14481 | 42 → 1 | 42 → 1 |
 | above-30 | 8x | 5 | 337 → 9543 | 1 → 0 | 1 → 0 |
-| inside | 1x | 108 | 2728 → 13041 | 40 → 1 | 40 → 1 |
-| inside | 2x | 58 | 1883 → 15204 | 15 → 0 | 15 → 0 |
-| inside | 8x | 15 | 804 → 14458 | 2 → 0 | 2 → 0 |
-| outside | 1x | 1059 | 13720 → 13815 | 786 → 657 | 51 → 46 |
-| outside | 2x | 466 | 6853 → 10928 | 332 → 197 | 185 → 56 |
-| outside | 8x | 55 | 1831 → 12471 | 22 → 0 | 22 → 0 |
+| inside | 1x | 108 | 2716 → 13251 | 40 → 1 | 40 → 1 |
+| inside | 2x | 58 | 1846 → 15555 | 15 → 0 | 15 → 0 |
+| inside | 8x | 15 | 694 → 13694 | 1 → 0 | 1 → 0 |
+| outside | 1x | 1059 | 13720 → 14209 | 786 → 664 | 51 → 50 |
+| outside | 2x | 466 | 6840 → 11313 | 332 → 200 | 185 → 58 |
+| outside | 8x | 55 | 1770 → 12856 | 21 → 0 | 21 → 0 |
 
 `along` and `along-back` look along the ring 2 km above it, `above-30` from 10 km above it
 30° down, `inside` from 20 km inside it outwards, `outside` from 60 km outside it inwards.
 Looking straight down from 10 km the game draws the near rocks itself. The quads are those
-drawn, the budget 16000. They stay below it because the margin's asteroids take some of it
+drawn, the budget 16000 before and 16384 after. They stay below it because the margin's asteroids take some of it
 and the pick counts half of each shape's quads, while the draw counts the faces that turn to
 the camera.
 
