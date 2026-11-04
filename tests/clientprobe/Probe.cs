@@ -30,6 +30,10 @@ namespace ImpostorsClientProbe;
 //   with the HUD hidden, see CharacterView.
 // - vcut.txt ("id offset radius") cuts a sphere out of a voxel map offline, like the server
 //   probe's vcut, then the file goes.
+// - voxelray.txt ("x1 y1 z1 x2 y2 z2") looks for voxel maps on that line the way the Radio
+//   Spectrometry mod does, and on its first 2 km, into voxelray-result.txt, then the file goes.
+// - voxelcenter.txt ("storage name") writes the world position of that loaded voxel map's rock,
+//   the middle of its voxels, into voxelcenter-result.txt, then the file goes.
 public class Probe : IPlugin
 {
     private int tick;
@@ -60,6 +64,8 @@ public class Probe : IPlugin
         BillboardStress.Read();
         BillboardCheck.Write();
         VoxelCut();
+        VoxelRay();
+        VoxelCenter();
 
         var camera = MySector.MainCamera;
         if (camera == null)
@@ -84,6 +90,92 @@ public class Probe : IPlugin
             camera.FieldOfView = original.Value;
             original = null;
         }
+    }
+
+    private static void VoxelCenter()
+    {
+        var file = Path.Combine(MyFileSystem.UserDataPath, "voxelcenter.txt");
+        if (MySession.Static?.Ready != true || !File.Exists(file))
+            return;
+        var name = File.ReadAllText(file).Trim();
+        File.Delete(file);
+        var map = MyEntities
+            .GetEntities()
+            .OfType<MyVoxelBase>()
+            .FirstOrDefault(m => m.StorageName == name);
+        var text = "none";
+        if (map?.Storage != null)
+        {
+            const int lod = 3;
+            var size = map.Storage.Size >> lod;
+            var read = new VRage.Voxels.MyStorageData();
+            read.Resize(size);
+            map.Storage.ReadRange(
+                read,
+                VRage.Voxels.MyStorageDataTypeFlags.Content,
+                lod,
+                Vector3I.Zero,
+                size - 1
+            );
+            var sum = Vector3D.Zero;
+            var count = 0;
+            for (var z = 0; z < size.Z; z++)
+            for (var y = 0; y < size.Y; y++)
+            for (var x = 0; x < size.X; x++)
+            {
+                var p = new Vector3I(x, y, z);
+                if (read.Content(ref p) < 128)
+                    continue;
+                sum += new Vector3D(x + 0.5, y + 0.5, z + 0.5) * (1 << lod);
+                count++;
+            }
+            if (count > 0)
+            {
+                var local = sum / count - map.SizeInMetresHalf;
+                var world = Vector3D.Transform(local, map.WorldMatrix);
+                text = string.Format(
+                    CultureInfo.InvariantCulture,
+                    "{0} {1} {2} {3}",
+                    world.X,
+                    world.Y,
+                    world.Z,
+                    count
+                );
+            }
+        }
+        File.WriteAllText(Path.Combine(MyFileSystem.UserDataPath, "voxelcenter-result.txt"), text);
+    }
+
+    private static void VoxelRay()
+    {
+        var file = Path.Combine(MyFileSystem.UserDataPath, "voxelray.txt");
+        if (MySession.Static?.Ready != true || !File.Exists(file))
+            return;
+        var v = File.ReadAllText(file)
+            .Split((char[])null, StringSplitOptions.RemoveEmptyEntries)
+            .Select(w => double.Parse(w, CultureInfo.InvariantCulture))
+            .ToArray();
+        File.Delete(file);
+        var from = new Vector3D(v[0], v[1], v[2]);
+        var to = new Vector3D(v[3], v[4], v[5]);
+        var text = "";
+        foreach (var end in new[] { to, from + Vector3D.Normalize(to - from) * 2000 })
+        {
+            var ray = new LineD(from, end);
+            var maps = new System.Collections.Generic.List<
+                MyLineSegmentOverlapResult<MyVoxelBase>
+            >();
+            MyGamePruningStructure.GetVoxelMapsOverlappingRay(ref ray, maps);
+            text += $"length={ray.Length:0} maps={maps.Count}";
+            foreach (var map in maps)
+            {
+                map.Element.GetIntersectionWithLine(ref ray, out Vector3D? hit, false);
+                text +=
+                    $" {map.Element.StorageName}:{(hit.HasValue ? (hit.Value - from).Length().ToString("0") : "miss")}";
+            }
+            text += "\n";
+        }
+        File.WriteAllText(Path.Combine(MyFileSystem.UserDataPath, "voxelray-result.txt"), text);
     }
 
     private static void VoxelCut()

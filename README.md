@@ -38,6 +38,8 @@ Safe zones show from afar too, as translucent bubbles in their color.
 - [Asteroid pack](Docs/AsteroidPack.md): asteroid impostors built in advance for a world,
   shipped as a mod.
 - [Grid pack](Docs/GridPack.md): the same for the world's own grids and the prefabs of its mods.
+- [Radio Spectrometry](Docs/RadioSpectrometry.md): the voxel materials of the asteroids drawn as
+  impostors, for that mod and others.
 - [Configuration](Docs/Configuration.md): the options of `Impostors.cfg`.
 - [Design](Docs/Design.md): how it works inside, the protocol, clusters and the limits.
 - [Development](Docs/Development.md): building, deployment, debugging and tests.

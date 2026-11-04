@@ -1,0 +1,203 @@
+diff --git a/Data/Scripts/RadioSpectrometry/AsteroidScanTask.cs b/Data/Scripts/RadioSpectrometry/AsteroidScanTask.cs
+index cc4affb..f23b396 100755
+--- a/Data/Scripts/RadioSpectrometry/AsteroidScanTask.cs
++++ b/Data/Scripts/RadioSpectrometry/AsteroidScanTask.cs
+@@ -1,4 +1,5 @@
+ ﻿using ParallelTasks;
++using Sandbox.Definitions;
+ using Sandbox.Engine.Voxels;
+ using Sandbox.Game.Entities;
+ using Sandbox.ModAPI;
+@@ -59,6 +60,9 @@ namespace ResourceRadiospectrometry
+ 			{
+ 				if(!(workMap is MyPlanet))
+ 				{
++					// An impostor's materials came with Prepare
++					if (workMap != null)
++					{
+ 					MyStorageData cache = new MyStorageData();
+ 					var cachesize = workMap.Storage.Size >> LOD;
+ 					cache.Resize(cachesize + 7);
+@@ -83,6 +87,7 @@ namespace ResourceRadiospectrometry
+ 							materials.Add(mat, 1);
+ 						}
+ 					}
++					}
+ 					//mesh result of all the mats
+ 					foreach (var mat in materials)
+ 					{
+@@ -121,7 +126,7 @@ namespace ResourceRadiospectrometry
+ 				{
+ 					noise *= 5f;
+ 				}
+-				var randgen = new Random(workMap.EntityId.GetHashCode());
++				var randgen = new Random(workId.GetHashCode());
+ 				for (int i = 0; i < 256; i++)
+ 				{
+ 					resultMap[i] += (float)(randgen.NextDouble() * lrgvl * noise);
+@@ -147,6 +152,7 @@ namespace ResourceRadiospectrometry
+ 		}
+ 		Dictionary<byte, long> materials = new Dictionary<byte, long>();
+ 		public MyVoxelBase workMap;
++		public long workId;
+ 		float m_maxrange = 150f;
+ 
+ 
+@@ -164,8 +170,27 @@ namespace ResourceRadiospectrometry
+ 			Complete = false;
+ 			Running = true;
+ 			workMap = closestvoxelmap;
++			workId = closestvoxelmap.EntityId;
++			m_maxrange = maxrange;
++			materials.Clear();
++			ResourceRadioSpecCore.instance.SubmitWork(this);
++		}
++
++		// An asteroid drawn by Impostors: its voxel counts by material name
++		internal void Prepare(long impostorId, Dictionary<string, int> counts, float maxrange)
++		{
++			Complete = false;
++			Running = true;
++			workMap = null;
++			workId = impostorId;
+ 			m_maxrange = maxrange;
+ 			materials.Clear();
++			foreach (var count in counts)
++			{
++				var def = MyDefinitionManager.Static.GetVoxelMaterialDefinition(count.Key);
++				if (def != null)
++					materials[def.Index] = count.Value;
++			}
+ 			ResourceRadioSpecCore.instance.SubmitWork(this);
+ 		}
+ 
+diff --git a/Data/Scripts/RadioSpectrometry/AsteroidScannerComponent.cs b/Data/Scripts/RadioSpectrometry/AsteroidScannerComponent.cs
+index 470caab..e7b49a5 100755
+--- a/Data/Scripts/RadioSpectrometry/AsteroidScannerComponent.cs
++++ b/Data/Scripts/RadioSpectrometry/AsteroidScannerComponent.cs
+@@ -24,6 +24,8 @@ namespace ResourceRadiospectrometry
+ 		float m_maxrange = 1f;
+ 		Base6Directions.Direction m_direction = Base6Directions.Direction.Forward;
+ 		bool raycastPending = false;
++		long impostorId = 0;
++		Dictionary<string, int> impostorMaterials = new Dictionary<string, int>();
+ 		public bool isObstructed = false;
+ 		public bool isScanning = false;
+ 		public int Active_Counter = 0;
+@@ -178,13 +180,18 @@ namespace ResourceRadiospectrometry
+ 					}
+ 				}
+ 
+-				isScanning = closestvoxelmap != null;
++				isScanning = closestvoxelmap != null || impostorId != 0;
+ 
+ 				if (closestvoxelmap != null && closestvoxelmap != m_lastMap)
+ 				{
+ 					m_lastMap = closestvoxelmap;
+ 					scanTask.Prepare(closestvoxelmap, m_maxrange);
+ 				}
++				else if (closestvoxelmap == null && impostorId != 0 && impostorId != m_lastImpostor)
++				{
++					m_lastImpostor = impostorId;
++					scanTask.Prepare(impostorId, impostorMaterials, m_maxrange);
++				}
+ 			}
+ 			catch
+ 			{
+@@ -208,6 +215,11 @@ namespace ResourceRadiospectrometry
+ 				Vector3D to = this.Entity.WorldMatrix.Translation + Vector3D.Multiply(direction, 25000);
+ 				Vector3D toshort = this.Entity.WorldMatrix.Translation + Vector3D.Multiply(direction, 500);
+ 
++				// An asteroid the game hasn't loaded, drawn by Impostors
++				impostorMaterials.Clear();
++				var impostors = ResourceRadioSpecCore.instance.ImpostorMaterials;
++				impostorId = impostors != null ? impostors(from, to, impostorMaterials) : 0;
++
+ 				//var color = Color.Yellow.ToVector4();
+ 				//MySimpleObjectDraw.DrawLine(from, to, MyStringId.GetOrCompute("Square"), ref color, 1);
+ 
+@@ -223,6 +235,7 @@ namespace ResourceRadiospectrometry
+ 		}
+ 
+ 		public MyVoxelBase m_lastMap;
++		public long m_lastImpostor;
+ 		
+ 		internal float[] getSpecMap()
+ 		{
+diff --git a/Data/Scripts/RadioSpectrometry/RadioSpectrometryTSS.cs b/Data/Scripts/RadioSpectrometry/RadioSpectrometryTSS.cs
+index 1f0d8eb..659c8a0 100755
+--- a/Data/Scripts/RadioSpectrometry/RadioSpectrometryTSS.cs
++++ b/Data/Scripts/RadioSpectrometry/RadioSpectrometryTSS.cs
+@@ -191,7 +191,7 @@ namespace ResourceRadiospectrometry
+ 				var sel = oreDetectors[oredetectorsoffset];
+ 				var scancomp = sel.GameLogic.GetAs<AsteroidScannerComponent>();
+ 				scancomp.Active_Counter = 10;
+-				var lm = (scancomp.scanTask.workMap?.EntityId ?? 0);
++				var lm = scancomp.scanTask.workId;
+ 
+ 				if (scancomp.isObstructed != isObstructed)
+ 					dirty = true;
+@@ -212,10 +212,10 @@ namespace ResourceRadiospectrometry
+ 					Color linecolor = Surface.ScriptForegroundColor * 0.05f + Surface.ScriptBackgroundColor;
+ 					var oredetectorname = oreDetectors[oredetectorsoffset].CustomName;
+ 
+-					if(scancomp.m_lastMap != null)
++					if(scancomp.m_lastMap != null || scancomp.m_lastImpostor != 0)
+ 					{
+ 						asteroidDetected.Color = Surface.ScriptForegroundColor;
+-						asteroidDetected.Data = scancomp.m_lastMap.GetHashCode().ToString();
++						asteroidDetected.Data = (scancomp.scanTask.workMap != null ? scancomp.scanTask.workMap.GetHashCode() : scancomp.m_lastImpostor.GetHashCode()).ToString();
+ 						frame.Add(asteroidDetected);
+ 					}
+ 					else
+diff --git a/Data/Scripts/RadioSpectrometry/ResourceRadioSpecCore.cs b/Data/Scripts/RadioSpectrometry/ResourceRadioSpecCore.cs
+index df1ab69..b7f5921 100755
+--- a/Data/Scripts/RadioSpectrometry/ResourceRadioSpecCore.cs
++++ b/Data/Scripts/RadioSpectrometry/ResourceRadioSpecCore.cs
+@@ -10,6 +10,7 @@ using VRage.Game;
+ using VRage.Game.Components;
+ using VRage.ModAPI;
+ using VRage.Utils;
++using VRageMath;
+ 
+ namespace ResourceRadiospectrometry
+ {
+@@ -23,6 +24,20 @@ namespace ResourceRadiospectrometry
+ 		public Queue<Action> raycastQueue = new Queue<Action>();
+ 		public DefinitionExtensionsAPI DefExtensions = new DefinitionExtensionsAPI(initDefinitions);
+ 
++		// The Impostors mod hands out the voxel materials of the asteroids it draws beyond the
++		// range the game loads them in, from the world's asteroid pack: (from, to, counts by
++		// material name) -> entity id of the nearest such asteroid on the segment, or 0.
++		// Game thread only.
++		const long ImpostorsMaterialsApi = 4721300005;
++		public Func<Vector3D, Vector3D, Dictionary<string, int>, long> ImpostorMaterials;
++
++		private void OnImpostorsApi(object message)
++		{
++			var api = message as Func<Vector3D, Vector3D, Dictionary<string, int>, long>;
++			if (api != null)
++				ImpostorMaterials = api;
++		}
++
+ 		private static void initDefinitions()
+ 		{
+ 			
+@@ -37,6 +52,8 @@ namespace ResourceRadiospectrometry
+ 
+ 		public override void LoadData()
+ 		{
++			MyAPIGateway.Utilities.RegisterMessageHandler(ImpostorsMaterialsApi, OnImpostorsApi);
++			MyAPIGateway.Utilities.SendModMessage(ImpostorsMaterialsApi, "RadioSpectrometry");
+ 			//obtain all voxel definitions
+ 			MyLog.Default.WriteLine("~ResourceRadioSpecCore - Init");
+ 			var defs = MyDefinitionManager.Static.GetVoxelMaterialDefinitions();
+@@ -107,6 +124,8 @@ namespace ResourceRadiospectrometry
+ 
+ 		protected override void UnloadData()
+ 		{
++			MyAPIGateway.Utilities.UnregisterMessageHandler(ImpostorsMaterialsApi, OnImpostorsApi);
++			ImpostorMaterials = null;
+ 			instance = null;
+ 			base.UnloadData();
+ 		}

@@ -111,6 +111,9 @@ the whitelist, loading the mod in the game does.
   view, the quads and the levels, before SE-971 (`old`) or since (`new`).
   `tests/ring_levels.py <tag>` takes the same spots and zooms in the game, offline with the
   client plugin and the pack, and saves a screenshot and the stats of each (SE-971).
+- `tests/radio_spectrometry.py` reads what the Radio Spectrometry mod's LCD shows for a ring
+  asteroid of "Octahedron - Seed 2", loaded and drawn only as an impostor, on a server with a
+  headless client (SE-984). See [Radio Spectrometry](RadioSpectrometry.md).
 - `tests/level_views.py` shoots three views of the Seed 2 asteroid ring (from Gamma Station,
   and from above the ring along it both ways), once with the impostors and once with the
   real asteroids up to the game's 50 km, offline (`IMP_SETUP=offline`) or on a server. It

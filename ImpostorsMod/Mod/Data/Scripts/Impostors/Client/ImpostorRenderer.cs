@@ -123,6 +123,12 @@ namespace Impostors
         private int frameBudget;
         private int frameBudgetTick = -BudgetTicks - 1;
 
+        // Other mods get the voxel materials of the asteroids drawn as impostors from the world's
+        // asteroid pack (see AsteroidMaterials): this delegate goes out on this channel once the
+        // renderer starts, and again to anyone sending a string on it.
+        public const long MaterialsApiMessage = 4721300005;
+        private Func<Vector3D, Vector3D, Dictionary<string, int>, long> materialsApi;
+
         private readonly Dictionary<long, ClientImpostor> impostors =
             new Dictionary<long, ClientImpostor>();
         private readonly List<ClientImpostor> visible = new List<ClientImpostor>();
@@ -307,6 +313,15 @@ namespace Impostors
             MyAPIGateway.Utilities.RegisterMessageHandler(BudgetMessage, OnBudget);
             MyAPIGateway.Utilities.RegisterMessageHandler(VoxelLoadedMessage, OnVoxelLoaded);
             active = true;
+            if (pack != null)
+            {
+                materialsApi = AsteroidMaterials;
+                MyAPIGateway.Utilities.RegisterMessageHandler(
+                    MaterialsApiMessage,
+                    OnMaterialsRequest
+                );
+                MyAPIGateway.Utilities.SendModMessage(MaterialsApiMessage, materialsApi);
+            }
 
             // Tests put this file into the storage (see StorageExists) to get stats.txt every
             // second and to switch between the real entities and their impostors (see ReadMode)
@@ -506,6 +521,14 @@ namespace Impostors
                 );
             MyAPIGateway.Utilities.UnregisterMessageHandler(BudgetMessage, OnBudget);
             MyAPIGateway.Utilities.UnregisterMessageHandler(VoxelLoadedMessage, OnVoxelLoaded);
+            if (materialsApi != null)
+            {
+                MyAPIGateway.Utilities.UnregisterMessageHandler(
+                    MaterialsApiMessage,
+                    OnMaterialsRequest
+                );
+                materialsApi = null;
+            }
             active = false;
             impostors.Clear();
             store.Clear();
@@ -519,6 +542,41 @@ namespace Impostors
                 cache = null;
                 caching = false;
             }
+        }
+
+        private void OnMaterialsRequest(object message)
+        {
+            if (message is string)
+                MyAPIGateway.Utilities.SendModMessage(MaterialsApiMessage, materialsApi);
+        }
+
+        // The nearest asteroid impostor on the segment from-to, by its bounding sphere: fills in
+        // its voxel counts by material name, as Radio Spectrometry reads them from a loaded
+        // asteroid, and returns its entity id. 0 when there is none, or the pack has no
+        // materials for it, as for an asteroid mined since the pack was made. Game thread only.
+        private long AsteroidMaterials(Vector3D from, Vector3D to, Dictionary<string, int> counts)
+        {
+            var length = Vector3D.Distance(from, to);
+            if (pack == null || length <= 0)
+                return 0;
+            var ray = new RayD(from, (to - from) / length);
+            ImpostorState? nearest = null;
+            foreach (var impostor in impostors.Values)
+            {
+                var state = impostor.State;
+                if (state.Kind != ImpostorKind.Voxel)
+                    continue;
+                var hit = ray.Intersects(new BoundingSphereD(state.Position, state.Radius));
+                if (hit.HasValue && hit.Value < length)
+                {
+                    length = hit.Value;
+                    nearest = state;
+                }
+            }
+            return
+                nearest.HasValue && pack.Materials(nearest.Value.Id, nearest.Value.Version, counts)
+                ? nearest.Value.Id
+                : 0;
         }
 
         public override void UpdateBeforeSimulation()
