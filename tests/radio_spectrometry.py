@@ -159,6 +159,19 @@ def impostor_of(entity_id: int) -> dict | None:
     return CLIENT.stats()[1].get(entity_id)
 
 
+def rock_center(name: str) -> np.ndarray | None:
+    """The middle of a loaded asteroid's voxels, through the client probe: the rock can sit
+    anywhere in its voxel storage, so its bounding box center may be empty space"""
+    result = CLIENT.appdata / "voxelcenter-result.txt"
+    result.unlink(missing_ok=True)
+    (CLIENT.appdata / "voxelcenter.txt").write_text(name)
+    deadline = time.monotonic() + 20
+    while not result.exists() and time.monotonic() < deadline:
+        time.sleep(0.5)
+    values = result.read_text().split() if result.exists() else []
+    return np.array([float(v) for v in values[:3]]) if len(values) == 4 else None
+
+
 def voxel_ray(detector, ahead) -> str:
     """What the mod's own lookup finds along the detector's ray, through the client probe"""
     result = CLIENT.appdata / "voxelray-result.txt"
@@ -200,7 +213,7 @@ def check(
     api, case: str, target: dict, normal, side, height: float
 ) -> tuple[bool, list]:
     """A station `height` metres over the asteroid, its detector facing it"""
-    center = np.array(target["center"])
+    center = np.array(target["rock"])
     spot = center + normal * height
     api.character_teleport(*(spot + normal * 30 + side * 20))
     time.sleep(3)
@@ -231,6 +244,8 @@ def check(
     time.sleep(2)
     api.character_look_at(*lcd, tolerance=1)
 
+    shown_on = [next(iter(LCDS))]
+
     def read() -> dict:
         """The LCD showing the most, selecting the script where it isn't yet"""
         surfaces = []
@@ -238,8 +253,9 @@ def check(
             surface = api.get_surface(grid, cell)
             if surface.get("contentType") != "SCRIPT":
                 api.set_surface_script(grid, cell, SCRIPT)
-            surfaces.append(surface)
-        return max(surfaces, key=lambda x: len(x.get("sprites") or []))
+            surfaces.append((len(surface.get("sprites") or []), cell, surface))
+        _, shown_on[0], surface = max(surfaces, key=lambda x: x[0])
+        return surface
 
     surface, deadline = {}, time.monotonic() + 90
     while time.monotonic() < deadline:
@@ -267,7 +283,15 @@ def check(
         flush=True,
     )
     (SHOTS / f"{case}-lcd.json").write_text(json.dumps(surface, indent=1))
-    (SHOTS / f"{case}-lcd.png").write_bytes(api.screenshot_bytes())
+    # The LCD showing it, up close
+    screen = grid_to_world(api, grid, shown_on[0])
+    api.character_teleport(*(screen + normal * 4))
+    time.sleep(2)
+    api.character_look_at(*screen, tolerance=0.5)
+    CLIENT.set_fov(40)
+    time.sleep(3)
+    (SHOTS / f"{case}-lcd.png").write_bytes(api.screenshot_bytes(ignore_sprites=True))
+    CLIENT.set_fov(None)
     # The asteroid as the player sees it from the station, zoomed
     api.character_teleport(*(spot + normal * 30 + side * 20))
     time.sleep(2)
@@ -302,6 +326,7 @@ def main() -> int:
     CLIENT.mod_storage.mkdir(parents=True, exist_ok=True)
     (CLIENT.mod_storage / "noearly").unlink(missing_ok=True)
     (CLIENT.appdata / "voxelray.txt").unlink(missing_ok=True)
+    (CLIENT.appdata / "voxelcenter.txt").unlink(missing_ok=True)
     if NOEARLY:
         (CLIENT.mod_storage / "noearly").write_text("")
     CLIENT.launch(SERVER.port)
@@ -334,8 +359,14 @@ def main() -> int:
         if target is None:
             print("FAIL no ring asteroid loaded near", base.round(0), flush=True)
             return 1
+        rock = rock_center(target["name"])
+        if rock is None:
+            print("FAIL no voxels of", target["name"], flush=True)
+            return 1
+        target["rock"] = rock
         print(
-            f"asteroid {target['name']} id={target['entityId']} r={target['radius']:.0f}",
+            f"asteroid {target['name']} id={target['entityId']} r={target['radius']:.0f}, "
+            f"rock {np.linalg.norm(rock - np.array(target['center'])):.0f} m off its center",
             flush=True,
         )
         curves = []
