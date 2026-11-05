@@ -33,6 +33,8 @@ public sealed class VoxelSource : ImpostorSource, IDisposable
 
     // Colors by the material's mined ore, the rest are stone. Stone is fitted to screenshots of
     // real asteroids from 8 directions (a neutral gray the 4 bit quantization keeps exact), the ores keep their hues at about the same brightness.
+    // Uraninite is a gray rock without a hue, darker than stone: fitted to an asteroid of only
+    // uraninite in sunlight (SE-1102).
     private static readonly Dictionary<string, Vector3I> OreColors = new()
     {
         ["Stone"] = new Vector3I(170, 170, 170),
@@ -44,7 +46,7 @@ public sealed class VoxelSource : ImpostorSource, IDisposable
         ["Silver"] = new Vector3I(204, 204, 208),
         ["Gold"] = new Vector3I(208, 174, 85),
         ["Platinum"] = new Vector3I(204, 208, 217),
-        ["Uranium"] = new Vector3I(136, 166, 110),
+        ["Uranium"] = new Vector3I(136, 136, 136),
         ["Ice"] = new Vector3I(200, 208, 217),
     };
 
