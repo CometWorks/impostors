@@ -375,8 +375,17 @@ namespace Impostors
             foreach (var k in known.Values)
             {
                 var id = k.State.Id;
-                if (served.Contains(id) || k.Lods.Length == 0)
+                if (served.Contains(id))
                     continue;
+
+                // A changed asteroid none of whose new levels arrived yet keeps the old shape
+                // it shows (SE-1040): dropped, it blinked out until they came
+                if (k.Lods.Length == 0)
+                {
+                    if (k.Noticed)
+                        wanted.Add(id);
+                    continue;
+                }
                 var radius = k.State.Radius;
                 var distance = Vector3D.Distance(pickEye, k.State.Position);
                 if (distance - radius > range || distance - radius <= drawnRange)

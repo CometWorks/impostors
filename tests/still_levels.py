@@ -9,7 +9,8 @@ On the server the client must show the asteroids from the pack: none of the draw
 server's and the server announces none (the stats' notices). Then the server forgets the
 player, as a cluster node does when the player leaves it for less than the client's Hello
 interval (the probe's `forget`): within a minute the client must send its inventory again and
-keep its asteroids, without the server sending them.
+keep its asteroids, without the server sending them. Last the server cuts the largest drawn
+asteroid: the client must keep its impostor, the old shape until the new version's arrives.
 
     IMP_TASK=se1097 IMP_RESOLUTION=1920x1080 IMP_SAVE=<"Octahedron - Seed 2" save> \\
         uv run --no-project --with httpx --with pillow --with numpy \\
@@ -128,6 +129,51 @@ def forget(api, client, out: Path) -> list[str]:
     return problems
 
 
+def changed(api, client, out: Path) -> list[str]:
+    """The largest drawn asteroid is cut on the server: the client must keep showing its old
+    shape until the new version's arrives, the same impostor all along (SE-1040). Problems
+    found."""
+    _, impostors = client.stats()
+    asteroid, before = max(
+        rl.drawn(impostors).items(), key=lambda t: float(t[1].get("radius", 0))
+    )
+    old = before["shape"].split("/")[0]
+    _, _, size = ap.entry(api, asteroid)
+    print(
+        "server:",
+        ap.command(api, f"!iprobe vcut {asteroid} {size * 0.25:.0f} {size * 0.25:.0f}"),
+        flush=True,
+    )
+    samples, missing, start = [], 0, time.monotonic()
+    while time.monotonic() - start < 90:
+        time.sleep(1)
+        totals, impostors = client.stats()
+        record = impostors.get(asteroid, {})
+        shown = rl.drawn(impostors).get(asteroid)
+        missing += shown is None
+        samples.append({"t": time.monotonic() - start, "record": record})
+        if shown and shown["shape"].split("/")[0] != old:
+            break
+    (out / "changed.json").write_text(json.dumps(samples))
+    after = samples[-1]["record"]
+    problems = []
+    if after.get("shape", "none").split("/")[0] == old:
+        problems.append(f"asteroid {asteroid}: the new version never showed")
+    if after.get("firstshape") != before.get("firstshape"):
+        problems.append(
+            f"asteroid {asteroid}: dropped and shown anew (first shape at tick "
+            f"{before.get('firstshape')}, now {after.get('firstshape')})"
+        )
+    if missing:
+        problems.append(f"asteroid {asteroid}: not drawn in {missing} of the seconds")
+    print(
+        f"changed: {asteroid} version {old} -> {after.get('shape')} in "
+        f"{samples[-1]['t']:.0f} s, {'; '.join(problems) or 'ok'}",
+        flush=True,
+    )
+    return problems
+
+
 def start_offline(client):
     import local
 
@@ -192,6 +238,7 @@ def run(out: Path) -> tuple[list[str], list[str]]:
                     )
         if MODE == "server":
             problems += forget(api, client, out)
+            problems += changed(api, client, out)
     finally:
         client.stop()
         if MODE == "server":
