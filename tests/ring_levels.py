@@ -212,11 +212,9 @@ def sheets(before: Path, after: Path, out: Path) -> None:
         sheet.save(out / f"{spot}.jpg", quality=88)
 
 
-def run(out: Path) -> None:
-    import local
-
-    pos, _, _ = rb.read_index(ap.PACK / ap.PACK_FILE)
-    client = rig.Client(2, "Viktor", plugin=True, quality="medium", probe=True)
+def launch(client) -> Path:
+    """The world offline with the pack and empty caches, the client launched without a
+    server; the world's folder"""
     world = client.appdata / "Saves" / ring.WORLD_NAME
     ring.PLUGIN = True
     ids = ring.copy_world(world)
@@ -245,6 +243,15 @@ def run(out: Path) -> None:
     ]
     client.launch(0)
     ap.stage(client.appdata / "Mods", ids)
+    return world
+
+
+def run(out: Path) -> None:
+    import local
+
+    pos, _, _ = rb.read_index(ap.PACK / ap.PACK_FILE)
+    client = rig.Client(2, "Viktor", plugin=True, quality="medium", probe=True)
+    world = launch(client)
     try:
         api = client.wait_api()
         api.load(str(world), online_mode="OFFLINE")

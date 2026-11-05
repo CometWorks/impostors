@@ -35,6 +35,15 @@ namespace Impostors
         // Shapes read per tick, milliseconds of the game thread
         private const double LoadMilliseconds = 2;
 
+        // A still view keeps the levels it shows (SE-1097): a new pick replaces them only when
+        // its on-screen error is this much smaller, and the budget is the lowest of the last
+        // 30 to 60 seconds. The budget is what the server's impostors in view leave, which
+        // moves with every ship that comes and goes. Picked anew each second, as before, the
+        // greedy fill swapped levels between asteroids back and forth even at a fixed budget,
+        // since the levels shown count in it.
+        private const double KeepError = 1.125;
+        private const int HoldTicks = 1800;
+
         private class Known
         {
             public ImpostorState State;
@@ -58,6 +67,9 @@ namespace Impostors
             public double Weight;
             public int Index;
             public byte Lod;
+
+            // The level it shows now, -1 for none of its levels
+            public int Kept;
 
             // A finer level of it didn't fit the budget, it gets none
             public bool Full;
@@ -90,6 +102,17 @@ namespace Impostors
         private Vector3 pickForward;
         private float pickFov;
         private bool failed;
+
+        // Where the view was when the levels it keeps were picked, whether it is still there,
+        // and the budget's lowest in the hold's last and current window
+        private bool anchored;
+        private bool still;
+        private Vector3D stillEye;
+        private Vector3 stillForward;
+        private float stillFov;
+        private int lastLow;
+        private int low;
+        private int lowTick;
 
         // Stats: impostors shown early, shapes read and their time, the server's states that
         // kept the early shape and those that changed it, the last of those as id:early
@@ -131,6 +154,7 @@ namespace Impostors
             Count = 0;
             next = 0;
             due = true;
+            anchored = false;
             known.Clear();
             if (pack != null)
                 pack.ForEachFrame(Add);
@@ -167,6 +191,16 @@ namespace Impostors
         // version from then on, the old one until the levels it picks arrive
         public void Notice(ImpostorState state)
         {
+            // A version we have: its levels stay while the server's add to them. Dropped, the
+            // asteroid blinked out until the server's arrived, every one of them when a server
+            // that lost track of us sent them all (SE-1097).
+            Notices++;
+            Known k;
+            if (known.TryGetValue(state.Id, out k) && k.State.Version == state.Version)
+            {
+                k.Noticed = true;
+                return;
+            }
             known[state.Id] = new Known
             {
                 State = state,
@@ -174,7 +208,6 @@ namespace Impostors
                 Lengths = new int[0],
                 Noticed = true,
             };
-            Notices++;
             due = true;
         }
 
@@ -263,12 +296,43 @@ namespace Impostors
 
         private bool Due(IMyCamera camera, int tick)
         {
-            var forward = (Vector3)camera.WorldMatrix.Forward;
             return due
                 || tick - pickTick >= PickTicks
-                || Vector3D.DistanceSquared(camera.Position, pickEye) > MoveMeters * MoveMeters
-                || Vector3.Dot(forward, pickForward) < Math.Cos(camera.FovWithZoom / 8)
-                || Math.Abs(camera.FovWithZoom - pickFov) > pickFov * 0.05;
+                || Moved(camera, pickEye, pickForward, pickFov);
+        }
+
+        private static bool Moved(IMyCamera camera, Vector3D eye, Vector3 forward, float fov)
+        {
+            return Vector3D.DistanceSquared(camera.Position, eye) > MoveMeters * MoveMeters
+                || Vector3.Dot((Vector3)camera.WorldMatrix.Forward, forward)
+                    < Math.Cos(camera.FovWithZoom / 8)
+                || Math.Abs(camera.FovWithZoom - fov) > fov * 0.05;
+        }
+
+        // The lowest budget of the hold's current window and the last one while the view stays,
+        // the budget itself once it moved
+        private int Hold(IMyCamera camera, int tick, int budget)
+        {
+            var moved = !anchored || Moved(camera, stillEye, stillForward, stillFov);
+            if (moved)
+            {
+                anchored = true;
+                stillEye = camera.Position;
+                stillForward = (Vector3)camera.WorldMatrix.Forward;
+                stillFov = camera.FovWithZoom;
+            }
+            if (moved || tick - lowTick >= HoldTicks)
+            {
+                lastLow = moved ? budget : low;
+                low = budget;
+                lowTick = tick;
+            }
+            else
+            {
+                low = Math.Min(low, budget);
+            }
+            still = !moved;
+            return Math.Min(lastLow, low);
         }
 
         // The view is looked up again once it turned by an eighth of its field of view: the
@@ -291,6 +355,8 @@ namespace Impostors
             int budget
         )
         {
+            // Levels still loading aren't shown yet, kept they would stay the old view's
+            var loaded = next >= candidates.Count;
             due = false;
             pickTick = tick;
             pickEye = camera.Position;
@@ -309,8 +375,17 @@ namespace Impostors
             foreach (var k in known.Values)
             {
                 var id = k.State.Id;
-                if (served.Contains(id) || k.Lods.Length == 0)
+                if (served.Contains(id))
                     continue;
+
+                // A changed asteroid none of whose new levels arrived yet keeps the old shape
+                // it shows (SE-1040): dropped, it blinked out until they came
+                if (k.Lods.Length == 0)
+                {
+                    if (k.Noticed)
+                        wanted.Add(id);
+                    continue;
+                }
                 var radius = k.State.Radius;
                 var distance = Vector3D.Distance(pickEye, k.State.Position);
                 if (distance - radius > range || distance - radius <= drawnRange)
@@ -352,6 +427,8 @@ namespace Impostors
                 );
             }
 
+            budget = Hold(camera, tick, budget);
+
             dropped.Clear();
             foreach (var impostor in impostors.Values)
             {
@@ -362,7 +439,7 @@ namespace Impostors
                 impostors.Remove(id);
             Count -= dropped.Count;
 
-            FitLevels(budget);
+            FitLevels(budget, still && loaded);
             candidates.Sort(
                 (a, b) => a.InView != b.InView ? (a.InView ? -1 : 1) : b.Pixels.CompareTo(a.Pixels)
             );
@@ -377,8 +454,8 @@ namespace Impostors
         // with half of the budget unused: each level has 4 to 5 times the quads of the one
         // below. The error counts less the farther off the view's center an asteroid is, half
         // in the margin around the screen. Those out of view take their coarsest level and
-        // nothing from the budget.
-        private void FitLevels(int budget)
+        // nothing from the budget. A still view keeps the levels it shows (see Keep).
+        private void FitLevels(int budget, bool keep)
         {
             var quads = 0;
             for (var i = 0; i < candidates.Count; i++)
@@ -398,6 +475,8 @@ namespace Impostors
             }
             if (quads > budget)
                 Fill(budget);
+            if (keep)
+                Keep(budget);
             for (var i = 0; i < candidates.Count; i++)
             {
                 var c = candidates[i];
@@ -415,24 +494,15 @@ namespace Impostors
                 var c = candidates[i];
                 if (!c.InView)
                     continue;
-                var wanted = 2 * c.Pixels * CellsPerPixel;
                 var target = c.Known.Lods[Level(c.Known, c.Pixels, 0)];
-                var current = Current(c.Known);
                 c.Index = Finer(c.Known, -1);
                 candidates[i] = c;
                 quads += Quads(c.Known, c.Index);
 
-                // The error of a level: its cell size on screen times the asteroid's area,
-                // wanted^3 / level, times its weight. The level it has now gets the step to it
-                // at twice the gain, so a small change of the view doesn't swap levels back and
-                // forth.
                 for (var from = c.Index; c.Known.Lods[from] < target; )
                 {
                     var to = Finer(c.Known, from);
-                    var added = Math.Max(1, Quads(c.Known, to) - Quads(c.Known, from));
-                    var gain = c.Weight * wanted * wanted * wanted / c.Known.Lods[from] / added;
-                    if (c.Known.Lods[to] <= current)
-                        gain *= 2;
+                    var gain = Gain(c, from, to);
                     steps.Add(
                         new Step
                         {
@@ -463,6 +533,89 @@ namespace Impostors
             }
         }
 
+        // The levels those in view show stay, the steps to them that take the least off the
+        // on-screen error per quad given back first while they don't fit the budget, unless
+        // the new pick's error is KeepError times smaller. Kept instead, a level would be
+        // given back whenever the budget shrank and taken again when it grew.
+        private void Keep(int budget)
+        {
+            var quads = 0;
+            for (var i = 0; i < candidates.Count; i++)
+            {
+                var c = candidates[i];
+                if (!c.InView)
+                    continue;
+                c.Kept = Array.IndexOf(c.Known.Lods, Current(c.Known));
+                if (c.Kept < 0)
+                    return;
+                quads += Quads(c.Known, c.Kept);
+                candidates[i] = c;
+            }
+            while (quads > budget)
+            {
+                var least = -1;
+                var leastGain = 0.0;
+                for (var i = 0; i < candidates.Count; i++)
+                {
+                    var c = candidates[i];
+                    if (!c.InView)
+                        continue;
+                    var coarser = Coarser(c.Known, c.Kept);
+                    if (coarser == c.Kept)
+                        continue;
+                    var gain = Gain(c, coarser, c.Kept);
+                    if (least < 0 || gain < leastGain)
+                    {
+                        least = i;
+                        leastGain = gain;
+                    }
+                }
+                if (least < 0)
+                    return;
+                var l = candidates[least];
+                var to = Coarser(l.Known, l.Kept);
+                quads -= Quads(l.Known, l.Kept) - Quads(l.Known, to);
+                l.Kept = to;
+                candidates[least] = l;
+            }
+            double kept = 0,
+                picked = 0;
+            foreach (var c in candidates)
+            {
+                if (!c.InView)
+                    continue;
+                kept += Error(c, c.Kept);
+                picked += Error(c, c.Index);
+            }
+            if (kept > picked * KeepError)
+                return;
+            for (var i = 0; i < candidates.Count; i++)
+            {
+                var c = candidates[i];
+                if (!c.InView)
+                    continue;
+                c.Index = c.Kept;
+                candidates[i] = c;
+            }
+        }
+
+        // The on-screen error of a level: its cell size on screen times the asteroid's area,
+        // wanted^3 / level, times its weight. A level finer than its size wants counts as that.
+        private static double Error(Candidate c, int index)
+        {
+            var wanted = 2 * c.Pixels * CellsPerPixel;
+            var target = c.Known.Lods[Level(c.Known, c.Pixels, 0)];
+            return c.Weight * wanted * wanted * wanted / Math.Min(c.Known.Lods[index], target);
+        }
+
+        // What one level finer takes off the on-screen error per quad it adds
+        private static double Gain(Candidate c, int from, int to)
+        {
+            var wanted = 2 * c.Pixels * CellsPerPixel;
+            var added = Math.Max(1, Quads(c.Known, to) - Quads(c.Known, from));
+            return c.Weight * wanted * wanted * wanted / c.Known.Lods[from] / added;
+        }
+
         // The level its early impostor shows now, 0 for none
         private byte Current(Known k)
         {
@@ -487,6 +640,19 @@ namespace Impostors
             for (var i = 0; i < k.Lods.Length; i++)
             {
                 if (k.Lods[i] > lod && (next == index || k.Lods[i] < k.Lods[next]))
+                    next = i;
+            }
+            return next;
+        }
+
+        // Index of the next coarser level than the one at index, index itself when it is the
+        // coarsest
+        private static int Coarser(Known k, int index)
+        {
+            var next = index;
+            for (var i = 0; i < k.Lods.Length; i++)
+            {
+                if (k.Lods[i] < k.Lods[index] && (next == index || k.Lods[i] > k.Lods[next]))
                     next = i;
             }
             return next;

@@ -111,6 +111,12 @@ the whitelist, loading the mod in the game does.
   view, the quads and the levels, before SE-971 (`old`) or since (`new`).
   `tests/ring_levels.py <tag>` takes the same spots and zooms in the game, offline with the
   client plugin and the pack, and saves a screenshot and the stats of each (SE-971).
+- `tests/ring_still.py <pack> old|new [--used MAX]` replays a still view's picks of the same
+  spots, the level each asteroid shows fed back into the next pick, and counts the level
+  changes; `--used` lets the server's impostors take up to that many quads, drawn anew each
+  second. `tests/still_levels.py <tag>` holds the camera still at some of the spots in the
+  game for 150 seconds each and counts the drawn asteroids' level changes, PASS for none
+  (SE-1097).
 - `tests/radio_spectrometry.py` reads what the Radio Spectrometry mod's LCD shows for a ring
   asteroid of "Octahedron - Seed 2", loaded and drawn only as an impostor, on a server with a
   headless client (SE-984). See [Radio Spectrometry](RadioSpectrometry.md).

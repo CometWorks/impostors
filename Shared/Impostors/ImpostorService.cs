@@ -620,7 +620,8 @@ public sealed class ImpostorService : IDisposable
         // A client without a Welcome yet has nothing of what we may have sent before, like after
         // rejoining before the player was gone here
         var fresh = message.Length > 2 && message[2] == 1;
-        if (!viewers.ContainsKey(sender) || fresh)
+        var started = !viewers.ContainsKey(sender) || fresh;
+        if (started)
         {
             if (!viewers.ContainsKey(sender))
                 log.Info(
@@ -645,6 +646,11 @@ public sealed class ImpostorService : IDisposable
             : MySession.Static.Settings.ViewDistance
         );
         writer.Float(config.MinPixels);
+
+        // We start over with the client: on a Hello that isn't fresh the client keeps our
+        // instance and would send no Inventory, like after the player left this cluster node
+        // for less than a HelloInterval (SE-1097)
+        writer.Byte((byte)(started ? 1 : 0));
         Send(sender);
     }
 

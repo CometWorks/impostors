@@ -132,6 +132,7 @@ namespace Impostors
         private readonly Dictionary<long, ClientImpostor> impostors =
             new Dictionary<long, ClientImpostor>();
         private readonly List<ClientImpostor> visible = new List<ClientImpostor>();
+        private readonly List<long> dropped = new List<long>();
 
         // Every shape the server sent, it switches to one of them or shows a removed impostor
         // again with a state only
@@ -1209,6 +1210,7 @@ namespace Impostors
                         return;
                     var instance = r.Long();
                     maxQuads = MathHelper.Clamp(r.Int(), 0, Protocol.BillboardLimit);
+                    var started = false;
                     if (r.Remaining >= 8)
                     {
                         var range = Math.Max(0, r.Float());
@@ -1219,6 +1221,7 @@ namespace Impostors
                             minPixels = pixels;
                             WriteRange();
                         }
+                        started = r.Remaining >= 1 && r.Byte() == 1;
                     }
                     if (instance != serverInstance)
                     {
@@ -1229,6 +1232,17 @@ namespace Impostors
                         serverInstance = instance;
 
                         // A new server knows nothing of the view yet
+                        viewZoomed = false;
+                        viewReported = false;
+                        SendInventory();
+                    }
+                    else if (started && serverInstance != 0)
+                    {
+                        // The same server forgot us: it waits for the inventory, or it sends
+                        // the asteroids we pick ourselves too, and its impostors start over.
+                        // Those we show early stay.
+                        ForgetServed();
+                        store.Clear();
                         viewZoomed = false;
                         viewReported = false;
                         SendInventory();
@@ -1401,6 +1415,19 @@ namespace Impostors
                     + " KB in the shape cache"
                     + (pack != null ? ", " + pack.Count + " asteroids in the pack" : "")
             );
+        }
+
+        // The server's impostors, not the early asteroids
+        private void ForgetServed()
+        {
+            dropped.Clear();
+            foreach (var impostor in impostors.Values)
+            {
+                if (!impostor.Early)
+                    dropped.Add(impostor.State.Id);
+            }
+            foreach (var id in dropped)
+                impostors.Remove(id);
         }
 
         // The server counts on shapes we don't have: forget its impostors and ask it to start

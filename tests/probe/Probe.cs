@@ -204,6 +204,22 @@ public sealed class ProbeCommands : CommandModule
         return $"Probe stats: entries={string.Join(" ", entries)} viewers={string.Join(" ", viewers)}";
     }
 
+    [Command(
+        "forget",
+        "Forgets a player's impostors as a cluster node does when the player leaves it for a moment (SE-1097)."
+    )]
+    [Permission(MyPromoteLevel.Admin)]
+    public string Forget(ulong steamId)
+    {
+        var service = Service;
+        if (service == null)
+            return "Probe forget: off";
+        var viewers = (IDictionary)Get(service, "viewers");
+        var known = viewers.Contains(steamId);
+        viewers.Remove(steamId);
+        return $"Probe forget: {steamId} {(known ? "forgotten" : "unknown")}";
+    }
+
     [Command("inputs", "The impostor entries: id, version and the hash of their content.")]
     [Permission(MyPromoteLevel.Admin)]
     public string Inputs()

@@ -30,7 +30,10 @@ namespace Impostors
         // float meters out to which the server shows asteroids, 0 when it shows none, and
         // float MinPixels: where the client shows the asteroids it has shapes of before the
         // server sends them (see EarlyAsteroids). Older clients ignore the two, an older
-        // server doesn't send them.
+        // server doesn't send them. Then byte 1 when the server started over with the client: it
+        // waits for the Inventory again and knows none of the shapes it sent before, also when
+        // its instance id is the same, as after the player left a cluster node for a moment
+        // (SE-1097).
         public const byte Welcome = 2;
 
         // Server to client: ushort count, then count states (see ImpostorState). A state whose
