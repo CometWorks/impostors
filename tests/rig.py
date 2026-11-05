@@ -650,11 +650,13 @@ class Client:
                 continue
         else:
             return {}, {}
-        parse = lambda line: dict(kv.split("=", 1) for kv in line.split())
+        # A file read while the game writes it can end in a cut line
+        parse = lambda line: dict(kv.split("=", 1) for kv in line.split() if "=" in kv)
         impostors = {}
         for line in lines[1:]:
             fields = parse(line)
-            impostors[int(fields["id"])] = fields
+            if fields.get("id", "").lstrip("-").isdigit():
+                impostors[int(fields["id"])] = fields
         return parse(lines[0]) if lines else {}, impostors
 
     def set_fov(self, degrees: float | None) -> None:

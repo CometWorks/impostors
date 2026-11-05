@@ -574,6 +574,30 @@ server's Welcome. Its Hello says so (a fifth byte).
   counts them. See "Client-picked levels" below.
 - `stats.txt` adds `picks`, `notices` and `noticelevels`.
 
+### A server that forgot the client (SE-1097)
+
+On the Octahedron cluster a player's asteroids came late and at odd levels, with lag, after a
+respawn. A node drops the player's impostors once the player is no longer on it, and the
+player was back within the client's 30 second Hello interval. Its next Hello wasn't fresh,
+since the client still had that node's instance id, so the node started over with it and
+waited 10 seconds for an Inventory that never came: the Welcome had the same id, and the client
+sends the Inventory only for a new one. Without it the node took the client for one without
+the pack and sent it every asteroid's state and level, 2409 shapes in the first minute with 844
+waiting. Each state made the client drop the pack's levels of that asteroid, though it had
+that version, so the asteroid blinked out until the server's level came.
+
+- The Welcome ends with a byte that says the server started over with the client. With the
+  same instance id the client then sends its Inventory again and drops the server's impostors
+  and its copy of their shapes, which that server no longer knows. The asteroids it shows from
+  the pack stay. Older clients and servers ignore the byte or don't send it.
+- A state of an asteroid whose version the client has keeps its levels, and the ones that
+  arrive add to them.
+
+`tests/still_levels.py` with `IMP_MODE=server` has the probe make the server forget the player
+(`!iprobe forget`) and checks that the client sends its Inventory again and keeps its asteroids.
+Before the fix the client sent no Inventory, the server announced 1471 asteroids, and the
+drawn ones fell from 355 to 150 within the minute; after it, none of that.
+
 ## Client-picked levels (SE-971)
 
 Over the Octahedron ring the client drew most asteroids as level 2 cubes, with half of the
@@ -597,8 +621,7 @@ Now, each time the client looks its asteroids up:
   on-screen error per quad it adds first, while it fits. The error of a level is its cell
   size on screen times the asteroid's area, wanted³/level for the cells its size wants, so a
   step from level 2 to 4 of a small far asteroid, 22 quads, usually comes before the 2900
-  quads from 16 to 32 of a near one. A step back to the level the asteroid shows counts
-  twice, so a small turn doesn't swap levels back and forth.
+  quads from 16 to 32 of a near one. A still view keeps the levels it shows, see below.
 - The error counts less the farther off the view's center the asteroid is: fully in the
   center, three quarters at the screen's edge and half at the margin's outer edge, by the
   asteroid's point nearest to the center. The margin took 1000 to 6000 quads of the budget
@@ -633,6 +656,66 @@ and the pick counts half of each shape's quads, while the draw counts the faces 
 the camera.
 
 `tests/ring_budget.py` replays the pick from the pack's index alone, in half a second.
+
+### Still views keep their levels (SE-1097)
+
+Some ring asteroids switched levels every few seconds while the camera stood still. The pick
+runs once a second, and the step back to the level an asteroid showed counted twice, so a
+small turn wouldn't swap levels. That level came from the pick before, so the fill fed on its
+own result, and some asteroids took
+turns at the last of the budget, one level up and the other down, then back. In multiplayer
+the budget also moves: it is what the server's impostors in view leave, and every ship that
+comes or goes changes it.
+
+While the view stays within the distance, turn and zoom that would make the client look its
+asteroids up again, measured from where the levels were picked:
+
+- The levels shown stay. When they don't fit the budget, the steps to them that take the
+  least off the on-screen error per quad are given back first, until they fit.
+- A new pick replaces them only when its on-screen error is 1/8 smaller.
+- The budget is the lowest of the last 30 to 60 seconds, so a ship that flies through the view
+  takes its quads once, not each time it comes back.
+
+Once the view moved past that, the levels are picked anew, without the old view's levels
+counting twice, and the view there is the new reference.
+
+This is hysteresis in two places. The margin on the error keeps a level from switching back
+and forth around the point where two picks are about as good; the hold keeps the budget, and
+with it the levels, from following each ship. A minimum time per level wouldn't do: after
+it the swaps would come back at that pace. Measured from where the levels were picked, and
+not from the last pick, a slow turn or drift still gets a fresh pick once it adds up, and a
+moving view gets one at every look-up as before, so levels follow the view, and the budget
+always holds.
+
+`tests/ring_still.py` replays a still view's picks from the pack's index: 120 picks at each of
+`ring_budget.py`'s 18 views, with a fixed budget and with the server's impostors taking a
+random 0 to 3000 quads each second.
+
+| Budget | Level changes before | After |
+|---|---:|---:|
+| fixed | 4797 | 0 |
+| 0 to 3000 quads less, each second | 24431 | 404, 60 of them after the first 10 seconds |
+
+With the moving budget, each asteroid changed its level once at most: the levels come down as
+the budget's low settles, and stay.
+
+In the game, the camera still for 149 seconds after a 20 second warm-up, each drawn
+asteroid's level read once a second (`tests/still_levels.py`), offline with the client plugin
+and the pack, and on a Magnetar server (`IMP_MODE=server`) that a client with the plugin and
+the pack joins:
+
+| View | Drawn | Offline before | After | Magnetar before | After |
+|---|---:|---:|---:|---:|---:|
+| along-back 1x | 490 | 1617, 11 asteroids | 0 | 1029, 7 asteroids | 0 |
+| outside 1x | 1056 | 0 | 0 | 0 | 0 |
+| along 2x | 323 to 355 | 1176, 8 asteroids | 0 | 292, 2 asteroids | 0 |
+
+Before, those asteroids changed their level at every pick, once a second.
+
+The level quality stays: `tests/ring_levels.py`'s 18 views drew the same quads within a few
+percent, with 309 level 2 cubes that want level 8 or finer against 297 before (51 to 58 in
+the worst view, along 2x), and every view settled within 2 to 8 seconds, against up to 10
+before.
 
 ## Protocol
 
