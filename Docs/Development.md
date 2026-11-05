@@ -127,6 +127,9 @@ the whitelist, loading the mod in the game does.
 - `tests/cluster_scenario.py` checks far view across a cluster on the cluster's scenario
   bench. An asteroid every node builds checks that its shapes reach the WA's cache;
   `IMP_CACHE_MB=0` turns the caches off for a baseline.
+- `tests/cluster_delete.py` deletes grids on a cluster node, alone in their partition and in
+  partitions a split renumbers right after, and checks that the WA's index, which every
+  node's far view reads, drops them and keeps the others (SE-1090).
 - `tests/shutdown.py` checks the server's shutdown (SE-676): the server starts the service and
   gets a SIGTERM, which disposes the plugins off the game thread. The log must have no
   "Dispose failed", and the test probe must find the service's state cleared.

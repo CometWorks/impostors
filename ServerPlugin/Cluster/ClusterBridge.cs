@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Threading.Tasks;
 using Impostors;
 using PluginSdk.Clustering;
@@ -11,6 +12,7 @@ using Sandbox.Game.World;
 using Shared.Config;
 using Shared.Impostors;
 using Shared.Logging;
+using VRage.Game.Entity;
 
 namespace ServerPlugin.Cluster;
 
@@ -79,6 +81,15 @@ public sealed class ClusterBridge : IShapeCache
     private readonly Dictionary<long, ulong> partitions = new();
     private readonly HashSet<(long, int)> pushed = new();
     private long knownWaInstance;
+
+    // Node: the grid each reported entry is located by, and for those deleted since, whether
+    // the cluster closed it (see OnEntityDelete)
+    private readonly Dictionary<long, long> locatedBy = new();
+    private readonly HashSet<long> locatedIds = new();
+    private readonly Dictionary<long, bool> closedByCluster = new();
+    private bool watchingDeletes;
+    private Func<bool> clusterClosing;
+    private bool clusterClosingLooked;
 
     // Node: since when (tick) it owns each partition. A partition owned for less than
     // SettledTicks may still be loading its grids, its report isn't complete.
@@ -176,6 +187,13 @@ public sealed class ClusterBridge : IShapeCache
         while (gameThread.TryDequeue(out var action))
             action();
 
+        // MyEntities drops its event handlers when the session unloads
+        if (!watchingDeletes && MySession.Static != null)
+        {
+            MyEntities.OnEntityDelete += OnEntityDelete;
+            watchingDeletes = true;
+        }
+
         if (++tick % IntervalTicks != 0 || PluginCluster.Current == null)
             return;
 
@@ -228,6 +246,43 @@ public sealed class ClusterBridge : IShapeCache
     // Node side
     // ---------------------------------------------------------------------------------------
 
+    // A grid closed by the cluster (handover, offline, a dropped copy) lives on in a save or on
+    // another node, the cluster says so with its ClusterCloseScope; any other close deletes it.
+    // Telling them apart by the partition at the next report failed (SE-1090): a delete that
+    // empties a partition releases it within a frame or two, and a split or merge renumbers it.
+    private void OnEntityDelete(MyEntity entity)
+    {
+        if (entity is not MyCubeGrid || !locatedIds.Contains(entity.EntityId))
+            return;
+        if (!clusterClosingLooked)
+        {
+            clusterClosing = ClusterCloseScope();
+            clusterClosingLooked = true;
+        }
+        if (clusterClosing != null)
+            closedByCluster[entity.EntityId] = clusterClosing();
+    }
+
+    // The cluster plugin's ClusterCloseScope.Active, which the PluginSdk doesn't offer; null
+    // without it, then gone grids are told apart by their partition as before
+    private Func<bool> ClusterCloseScope()
+    {
+        var active = AppDomain
+            .CurrentDomain.GetAssemblies()
+            .Select(a => a.GetType("ClusterPlugin.ClusterCloseScope", false))
+            .FirstOrDefault(t => t != null)
+            ?.GetProperty(
+                "Active",
+                BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic
+            );
+        if (active?.GetMethod == null)
+        {
+            log.Warning("no ClusterCloseScope: a grid deleted on this node may keep its impostor");
+            return null;
+        }
+        return (Func<bool>)Delegate.CreateDelegate(typeof(Func<bool>), active.GetMethod);
+    }
+
     private void Report()
     {
         var service = ImpostorService.Instance;
@@ -257,10 +312,22 @@ public sealed class ClusterBridge : IShapeCache
             }
 
             current[entry.Id] = entry;
+            locatedBy[entry.Id] = located;
             var partition = cluster.LocateEntity(located)?.Partition ?? 0;
             if (partition != 0)
                 partitions[entry.Id] = partition;
         }
+
+        foreach (
+            var id in locatedBy
+                .Keys.Where(i => !current.ContainsKey(i) && !acked.ContainsKey(i))
+                .ToList()
+        )
+            locatedBy.Remove(id);
+        locatedIds.Clear();
+        locatedIds.UnionWith(locatedBy.Values);
+        foreach (var id in closedByCluster.Keys.Where(i => !locatedIds.Contains(i)).ToList())
+            closedByCluster.Remove(id);
 
         var upserts = current
             .Values.Select(ClusterRecord.From)
@@ -272,13 +339,11 @@ public sealed class ClusterBridge : IShapeCache
             ownedSince.Remove(partition);
         foreach (var partition in owned.Keys.Where(p => !ownedSince.ContainsKey(p)).ToList())
             ownedSince[partition] = tick;
-        // Gone from this node: released when its partition left the node (handover or offline),
-        // so the WA keeps the record, deleted otherwise
+        // Gone from this node: released when the cluster closed it or its partition left the node
+        // (handover or offline), so the WA keeps the record, deleted otherwise
         var gone = acked
             .Keys.Where(id => !current.ContainsKey(id))
-            .Select(id =>
-                (id, released: !partitions.TryGetValue(id, out var p) || !owned.ContainsKey(p))
-            )
+            .Select(id => (id, released: Released(id, owned)))
             .ToList();
 
         var newShapes = current
@@ -300,6 +365,16 @@ public sealed class ClusterBridge : IShapeCache
             .Select(r => partitions.TryGetValue(r.Id, out var p) ? p : 0)
             .ToList();
         busy = SendReport(upserts, upsertPartitions, gone, complete, newShapes);
+    }
+
+    private bool Released(long id, Dictionary<ulong, long> owned)
+    {
+        if (
+            locatedBy.TryGetValue(id, out var located)
+            && closedByCluster.TryGetValue(located, out var byCluster)
+        )
+            return byCluster;
+        return !partitions.TryGetValue(id, out var p) || !owned.ContainsKey(p);
     }
 
     private async Task SendReport(
@@ -377,6 +452,7 @@ public sealed class ClusterBridge : IShapeCache
                 {
                     acked.Remove(id);
                     partitions.Remove(id);
+                    locatedBy.Remove(id);
                 }
             });
         }

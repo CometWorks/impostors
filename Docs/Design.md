@@ -863,8 +863,14 @@ Magnetar Plugin SDK (`PluginSdk.Clustering`); the client side is unchanged.
 - Every 5 s each node reports its grid entries to the World Authority (topic `report`): records
   (id, version, frame, velocity, AABB) that changed noticeably since the WA acknowledged the
   last report, and the ids that are gone. Gone means released when the entry's partition left
-  the node (handover or offline), deleted otherwise. The shapes of new versions go first
-  (`shape-chunk`, see below).
+  the node (handover or offline), deleted otherwise. Since SE-1090 a node notes how each grid
+  closed: the cluster closes the grids it hands over, takes offline or drops inside its
+  `ClusterCloseScope`, which the bridge reads by reflection, as the PluginSdk has no such call.
+  Every other close is a delete. Before, a delete counted as a release when the grid's partition
+  was gone by the next report: the cluster releases an emptied partition a frame or two after
+  the delete, and a split or merge renumbers it. The WA then kept the grid's record, and every
+  node its impostor. Without the scope (another cluster plugin) the partition decides as before.
+  The shapes of new versions go first (`shape-chunk`, see below).
 - The WA merges the reports into the index. A released record stays, without an owner, until
   some node reports the grid again: that is how grids of offline partitions stay visible. Every
   5 s the WA broadcasts the changes to the nodes (`index`) as consecutive revisions.
