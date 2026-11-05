@@ -148,6 +148,8 @@ the whitelist, loading the mod in the game does.
   it. It compares their luminance and color in the middle of the asteroid.
   `IMP_EXTRA_MODS=3415912276:<folder>` loads Seed 2's environment mod as a world mod (the
   rig's `IMP_EXTRA_MODS` stages any mod folder under its Workshop id). See its docstring.
+  `tests/vx2_material.py` makes an asteroid of one voxel material for it (`IMP_ASTEROID`), to
+  fit an ore's color (SE-1102).
 - `tests/zone_mesh.py` checks the safe zone meshes offline, without a game running: the
   sphere for each size on screen, up to a camera inside the zone, infinity and NaN.
 
