@@ -592,6 +592,10 @@ that version, so the asteroid blinked out until the server's level came.
   the pack stay. Older clients and servers ignore the byte or don't send it.
 - A state of an asteroid whose version the client has keeps its levels, and the ones that
   arrive add to them.
+- A changed asteroid keeps the old shape it shows until a level of its new version arrived
+  (SE-1040). Its state and levels come in the same server pick, but when a client pick ran
+  between them, or only a large level was still on its way, the client dropped the asteroid
+  in between and it blinked out.
 
 `tests/still_levels.py` with `IMP_MODE=server` has the probe make the server forget the player
 (`!iprobe forget`) and checks that the client sends its Inventory again and keeps its asteroids.
