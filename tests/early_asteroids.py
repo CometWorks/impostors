@@ -32,8 +32,10 @@ shown, kept and swapped. PASS when the early joins have every asteroid's shape w
 
 `swap` cuts an asteroid in view, so the server's version no longer is the pack's: a join
 with an empty cache shows the pack's shape early and swaps to the server's when its state
-comes, the next join takes the server's version from its cache and keeps it. PASS/FAIL per
-step.
+comes, the next join takes the server's version from its cache and keeps it. Then the server
+starts over from the uncut world, back at the pack's version, while the client's cache still
+has the cut one as its last state (SE-1109): the next join must get the pack's version from
+the server. PASS/FAIL per step.
 
 `offline` loads the world offline in a client with the client plugin and the pack, without
 the early asteroids and with them, and prints the same join numbers for the asteroids beyond
@@ -446,6 +448,23 @@ def swap() -> int:
             and int(totals.get("notices", 0)) == 0,
             f"next join from the cache: no swap of {asteroid} ({totals.get('swapped')} swaps, "
             f"{totals.get('kept')} kept, {totals.get('notices')} notices), shape {final.get('shape')}",
+        )
+
+        # The server back at the pack's version, the cache's last state still the cut one.
+        # The client shows that one early, the server must replace it (SE-1109).
+        SERVER.stop()
+        start_server()
+        third = join(
+            ids, "swap, server back at the pack", True, True, eye, target, away
+        )
+        totals = third["totals"]
+        _, impostors = CLIENT.stats()
+        final = impostors.get(asteroid, {})
+        ok &= ap.check(
+            int(totals.get("notices", 0)) >= 1
+            and final.get("shape", "").split("/")[0] == str(versions[asteroid]),
+            f"server back at the pack's {versions[asteroid]}: {totals.get('notices')} notices, "
+            f"shape at the end {final.get('shape')}",
         )
     finally:
         CLIENT.stop()
