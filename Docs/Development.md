@@ -136,12 +136,14 @@ the whitelist, loading the mod in the game does.
 - `tests/cluster_delete.py` deletes grids on a cluster node, alone in their partition and in
   partitions a split renumbers right after, and checks that the WA's index, which every
   node's far view reads, drops them and keeps the others (SE-1090).
-- `tests/cluster_removal.py` fails a handover on purpose, removes grids on the source node two
-  ways (admin delete, plain close), seeds the WA's saved index with orphan records and lets two
-  partitions go offline. It checks that the WA's index drops the removed grids and the orphans
-  and keeps the offline grids, and prints the time each took (SE-1145). It sets the plugin's
-  cluster timers (`IMPOSTORS_CLUSTER_*_SECONDS`) to seconds, so it waits seconds where the
-  defaults wait minutes; `IMP_FAST=0` keeps the defaults.
+- `tests/cluster_removal.py` fails a handover on purpose, with the target holding the failed
+  import's grids for a few seconds (the cluster test plugin's hold-import seam, SE-1167), so it
+  reports and then releases them. It removes grids on the source node two ways (admin delete,
+  plain close), seeds the WA's saved index with orphan records and lets two partitions go
+  offline. It checks that the WA's index drops the removed grids and the orphans and keeps the
+  offline grids, and prints the time each took (SE-1145). It sets the plugin's cluster timers
+  (`IMPOSTORS_CLUSTER_*_SECONDS`) to seconds, so it waits seconds where the defaults wait
+  minutes; `IMP_FAST=0` keeps the defaults.
 - `tests/shutdown.py` checks the server's shutdown (SE-676): the server starts the service and
   gets a SIGTERM, which disposes the plugins off the game thread. The log must have no
   "Dispose failed", and the test probe must find the service's state cleared.

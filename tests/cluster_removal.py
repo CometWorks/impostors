@@ -20,23 +20,23 @@ without the stations, gets 27-block grids 40 km out: a yard of three sharing a p
 (Carrier, Drone, Freighter) and two alone that go offline.
 
 1. The yard's handover to the other node fails on purpose, through the cluster test plugin's
-   corrupt-import seam. The target discards the import about 0.1 s after it arrives, mostly
-   before it has built the yard's impostors (once in 20 tries on polaris). The handover
-   repeats, up to 10 times, until the target had them built for two ticks before the discard,
-   so it reported them and released them with the discard, as on octahedron-test. Without such
-   a try the released-record check is skipped and the output says so; the seeded orphans stand
-   for those records then.
+   corrupt-import seam, and its hold-import seam keeps the failed import's grids on the target
+   for HOLD seconds before the discard (SE-1167). Without the hold the target discards them
+   about 0.1 s after they arrive, mostly before it has built the yard's impostors. With it the
+   target builds and reports them, then releases them with the discard, as on octahedron-test,
+   where a big partition's failed import held them for 37 s.
 2. The source removes Carrier with the admin delete (/grid-delete) and Drone with a plain Close
    (/test-close-entity: what cut, grinding, cleanup, Hangar, the shipyard and a merge do).
 3. The balancer resumes, as offline admission needs its partition reports, offline partitions
    go on with a 2 s grace and the two lone grids go offline; the test waits two orphan periods.
 
-Checks: each removed grid leaves the WA's saved index within 10 s plus its save interval,
-Carrier's delete was of a released record (when the target reported it), the reconcile drops
-the orphans, the WA's saved index lists none of those and still lists Freighter and both
-offline grids. The times go to the output.
+Checks: the target held the yard past a report before the discard, each removed grid leaves
+the WA's saved index within 10 s plus its save interval, Carrier's delete was of the released
+record, the reconcile drops the orphans, the WA's saved index lists none of those and still
+lists Freighter and both offline grids. The times go to the output.
 
-Run it from the cluster repository's Test folder, as tests/cluster_scenario.py:
+Run it from the Test folder of a cluster repository whose test plugin has the hold-import
+seam (main after cluster 0.2.9), as tests/cluster_scenario.py:
 
     cd <cluster>/Test && uv run python <impostors>/tests/cluster_removal.py
 
@@ -70,7 +70,9 @@ REPORT = TIMERS.get("REPORT", 5)
 ORPHAN_WAIT = 2 * (TIMERS.get("ORPHAN", 60) + TIMERS.get("RECONCILE", 15)) + 2 * REPORT
 SAVE_WAIT = TIMERS.get("INDEX_SAVE", 60) + 2 * REPORT + 5
 
-ATTEMPTS = 10
+# The failed import's hold on the target: a report and time to build the yard. The gateway
+# gives the whole import 10 s (DirectGateway._http.Timeout), hold included.
+HOLD = REPORT + 2
 Z = 40000.0
 NAMES = ("Carrier", "Drone", "Freighter", "Offline-1", "Offline-2")
 IDS = {n: 130000000000003001 + i for i, n in enumerate(NAMES)}
@@ -159,47 +161,39 @@ def offline_grids(bench: Bench) -> set[int]:
     }
 
 
-def fail_handover(bench: Bench, source: str, target: str, partition: int) -> bool:
-    """Failed handovers of the yard until the target has built its impostors before the
-    discard: reporting every tick, it has reported them then, and released them with it
+def fail_handover(bench: Bench, source: str, target: str, partition: int) -> None:
+    """A failed handover of the yard whose target holds the import HOLD seconds before the
+    discard: reporting every tick, it reports the grids then, and releases them with it
     """
     carrier = rf"Impostor[^:]*: id={IDS['Carrier']} "
     discard = rf"partition={partition} phase=discard"
-    stayed = reported = False
     bench.cluster.node(target, "/debug/corrupt-import?field=DisplayName", "POST")
+    bench.cluster.node(target, f"/debug/hold-import?seconds={HOLD}", "POST")
+    started = time.time()
     try:
-        for attempt in range(1, ATTEMPTS + 1):
-            started = time.time()
-            bench.cluster.post(
-                f"/registry/handover-blocked/clear?partition={partition}"
-            )
-            try:
-                _force_handover(bench, source, target, partition)
-            except ClusterError as error:  # an aborted handover answers with an error
-                bench.record(f"handover-{attempt}", {"error": str(error)[:2000]})
-            stayed = cs.wait(
-                lambda: _all_partitions(bench).get(partition) == source, 60, 0.5
-            )
-            built = [t for t, _ in log_lines(bench, target, carrier) if t >= started]
-            discarded = [
-                t for t, _ in log_lines(bench, target, discard) if t >= started
-            ]
-            held = discarded[0] - built[0] if built and discarded else None
-            bench.record(f"target-{attempt}", {"built": built, "discarded": discarded})
-            print(
-                f"  [INFO] handover {attempt}: the target held the built yard {held} s"
-            )
-            reported = held is not None and held > REPORT + 1 / 30  # two ticks
-            if not stayed or reported:
-                break
+        _force_handover(bench, source, target, partition)
+    except ClusterError as error:  # an aborted handover answers with an error
+        bench.record("handover", {"error": str(error)[:2000]})
     finally:
+        hold = bench.cluster.node(target, "/debug/hold-import?seconds=0", "POST")
         bench.cluster.node(target, "/debug/corrupt-import?field=", "POST")
-    bench.check("the yard's handovers failed and it stayed on its source", bool(stayed))
-    print(
-        f"  [INFO] the target {'reported' if reported else 'never reported'} the yard"
+    stayed = cs.wait(lambda: _all_partitions(bench).get(partition) == source, 60, 0.5)
+    bench.check("the yard's handover failed and it stayed on its source", bool(stayed))
+    discarded = cs.wait(
+        lambda: [t for t, _ in log_lines(bench, target, discard) if t >= started],
+        30,
+        0.5,
+    )
+    built = [t for t, _ in log_lines(bench, target, carrier) if t >= started]
+    held = discarded[0] - built[0] if built and discarded else None
+    bench.record("target", {"built": built, "discarded": discarded, "hold": hold})
+    print(f"  [INFO] the target held the built yard {held} s before the discard")
+    bench.check(
+        "the target held the failed import and reported the yard before the discard",
+        hold.get("held", 0) >= 1 and held is not None and held > REPORT + 1 / 30,
+        f"held {held} s, {hold}",
     )
     time.sleep(2 * REPORT + 1)  # the target's released report
-    return reported
 
 
 def run(bench: Bench) -> None:
@@ -229,7 +223,7 @@ def run(bench: Bench) -> None:
     target = next(p for p in PROCESSES[1:] if p != source)
     print(f"  [INFO] yard partition {partition} on {source}, handover to {target}")
 
-    reported = fail_handover(bench, source, target, partition)
+    fail_handover(bench, source, target, partition)
 
     removed_at = {}
     for name, route in REMOVALS.items():
@@ -305,14 +299,10 @@ def run(bench: Bench) -> None:
     for name in ("Freighter", *OFFLINE):
         bench.check(f"{name} kept: in the WA's saved index", IDS[name] in listed)
 
-    if reported:
-        released = log_lines(
-            bench, "wa-1", rf"deleted {IDS['Carrier']}, a released record"
-        )
-        bench.check(
-            "Carrier's delete was of the failed handover's released record",
-            bool(released),
-        )
+    released = log_lines(bench, "wa-1", rf"deleted {IDS['Carrier']}, a released record")
+    bench.check(
+        "Carrier's delete was of the failed handover's released record", bool(released)
+    )
     # The WA's own delete, from its log, which it writes late (since SE-1145)
     for name, at in removed_at.items():
         line = log_lines(bench, "wa-1", rf"cluster index: \S+ deleted {IDS[name]}\b")
