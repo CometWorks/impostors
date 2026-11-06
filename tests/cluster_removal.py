@@ -88,11 +88,12 @@ STAMP = re.compile(r"^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d+)")
 
 
 def position(name: str) -> tuple[float, float, float]:
-    """The yard together, the others alone on the positive z half circle: on Cluster-Simple's
-    bench the other half is not on node-1"""
+    """The yard together at the top of the positive z half circle, the others alone on it, 20 km
+    from the yard: on Cluster-Simple's bench the other half is not on node-1. A lone grid on
+    the yard pushed Carrier off its record, so the source reported it again"""
     if name in YARD:
         return 60.0 * YARD.index(name), 0.0, Z
-    angle = (NAMES.index(name) - 2) * math.pi / 4
+    angle = (NAMES.index(name) - 2) * math.pi / 3
     return Z * math.cos(angle), 0.0, Z * math.sin(angle)
 
 
