@@ -959,8 +959,20 @@ Magnetar Plugin SDK (`PluginSdk.Clustering`); the client side is unchanged.
   node its impostor. Without the scope (another cluster plugin) the partition decides as before.
   The shapes of new versions go first (`shape-chunk`, see below).
 - The WA merges the reports into the index. A released record stays, without an owner, until
-  some node reports the grid again: that is how grids of offline partitions stay visible. Every
-  5 s the WA broadcasts the changes to the nodes (`index`) as consecutive revisions.
+  some node reports the grid again: that is how grids of offline partitions stay visible. A
+  gone report counts only from the node the WA last heard the grid from, with one exception
+  since SE-1145: any node may delete a released record. A failed handover's target reports the
+  grids while it holds the import and releases them with the discard, but the source keeps
+  them, and before the change its deletes were ignored for good. Every 5 s the WA broadcasts the
+  changes to the nodes (`index`) as consecutive revisions.
+- The WA reconciles every 15 s (SE-1145): it asks every node (`census`) which of its grid
+  records they hold, up to 4000 at a time round the index, leaving out the grids of offline
+  partitions, which it reads from the gateway's table (`CLUSTER_GATEWAY_REGISTRY`, the
+  PluginSdk has no view of them). A record that no node holds for a minute goes, without its
+  shapes, which the cache keeps by its own rules. That clears what no report ever removes:
+  records of a crashed node's deleted grids, of a failed handover, and orphans of a saved index
+  whose partition no longer exists. A round that can't ask every node or the gateway changes
+  nothing, so a cluster without the gateway's table never drops a record this way.
 - A node that missed a revision, or started after the last one, loads the whole index in pages
   (`snapshot`).
 - On each node, `RemoteSource` turns the other nodes' records into entries. They skip the

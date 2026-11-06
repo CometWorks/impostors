@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -13,6 +14,11 @@ using Shared.Config;
 using Shared.Impostors;
 using Shared.Logging;
 using VRage.Game.Entity;
+#if NETCOREAPP
+using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Text.Json;
+#endif
 
 namespace ServerPlugin.Cluster;
 
@@ -32,12 +38,27 @@ namespace ServerPlugin.Cluster;
 // for shapes of unchanged content before building them (the bridge is the service's
 // IShapeCache). The WA also saves its index, so the records of offline partitions' grids
 // survive a WA restart.
+//
+// A grid removed from the game leaves the index with its node's next report. As a safety net
+// the WA reconciles: a record whose grid no node holds and no offline partition lists for a
+// minute goes too, as after a node crash or a failed handover (SE-1145).
 public sealed class ClusterBridge : IShapeCache
 {
     // The plugin's loader id, the manifest Id
     private const string PluginId = "66AA3D09-1732-445D-A2B6-A377B31AE76C";
 
-    private const int IntervalTicks = 300;
+    private static readonly int IntervalTicks = Ticks("IMPOSTORS_CLUSTER_REPORT_SECONDS", 5);
+
+    // A timer in game ticks, its seconds from the environment variable if set. Tests shorten the
+    // cluster timers this way, so they wait seconds instead of minutes (SE-1145).
+    private static int Ticks(string variable, double seconds)
+    {
+        var set = Environment.GetEnvironmentVariable(variable);
+        if (double.TryParse(set, NumberStyles.Float, CultureInfo.InvariantCulture, out var value))
+            seconds = value;
+        return Math.Max(1, (int)Math.Round(seconds * 60));
+    }
+
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
 
     // Records per message, under the SDK's 64 KiB payload limit with room for node names
@@ -56,9 +77,10 @@ public sealed class ClusterBridge : IShapeCache
     private const string TopicIndex = "index";
     private const string TopicSnapshot = "snapshot";
     private const string TopicCacheGet = "cache-get-chunk";
+    private const string TopicCensus = "census";
 
     // The WA saves its index at most this often, seconds
-    private const int IndexSaveSeconds = 60;
+    private static readonly int IndexSaveTicks = Ticks("IMPOSTORS_CLUSTER_INDEX_SAVE_SECONDS", 60);
     private const int IndexMagic = 0x31584449; // "IDX1"
 
     private static readonly PluginTarget WorldAuthority = new()
@@ -147,6 +169,16 @@ public sealed class ClusterBridge : IShapeCache
     private int lastIndexSave;
     private Task indexSave;
 
+    // WA: the reconcile, how often it runs and how long a record has to be an orphan
+    // before it goes, and since when (tick) each suspect has been one
+    private static readonly int ReconcileTicks = Ticks("IMPOSTORS_CLUSTER_RECONCILE_SECONDS", 15);
+    private static readonly int OrphanTicks = Ticks("IMPOSTORS_CLUSTER_ORPHAN_SECONDS", 60);
+    private const int CensusIds = 4000;
+    private readonly Dictionary<long, int> suspects = new();
+    private long censusAfter = long.MinValue;
+    private Task reconciling;
+    private int lastReconcile;
+
     private ClusterBridge(IPluginConfig config, IPluginLogger log)
     {
         this.config = config;
@@ -210,6 +242,14 @@ public sealed class ClusterBridge : IShapeCache
                 LoadIndex();
                 Publish();
                 SaveIndex();
+                if (
+                    tick - lastReconcile >= ReconcileTicks
+                    && reconciling is not { IsCompleted: false }
+                )
+                {
+                    lastReconcile = tick;
+                    reconciling = Reconcile();
+                }
             }
             else if (indexInstance == 0)
                 busy = LoadSnapshot(); // A node that started after the last publication
@@ -232,6 +272,7 @@ public sealed class ClusterBridge : IShapeCache
             handlers.Add(cluster.RegisterHandler(TopicSnapshot, OnSnapshot));
             handlers.Add(cluster.RegisterHandler(TopicIndex, OnIndex));
             handlers.Add(cluster.RegisterHandler(TopicCacheGet, OnCacheGet));
+            handlers.Add(cluster.RegisterHandler(TopicCensus, OnCensus));
         }
         catch (Exception e)
         {
@@ -281,6 +322,25 @@ public sealed class ClusterBridge : IShapeCache
             return null;
         }
         return (Func<bool>)Delegate.CreateDelegate(typeof(Func<bool>), active.GetMethod);
+    }
+
+    // Game thread: which of the WA's suspect grids this node holds
+    private Task<byte[]> OnCensus(PluginMessage message)
+    {
+        var r = new ByteReader(message.Payload);
+        var count = r.Int();
+        var held = new List<long>();
+        for (var i = 0; i < count; i++)
+        {
+            var id = r.Long();
+            if (MyEntities.TryGetEntityById(id, out var entity) && !entity.MarkedForClose)
+                held.Add(id);
+        }
+        var w = new ByteWriter(4 + held.Count * 8);
+        w.Int(held.Count);
+        foreach (var id in held)
+            w.Long(id);
+        return Task.FromResult(w.ToArray());
     }
 
     private void Report()
@@ -549,7 +609,9 @@ public sealed class ClusterBridge : IShapeCache
         return Task.FromResult<byte[]>(null);
     }
 
-    // Upserts with their node, then removed ids
+    // Upserts with their node, then removed ids. A removed record of a grid this node still has
+    // goes to the WA again with the next report: the WA's reconcile dropped it while this node
+    // didn't answer (SE-1145).
     private void ApplyIndex(ByteReader r)
     {
         var count = r.UShort();
@@ -561,7 +623,12 @@ public sealed class ClusterBridge : IShapeCache
         }
         count = r.UShort();
         for (var i = 0; i < count; i++)
-            Index.Remove(r.Long());
+        {
+            var id = r.Long();
+            Index.Remove(id);
+            if (acked.Remove(id))
+                pushed.RemoveWhere(p => p.Item1 == id);
+        }
     }
 
     private async Task LoadSnapshot()
@@ -609,6 +676,12 @@ public sealed class ClusterBridge : IShapeCache
             Index.Clear();
             foreach (var (record, node) in records)
                 Index[record.Id] = (record, node);
+            // As in ApplyIndex: what the WA dropped of this node's goes again
+            foreach (var id in acked.Keys.Where(id => !Index.ContainsKey(id)).ToList())
+            {
+                acked.Remove(id);
+                pushed.RemoveWhere(p => p.Item1 == id);
+            }
             indexInstance = waInstance;
             indexRevision = snapshotRevision;
             log.Info($"cluster index loaded, {Index.Count} records, revision {indexRevision}");
@@ -738,16 +811,24 @@ public sealed class ClusterBridge : IShapeCache
         {
             var id = r.Long();
             var released = r.Byte() != 0;
-            if (!merged.TryGetValue(id, out var current) || current.node != node)
-                continue; // Another node reported it since
+            if (!merged.TryGetValue(id, out var current))
+                continue;
 
             if (released)
             {
+                if (current.node != node)
+                    continue; // Another node reported it since
                 merged[id] = (current.record, null, current.partition);
                 changed.Add(id);
             }
-            else
+            else if (current.node == node || current.node == null)
             {
+                // A released record too: a failed handover's target reports the grid and
+                // releases it with the discard, while the source keeps it and may delete it
+                // later (SE-1145)
+                log.Info(
+                    $"cluster index: {node} deleted {id}{(current.node == null ? ", a released record" : "")}"
+                );
                 Delete(id, true);
             }
         }
@@ -963,12 +1044,12 @@ public sealed class ClusterBridge : IShapeCache
         }
     }
 
-    // Writes the index on a background thread after it changed, at most every IndexSaveSeconds
+    // Writes the index on a background thread after it changed, at most every IndexSaveTicks
     private void SaveIndex()
     {
         if (
             !indexDirty
-            || tick - lastIndexSave < IndexSaveSeconds * 60
+            || tick - lastIndexSave < IndexSaveTicks
             || indexSave is { IsCompleted: false }
             || MySession.Static is not { } session
         )
@@ -1005,6 +1086,125 @@ public sealed class ClusterBridge : IShapeCache
     }
 
     private static string IndexPath => Path.Combine(ImpostorService.CacheFolder, "index.bin");
+
+    // Async, state on the game thread: the grid records no offline partition lists go to every
+    // node, CensusIds at a time, round the index. One that no node holds is a suspect, and a
+    // suspect for OrphanTicks is dropped. A round that can't ask every node or the gateway
+    // changes nothing. Only grids: block safe zones go with their grid's record anyway.
+    private async Task Reconcile()
+    {
+        var offline = await OfflineGrids().ConfigureAwait(false);
+        if (offline == null)
+            return;
+
+        var candidates = new TaskCompletionSource<List<long>>();
+        gameThread.Enqueue(() =>
+        {
+            var grids = merged
+                .Where(m => m.Value.record.Kind == ImpostorKind.Grid && !offline.Contains(m.Key))
+                .Select(m => m.Key)
+                .OrderBy(id => id)
+                .ToList();
+            var next = grids
+                .Where(id => id > censusAfter)
+                .Concat(grids.Where(id => id <= censusAfter));
+            candidates.SetResult(next.Take(CensusIds).ToList());
+        });
+        var asked = await candidates.Task.ConfigureAwait(false);
+        if (asked.Count == 0)
+            return;
+
+        var w = new ByteWriter(4 + asked.Count * 8);
+        w.Int(asked.Count);
+        foreach (var id in asked)
+            w.Long(id);
+        var census = await cluster
+            .BroadcastAsync(TopicCensus, w.ToArray(), Guid.NewGuid(), Timeout, false)
+            .ConfigureAwait(false);
+        if (census.Code != PluginResultCode.Success)
+            return;
+        var held = new HashSet<long>();
+        foreach (var answer in census.Nodes.Values)
+        {
+            var r = new ByteReader(answer.Payload);
+            for (var count = r.Int(); count > 0; count--)
+                held.Add(r.Long());
+        }
+
+        gameThread.Enqueue(() =>
+        {
+            censusAfter = asked.Count < CensusIds ? long.MinValue : asked[asked.Count - 1];
+            var dropped = 0;
+            foreach (var id in asked)
+            {
+                if (held.Contains(id) || !merged.ContainsKey(id))
+                    suspects.Remove(id);
+                else if (!suspects.TryGetValue(id, out var since))
+                    suspects[id] = tick;
+                else if (tick - since >= OrphanTicks)
+                {
+                    Delete(id, false);
+                    suspects.Remove(id);
+                    dropped++;
+                }
+            }
+            foreach (var id in suspects.Keys.Where(id => !merged.ContainsKey(id)).ToList())
+                suspects.Remove(id);
+            if (dropped > 0)
+                log.Info(
+                    $"cluster index: reconcile dropped {dropped} records no node or offline partition has"
+                );
+        });
+    }
+
+    // The grids of the offline partitions, from the gateway's table (Docs/OfflinePartitions.md
+    // of CometWorks/cluster); the PluginSdk has no view of them. Null when it can't be read.
+    private async Task<HashSet<long>> OfflineGrids()
+    {
+#if NETCOREAPP
+        var root = Environment.GetEnvironmentVariable("CLUSTER_GATEWAY_REGISTRY")?.TrimEnd('/');
+        if (string.IsNullOrEmpty(root))
+            return null;
+        try
+        {
+            using var document = JsonDocument.Parse(
+                await Gateway
+                    .Value.GetStringAsync($"{root}/registry/partitions/offline")
+                    .ConfigureAwait(false)
+            );
+            var grids = new HashSet<long>();
+            foreach (var row in document.RootElement.GetProperty("Partitions").EnumerateArray())
+            foreach (var member in row.GetProperty("Members").EnumerateArray())
+                grids.Add(member.GetInt64());
+            return grids;
+        }
+        catch (Exception e)
+        {
+            gameThread.Enqueue(() =>
+                log.Warning($"cluster index: no offline partitions for the reconcile: {e.Message}")
+            );
+            return null;
+        }
+#else
+        return await Task.FromResult<HashSet<long>>(null);
+#endif
+    }
+
+#if NETCOREAPP
+    private static readonly Lazy<HttpClient> Gateway = new(() =>
+    {
+        var client = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+        var token =
+            Environment.GetEnvironmentVariable("CLUSTER_JOIN_TOKEN_CURRENT")
+            ?? Environment.GetEnvironmentVariable("CLUSTER_JOIN_TOKEN");
+        if (!string.IsNullOrWhiteSpace(token))
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+                "Bearer",
+                token
+            );
+        return client;
+    });
+#endif
 
     // Sends the changes since the last publication to every node, as consecutive revisions
     private void Publish()
