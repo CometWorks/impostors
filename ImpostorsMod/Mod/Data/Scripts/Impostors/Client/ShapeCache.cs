@@ -140,6 +140,18 @@ namespace Impostors
                 pack.ForEach(
                     (id, version, mask) =>
                     {
+                        // An asteroid whose last state from a server is of another version
+                        // shows that one (see EarlyAsteroids.Reset). Claimed, the pack's version
+                        // would tell the server the client has the current one when the server
+                        // is back at it, and the stale state would never be replaced (SE-1109).
+                        List<Entry> list;
+                        Entry state;
+                        if (
+                            entries.TryGetValue(id, out list)
+                            && (state = LastState(list)) != null
+                            && state.Version != version
+                        )
+                            return;
                         var versions = new Dictionary<int, byte>();
                         versions[version] = mask;
                         masks[id] = versions;
@@ -258,12 +270,7 @@ namespace Impostors
             var lengths = new List<int>();
             foreach (var list in entries.Values)
             {
-                Entry state = null;
-                foreach (var entry in list)
-                {
-                    if (entry.Lod == StateLod && (state == null || entry.Order > state.Order))
-                        state = entry;
-                }
+                var state = LastState(list);
                 if (state == null)
                     continue;
                 lods.Clear();
@@ -276,13 +283,31 @@ namespace Impostors
                         lengths.Add(entry.Data.Length);
                     }
                 }
-                if (lods.Count > 0)
-                    visit(
-                        ImpostorState.Read(new ByteReader(state.Data)),
-                        lods.ToArray(),
-                        lengths.ToArray()
-                    );
+                visit(
+                    ImpostorState.Read(new ByteReader(state.Data)),
+                    lods.ToArray(),
+                    lengths.ToArray()
+                );
             }
+        }
+
+        // An asteroid's latest state, null without one or without a level of its version
+        private static Entry LastState(List<Entry> list)
+        {
+            Entry state = null;
+            foreach (var entry in list)
+            {
+                if (entry.Lod == StateLod && (state == null || entry.Order > state.Order))
+                    state = entry;
+            }
+            if (state == null)
+                return null;
+            foreach (var entry in list)
+            {
+                if (entry.Version == state.Version && entry.Lod != StateLod)
+                    return state;
+            }
+            return null;
         }
 
         // Retention, only where the server doesn't count on the entries: on load, on save at
