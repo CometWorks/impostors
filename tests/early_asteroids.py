@@ -35,7 +35,10 @@ with an empty cache shows the pack's shape early and swaps to the server's when 
 comes, the next join takes the server's version from its cache and keeps it. Then the server
 starts over from the uncut world, back at the pack's version, while the client's cache still
 has the cut one as its last state (SE-1109): the next join must get the pack's version from
-the server. PASS/FAIL per step.
+the server. After each join the client's cache file must have none of the pack's levels, and
+the cut version's levels the server streamed (SE-1223); before the second join the test adds
+40 of the pack's levels to the file, as older clients cached them, and loading must drop
+them. PASS/FAIL per step.
 
 `offline` loads the world offline in a client with the client plugin and the pack, without
 the early asteroids and with them, and prints the same join numbers for the asteroids beyond
@@ -65,6 +68,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import asteroid_pack as ap  # noqa: E402
+import cache_pack_dupes  # noqa: E402
 import rig  # noqa: E402
 import ring  # noqa: E402
 
@@ -122,6 +126,41 @@ def stage_client(ids, with_pack: bool) -> None:
             if (ring.WORKSHOP / str(i) / ap.PACK_FILE).exists():
                 (mods / f"{i}.sbm").unlink()
                 (mods / f"{i}.sbm").symlink_to(EMPTY_PACK)
+
+
+def cache_file() -> Path:
+    """The world's cache file; the client names it by a hash of the session's name, which
+    is empty on a multiplayer client while it loads"""
+    files = sorted(
+        CLIENT.mod_storage.glob("cache-*.bin"), key=lambda f: f.stat().st_mtime
+    )
+    return files[-1] if files else CLIENT.mod_storage / "cache-cbf29ce484222325.bin"
+
+
+def cache_report(tag: str) -> dict:
+    """The client's cache file after a join: its entries and bytes, and how many of them the
+    pack has too (SE-1223)"""
+    if not cache_file().exists():
+        print(f"{tag}: no cache file", flush=True)
+        return {
+            "entries": 0,
+            "bytes": 0,
+            "packed": 0,
+            "packed_bytes": 0,
+            "versions": {},
+        }
+    report = cache_pack_dupes.compare(cache_file(), ap.PACK / ap.PACK_FILE)
+    versions: dict[int, set[int]] = {}
+    for id_, version, lod, _ in cache_pack_dupes.read_cache(cache_file()):
+        if lod != cache_pack_dupes.STATE_LOD:
+            versions.setdefault(id_, set()).add(version)
+    report["versions"] = versions
+    print(
+        f"{tag}: cache file {report['entries']} entries, {report['bytes'] / 1024:.0f} KB, "
+        f"{report['packed']} of them in the pack ({report['packed_bytes'] / 1024:.0f} KB)",
+        flush=True,
+    )
+    return report
 
 
 def clear_cache() -> None:
@@ -250,9 +289,11 @@ def join(
         f"({totals.get('packed')} pack); early {totals.get('earlyloads')} loads in "
         f"{totals.get('earlyms')} ms, kept {totals.get('kept')}, swapped {totals.get('swapped')}; "
         f"client picks {totals.get('picks', '0')}, {totals.get('notices', '0')} changed asteroids "
-        f"with {totals.get('noticelevels', '0')} levels",
+        f"with {totals.get('noticelevels', '0')} levels; cache {totals.get('cachekb')} KB, "
+        f"{totals.get('cachesaves', '?')} saves",
         flush=True,
     )
+    result["cache"] = cache_report(tag)
     return result
 
 
@@ -435,6 +476,18 @@ def swap() -> int:
                 f"shape at the end {final.get('shape')}",
             )
 
+        # SE-1223: the cache has what the server streamed, none of the pack's levels
+        cached = first["cache"]
+        ok &= ap.check(
+            mined in cached["versions"].get(asteroid, set()) and cached["packed"] == 0,
+            f"cache after the pack-only join: {asteroid}'s versions "
+            f"{sorted(cached['versions'].get(asteroid, set()))}, {cached['packed']} pack levels",
+        )
+
+        # A cache of a client before SE-1223, with pack levels in it: loading drops them
+        seeded = cache_pack_dupes.seed(cache_file(), ap.PACK / ap.PACK_FILE, 40)
+        print(f"seeded the cache with {seeded} pack levels", flush=True)
+
         # The cache has the server's version now: early with it, kept
         second = join(ids, "swap, cached", True, True, eye, target, away)
         totals = second["totals"]
@@ -448,6 +501,14 @@ def swap() -> int:
             and int(totals.get("notices", 0)) == 0,
             f"next join from the cache: no swap of {asteroid} ({totals.get('swapped')} swaps, "
             f"{totals.get('kept')} kept, {totals.get('notices')} notices), shape {final.get('shape')}",
+        )
+        cached = second["cache"]
+        ok &= ap.check(
+            seeded > 0
+            and cached["packed"] == 0
+            and mined in cached["versions"].get(asteroid, set()),
+            f"seeded pack levels dropped on load: {cached['packed']} of {seeded} left, "
+            f"{asteroid}'s versions {sorted(cached['versions'].get(asteroid, set()))}",
         )
 
         # The server back at the pack's version, the cache's last state still the cut one.
@@ -465,6 +526,14 @@ def swap() -> int:
             and final.get("shape", "").split("/")[0] == str(versions[asteroid]),
             f"server back at the pack's {versions[asteroid]}: {totals.get('notices')} notices, "
             f"shape at the end {final.get('shape')}",
+        )
+
+        # The levels it streamed are the pack's: they stay out of the cache (SE-1223)
+        cached = third["cache"]
+        ok &= ap.check(
+            cached["packed"] == 0,
+            f"cache after the server went back to the pack: {cached['packed']} pack levels "
+            f"({cached['packed_bytes'] / 1024:.0f} KB)",
         )
     finally:
         CLIENT.stop()

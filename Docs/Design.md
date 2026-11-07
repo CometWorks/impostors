@@ -330,6 +330,10 @@ Versions are content hashes of all levels, so (id, version, level) names a shape
   arrived, 10 s at most; otherwise the first second's shapes would go out before the server
   knew the client has them. The server keeps the inventory per player and adds every shape
   it sends from then on, as the client caches all of them.
+- The cache is for what only the server has (SE-1223). A level of the world's asteroid pack
+  stays in the pack, whether it came inline or the client read it from the pack for a
+  changed asteroid's notice; a request for it from the cache falls back to the pack. Loading
+  the file drops the pack's levels that older clients cached again.
 - A shape the client's store lacks but its disk cache has goes into ShapeData as the id, the
   version, a 1 and the level, instead of the shape. The client decodes it from the cache and
   adds it to the shape store with the shape's real size, so both copies of the store stay
