@@ -77,6 +77,9 @@ namespace Impostors
 
         public long Bytes { get; private set; }
 
+        // Writes of the world's file this session, for the stats
+        public int Saves { get; private set; }
+
         public bool Loaded
         {
             get { return file != null; }
@@ -128,6 +131,26 @@ namespace Impostors
                     "Impostors: failed to update the shape cache index: " + e.Message
                 );
             }
+        }
+
+        // Drops the levels the asteroid pack has too, which clients before SE-1223 cached
+        // again: the pack has them, the cache is for what only the server has. How many.
+        public int DropPacked(AsteroidPack pack)
+        {
+            var dropped = 0;
+            foreach (var list in entries.Values)
+            {
+                dropped += list.RemoveAll(entry =>
+                {
+                    if (entry.Lod == StateLod || !pack.Has(entry.Id, entry.Version, entry.Lod))
+                        return false;
+                    Bytes -= entry.Data.Length;
+                    return true;
+                });
+            }
+            if (dropped > 0)
+                Changed();
+            return dropped;
         }
 
         // Ids, versions and level masks for the Inventory message, with those of the asteroid
@@ -547,7 +570,10 @@ namespace Impostors
         private void Write(string name, byte[] data)
         {
             lock (writing)
+            {
                 WriteFile(name, data);
+                Saves++;
+            }
         }
 
         private void WriteFile(string name, byte[] data)

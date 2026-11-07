@@ -226,6 +226,15 @@ namespace Impostors
             return true;
         }
 
+        // Client: whether the pack has this level of the asteroid's shapes of this version
+        public bool Has(long id, int version, byte lod)
+        {
+            Entry entry;
+            return entries.TryGetValue(id, out entry)
+                && entry.Version == version
+                && Array.IndexOf(entry.Lods, lod) >= 0;
+        }
+
         // Client: one level of the asteroid's shapes of this version, or null
         public byte[] Get(long id, int version, byte lod)
         {

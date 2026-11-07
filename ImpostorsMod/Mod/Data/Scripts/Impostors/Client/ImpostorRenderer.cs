@@ -309,6 +309,16 @@ namespace Impostors
             }
             if (UsePack)
                 OpenPack();
+            if (pack != null && cache != null)
+            {
+                var dropped = cache.DropPacked(pack);
+                if (dropped > 0)
+                    MyLog.Default.WriteLineAndConsole(
+                        "Impostors: dropped "
+                            + dropped
+                            + " shapes from the shape cache, the asteroid pack has them"
+                    );
+            }
             if (UseGridPack)
                 OpenGridPack();
             MyAPIGateway.Utilities.RegisterMessageHandler(BudgetMessage, OnBudget);
@@ -996,6 +1006,8 @@ namespace Impostors
                     + packedCount
                     + " cachekb="
                     + (cache != null ? cache.Bytes / 1024 : 0)
+                    + " cachesaves="
+                    + (cache != null ? cache.Saves : 0)
                     + " stored="
                     + store.Count
                     + " storedkb="
@@ -1358,14 +1370,15 @@ namespace Impostors
                             shapeCount++;
                             shapeBytes += data.Length;
                             if (caching && !local)
-                                cache.Add(id, version, shape.Lod, data);
+                                Cache(id, version, shape.Lod, data);
                         }
 
                         if (PicksAsteroids && early.Noticed(id, version))
                         {
                             // From the pack or inline: the cache keeps every level of the version
+                            // the pack doesn't have
                             if (caching)
-                                cache.Add(id, version, shape.Lod, data);
+                                Cache(id, version, shape.Lod, data);
                             early.AddLevel(id, shape.Lod, data.Length);
                             continue;
                         }
@@ -1390,6 +1403,14 @@ namespace Impostors
                     break;
                 }
             }
+        }
+
+        // The cache is for what only the server has: a level of the asteroid pack stays in the
+        // pack, which the Inventory claims anyway (SE-1223)
+        private void Cache(long id, int version, byte lod, byte[] data)
+        {
+            if (pack == null || !pack.Has(id, version, lod))
+                cache.Add(id, version, lod, data);
         }
 
         // Tells the server what the disk cache and the asteroid pack have, from then on the
