@@ -10,6 +10,10 @@ the whitelist, loading the mod in the game does.
 
 ## Tests
 
+- `tests/builds.py` builds the client and server plugins for net48 and net10.0, net48 the
+  way Pulsar Legacy and Magnetar Legacy compile it (TRACE only, no `LOCAL_BUILD`). Run it before
+  a release: Linux builds only net10.0 by default, so a .NET Core-only API breaks the Legacy
+  loaders unnoticed (SE-1367). Needs no game running.
 - `tests/scenario.py` checks it all in game: an isolated Magnetar server with the plugin and
   a headless client that has only the mod. `IMP_ONLY=zones` runs only the safe zone checks.
   See its docstring.

@@ -64,8 +64,11 @@ public static class VoxelReadiness
         }
         foreach (var id in gone)
         {
-            if (watched.Remove(id, out var clipmap))
+            if (watched.TryGetValue(id, out var clipmap))
+            {
+                watched.Remove(id);
                 clipmap.Loaded -= OnLoaded;
+            }
             loaded.Remove(id);
         }
         gone.Clear();
@@ -74,10 +77,11 @@ public static class VoxelReadiness
     private static void OnLoaded(IMyLodController clipmap)
     {
         clipmap.Loaded -= OnLoaded;
-        foreach (var (id, c) in watched)
+        foreach (var kv in watched)
         {
-            if (c != clipmap)
+            if (kv.Value != clipmap)
                 continue;
+            var id = kv.Key;
             watched.Remove(id);
             loaded.Add(id);
             MyAPIGateway.Utilities.SendModMessage(ImpostorRenderer.VoxelLoadedMessage, id);
