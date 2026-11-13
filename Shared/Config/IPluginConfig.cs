@@ -53,6 +53,10 @@ public interface IPluginConfig : INotifyPropertyChanged
     // Shortest time between two rebuilds of the same impostor, seconds
     int RebuildSeconds { get; set; }
 
+    // First builds of new grid groups started per minute, the largest first: a ship shot into
+    // pieces makes many at once (SE-1412). 0 for no limit.
+    int NewGridBuildsPerMinute { get; set; }
+
     // Impostors in view are rebuilt this often even without a known change, seconds, which
     // catches changes that don't alter the block count or bounds, like painting
     int RefreshSeconds { get; set; }

@@ -83,6 +83,15 @@ public sealed class ClusterBridge : IShapeCache
     private static readonly int IndexSaveTicks = Ticks("IMPOSTORS_CLUSTER_INDEX_SAVE_SECONDS", 60);
     private const int IndexMagic = 0x31584449; // "IDX1"
 
+    // The WA drops the shapes it holds in memory without an index record, and pushes that
+    // never completed, when they were already there at the sweep before: deleted grids, the
+    // debris of a ship shot apart, asteroids and anything read back from the store, which
+    // keeps them on disk (SE-1412)
+    private static readonly int ShapeSweepTicks = Ticks(
+        "IMPOSTORS_CLUSTER_SHAPE_SWEEP_SECONDS",
+        60
+    );
+
     private static readonly PluginTarget WorldAuthority = new()
     {
         Kind = PluginTargetKind.WorldAuthority,
@@ -136,6 +145,9 @@ public sealed class ClusterBridge : IShapeCache
         long,
         (int version, long input, byte[] packed, bool[] got, int missing)
     > incoming = new();
+    private readonly HashSet<long> unindexedShapes = new();
+    private readonly Dictionary<long, byte[]> staleIncoming = new();
+    private int lastShapeSweep;
     private DiskShapeCache store;
     private volatile bool storeOpened;
     private readonly object storeOpening = new();
@@ -242,6 +254,11 @@ public sealed class ClusterBridge : IShapeCache
                 LoadIndex();
                 Publish();
                 SaveIndex();
+                if (tick - lastShapeSweep >= ShapeSweepTicks)
+                {
+                    lastShapeSweep = tick;
+                    SweepShapes();
+                }
                 if (
                     tick - lastReconcile >= ReconcileTicks
                     && reconciling is not { IsCompleted: false }
@@ -449,7 +466,11 @@ public sealed class ClusterBridge : IShapeCache
         foreach (var (id, version, input, entryShapes) in newShapes)
         {
             if (await PushShapes(id, version, input, entryShapes).ConfigureAwait(false))
-                gameThread.Enqueue(() => pushed.Add((id, version)));
+                gameThread.Enqueue(() =>
+                {
+                    pushed.RemoveWhere(p => p.Item1 == id);
+                    pushed.Add((id, version));
+                });
         }
 
         for (var start = 0; start == 0 || start < upserts.Count; start += RecordsPerMessage)
@@ -510,6 +531,7 @@ public sealed class ClusterBridge : IShapeCache
                     acked[r.Id] = r;
                 foreach (var (id, _) in batchGone)
                 {
+                    pushed.RemoveWhere(p => p.Item1 == id);
                     acked.Remove(id);
                     partitions.Remove(id);
                     locatedBy.Remove(id);
@@ -860,6 +882,43 @@ public sealed class ClusterBridge : IShapeCache
         changed.Remove(id);
         unconfirmed.Remove(id);
         removed.Add(id);
+    }
+
+    // Shapes in memory without a record for two sweeps in a row, and pushes that got no
+    // further since the sweep before, leave memory. A node pushes a grid's shapes right
+    // before its record, so a sweep between the two keeps them.
+    private void SweepShapes()
+    {
+        var dropped = 0;
+        foreach (var id in shapes.Keys.ToList())
+        {
+            if (merged.ContainsKey(id))
+                unindexedShapes.Remove(id);
+            else if (!unindexedShapes.Add(id))
+            {
+                shapes.Remove(id);
+                unindexedShapes.Remove(id);
+                dropped++;
+            }
+        }
+        unindexedShapes.RemoveWhere(id => !shapes.ContainsKey(id));
+
+        var stale = 0;
+        foreach (var (id, part) in incoming.ToList())
+        {
+            if (staleIncoming.TryGetValue(id, out var seen) && seen == part.packed)
+            {
+                incoming.Remove(id);
+                stale++;
+            }
+        }
+        staleIncoming.Clear();
+        foreach (var (id, part) in incoming)
+            staleIncoming[id] = part.packed;
+
+        log.Info(
+            $"cluster shapes: {shapes.Count} in memory, {merged.Count} records, {incoming.Count} pushes in progress; dropped {dropped} without a record, {stale} stalled pushes"
+        );
     }
 
     // Records of the saved index in these partitions that their node didn't report

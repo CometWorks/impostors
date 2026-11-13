@@ -429,7 +429,15 @@ public sealed class ImpostorService : IDisposable
     {
         var start = Stopwatch.GetTimestamp();
         if (plan)
-            registry.Plan(now, config.RebuildSeconds, config.RefreshSeconds);
+            registry.Plan(
+                now,
+                config.RebuildSeconds,
+                config.RefreshSeconds,
+                // The grid pack writer spawns the prefabs as new grids to build them all
+                gridWriter == null
+                    ? config.NewGridBuildsPerMinute
+                    : 0
+            );
         else
             registry.Pump(now);
         var elapsed = Stopwatch.GetTimestamp() - start;

@@ -54,8 +54,7 @@ public sealed class GridSource : ImpostorSource
             if (grids.Length == 0 || grids.Sum(g => g.BlocksCount) < config.MinBlocks)
                 continue;
 
-            // The main grid gives the frame; ties go to the lowest id, so the choice is stable
-            var main = grids.OrderByDescending(g => g.BlocksCount).ThenBy(g => g.EntityId).First();
+            var main = Main(grids, registry);
             var entry = registry.Touch(main.EntityId, this);
             entry.Tag = grids;
             entry.WorldMatrix = main.WorldMatrix;
@@ -82,6 +81,26 @@ public sealed class GridSource : ImpostorSource
                 entry.Stale = true;
             }
         }
+    }
+
+    // The main grid gives the frame and the entry's key: the largest, ties to the lowest id.
+    // A group keeps its key while that grid is still at least half the size of the largest,
+    // so a ship losing blocks or a docked ship growing doesn't start over as a new entry and
+    // build again (SE-1412). Of two keyed groups that merged, the larger key wins.
+    private MyCubeGrid Main(MyCubeGrid[] grids, ImpostorRegistry registry)
+    {
+        var largest = grids.OrderByDescending(g => g.BlocksCount).ThenBy(g => g.EntityId).First();
+        var keyed = grids
+            .Where(g => g != largest && registry.Has(g.EntityId, this))
+            .OrderByDescending(g => g.BlocksCount)
+            .ThenBy(g => g.EntityId)
+            .FirstOrDefault();
+        return
+            keyed != null
+            && !registry.Has(largest.EntityId, this)
+            && keyed.BlocksCount * 2 >= largest.BlocksCount
+            ? keyed
+            : largest;
     }
 
     private static bool Eligible(MyCubeGrid grid) =>

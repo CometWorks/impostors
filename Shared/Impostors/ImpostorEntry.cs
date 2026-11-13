@@ -42,6 +42,9 @@ public sealed class ImpostorEntry
     public double LastBuild = double.NegativeInfinity;
     public int LastSeen;
 
+    // The registry's scan that found it first
+    public int Born;
+
     // Source specific data, for example the grids of a group
     public object Tag;
 
