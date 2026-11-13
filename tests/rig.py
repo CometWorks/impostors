@@ -486,7 +486,8 @@ class Server:
 class Client:
     """Client i of the slot. With plugin=True it also runs the Impostors client
     plugin, otherwise it is vanilla as far as Impostors goes. With probe=True it runs
-    the test probe of tests/clientprobe, which set_fov needs."""
+    the test probe of tests/clientprobe, which set_fov needs. With render=False it
+    runs headless with --no-render: the game's null renderer, no billboard pools."""
 
     def __init__(
         self,
@@ -495,8 +496,10 @@ class Client:
         plugin: bool = False,
         quality: str = "minimal",
         probe: bool = False,
+        render: bool = True,
     ):
         self.index = index
+        self.render = render
         self.name = name
         self.plugin = plugin
         self.probe = probe
@@ -539,7 +542,8 @@ class Client:
             "--resolution",
             RESOLUTION,
             "--no-audio",
-            *([] if DISPLAY else ["--headless"]),
+            *([] if DISPLAY and self.render else ["--headless"]),
+            *([] if self.render else ["--no-render"]),
             "--connect",
             f"127.0.0.1:{server_port}",
         ]
@@ -618,16 +622,21 @@ class Client:
             self.pulsar,
             self.launch_log,
             self.pid_file,
-            env=(
-                {
-                    "DISPLAY": DISPLAY,
-                    "SDL_VIDEO_DRIVER": "x11",
-                    "SDL_VIDEODRIVER": "x11",
-                }
-                if DISPLAY
-                else None
-            ),
+            env=self._env(),
         )
+
+    def _env(self) -> dict:
+        if not self.render:
+            # LinuxCompat reads this before Remote sees --no-render, so the option alone
+            # would leave the client rendering
+            return {"PULSAR_NO_RENDER": "true"}
+        if DISPLAY:
+            return {
+                "DISPLAY": DISPLAY,
+                "SDL_VIDEO_DRIVER": "x11",
+                "SDL_VIDEODRIVER": "x11",
+            }
+        return {}
 
     def stop(self) -> None:
         stop_process(self.pid_file, str(self.launcher))

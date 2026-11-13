@@ -226,6 +226,13 @@ namespace Impostors
         private readonly HashSet<long> hidden = new HashSet<long>();
         private int tick;
         private int drawnQuads;
+
+        // A client started with --no-render has no billboard pools, and the game's
+        // AddBillboardOriented and AddQuad throw on them. A mod can't read the render proxy,
+        // so the first draw finds out: a NullReferenceException before any quad got drawn
+        // turns drawing off for the session (SE-1407).
+        private bool quadDrawn;
+        private bool noRenderer;
         private int budget;
 
         // Impostors drawn while their real entity exists but doesn't draw yet, last frame
@@ -1499,7 +1506,7 @@ namespace Impostors
             var camera = MyAPIGateway.Session.Camera;
             if (debug && camera != null)
                 NoteMoves(camera);
-            if (!active || impostors.Count == 0 || realOnly || camera == null)
+            if (!active || impostors.Count == 0 || realOnly || noRenderer || camera == null)
                 return;
             var eye = camera.Position;
             var view = MatrixD.Transpose(camera.WorldMatrix);
@@ -1631,13 +1638,28 @@ namespace Impostors
             parts.Sort((a, b) => b.Distance.CompareTo(a.Distance));
 
             drawnQuads = 0;
-            foreach (var part in parts)
+            try
             {
-                if (part.Impostor.Shape.IsZone)
-                    DrawZone(part.Impostor, eye, part.Near);
-                else
-                    DrawImpostor(part.Impostor, eye, sun);
+                foreach (var part in parts)
+                {
+                    if (part.Impostor.Shape.IsZone)
+                        DrawZone(part.Impostor, eye, part.Near);
+                    else
+                        DrawImpostor(part.Impostor, eye, sun);
+                }
             }
+            catch (NullReferenceException)
+            {
+                if (quadDrawn || drawnQuads > 0)
+                    throw;
+                noRenderer = true;
+                MyLog.Default.WriteLineAndConsole(
+                    "Impostors: the game has no billboard pools (rendering is off), drawing nothing"
+                );
+                return;
+            }
+            if (drawnQuads > 0)
+                quadDrawn = true;
             visible.RemoveRange(count, visible.Count - count);
             foreach (var impostor in visible)
             {
