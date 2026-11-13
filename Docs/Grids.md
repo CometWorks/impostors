@@ -14,7 +14,9 @@ default `MinPixels` drops the impostor. Rendered at 2560x1440 with `tests/compar
 ## What gets one
 
 - One impostor per physical grid group, so docked ships and subgrids show as one. Its frame
-  and id are those of the group's largest grid.
+  and id are those of the group's largest grid. A group keeps them while that grid is at
+  least half the size of the largest, so a ship losing blocks or a docked ship growing isn't
+  built again as a new impostor.
 - Groups with fewer than `MinBlocks` blocks (8) get none, nor do projections and previews.
 - Only groups outside the player's replication range, within `MaxDistance` (400 km
   by default) and at least `MinPixels` across on screen. The largest `MaxImpostorsPerPlayer`
@@ -87,5 +89,9 @@ bounds; the levels under 16 are cheap, they are downsampled from 16.
 A group is rebuilt when blocks are added or removed or its bounds change, at most every
 `RebuildSeconds` (60). Paint doesn't change that signature, so impostors in view are also
 rebuilt every `RefreshSeconds` (600). Only groups some player is looking at are built.
+
+A group that shows up after the world loaded, like the pieces of a ship shot apart, is built
+at once, but at most `NewGridBuildsPerMinute` (30) of them per minute, the largest first.
+Pieces whose shapes come from a cache don't count.
 
 More detail: [Design](Design.md#grids-se-382).
