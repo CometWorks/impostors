@@ -29,7 +29,6 @@ from __future__ import annotations
 import re
 import sys
 import time
-import urllib.parse
 from datetime import datetime
 from pathlib import Path
 
@@ -42,6 +41,7 @@ from bench import Bench  # noqa: E402
 NODE = "node-1"
 PROCESSES = ("wa-1", NODE)
 PIECES = 20
+LOAD_SECONDS = 90
 BUDGET = 6
 TAIL = 30
 CHAIN = 130000000000002000
@@ -160,8 +160,8 @@ def remove_block(bench: Bench, entity_id: int) -> dict:
 
 
 def delete(bench: Bench, entity_id: int) -> dict:
-    query = urllib.parse.urlencode({"entityId": entity_id, "name": str(entity_id)})
-    return bench.cluster.node(NODE, f"/grid-delete?{query}", "POST")
+    """Closes the grid as a delete, not a cluster close (/grid-delete wants its name)"""
+    return bench.cluster.node(NODE, f"/test-close-entity?entity={entity_id}", "POST")
 
 
 def grids_on_node(bench: Bench) -> set[int]:
@@ -204,6 +204,7 @@ def run(bench: Bench) -> None:
         (bench.run_root / f"{process}-data" / "Impostors.cfg").write_text(CONFIG)
     bench.cluster.start()
     bench.cluster.wait_ready()
+    ready = time.time()
     bench.cluster.handover_config({"offline.enabled": "false", "npc.sweepSeconds": "0"})
 
     reported = cs.wait(
@@ -216,9 +217,12 @@ def run(bench: Bench) -> None:
         ROTOR_B not in listed,
     )
 
-    counted = cs.wait(lambda: shape_counts(bench), 120, 5)
+    counted = cs.wait(lambda: [c for _, c in shape_counts(bench) if c >= 2], 120, 5)
     bench.check("the WA logs its shape count", bool(counted))
-    before = counted[-1][1] if counted else 0
+    before = counted[-1] if counted else 0
+
+    # Groups found in the node's first minute are the world as loaded, not paced
+    time.sleep(max(0.0, ready + LOAD_SECONDS - time.time()))
 
     # The rotor: the tail goes, farthest block first, so A never splits
     for k in reversed(range(TAIL)):
@@ -248,6 +252,8 @@ def run(bench: Bench) -> None:
         5,
     )
     bench.check("every piece reached the WA's index", bool(all_listed))
+    # The game log reaches the disk late
+    cs.wait(lambda: len(builds(bench, pieces, split_at - 5)) >= len(pieces), 120, 5)
     times = builds(bench, pieces, split_at - 5)
     worst = max((sum(1 for u in times if t <= u < t + 60) for t in times), default=0)
     bench.record("piece-builds", [round(t - split_at, 1) for t in times])
