@@ -17,6 +17,9 @@ the whitelist, loading the mod in the game does.
 - `tests/scenario.py` checks it all in game: an isolated Magnetar server with the plugin and
   a headless client that has only the mod. `IMP_ONLY=zones` runs only the safe zone checks.
   See its docstring.
+- `tests/no_render.py` checks that a headless client started with `--no-render` doesn't crash
+  in the mod (SE-1407). The game's null renderer has no billboard pools, and drawing a
+  billboard throws there; the mod must notice and draw nothing. See its docstring.
 - `tests/local.py` checks the client plugin's service for the local player: the test world
   offline, or with `IMP_MODE=lobby` hosted as a lobby game over DirectTransport with a second
   client joining. The world doesn't list the mod, so the plugin loads it, and the mod must
