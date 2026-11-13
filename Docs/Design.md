@@ -1001,6 +1001,11 @@ Magnetar Plugin SDK (`PluginSdk.Clustering`); the client side is unchanged.
   nodes send the shapes of asteroids and admin safe zones they built too, so the next node to
   build one finds it. A deleted grid leaves the cache, a released one stays. After a WA
   restart, `shape-get-chunk` reads shapes the WA no longer has in memory from the disk.
+- The WA keeps shapes in memory only for the ids of its index (SE-1412). Once a minute it
+  drops the ones that had no record at the previous sweep too, deleted grids, asteroids and
+  anything read back from disk, and pushes that got no chunk further; the disk keeps them.
+  It logs `cluster shapes: N in memory` with each sweep. Nodes remember only the last
+  version they pushed of each id.
 - Shapes cross the cluster as one blob per entry, all its levels packed as in the disk cache's
   files, in chunks of 60 KiB (SE-704): the SDK's payload limit is 64 KiB, and the finest level
   of a 512 m asteroid is about 150 KB. A push sends all chunks at once, and the WA counts the
@@ -1019,6 +1024,7 @@ one message under the SDK's 64 KiB payload limit.
 |---|---|
 | Server game thread | one scan per second; a build's snapshot copies every cube of the group, 2 ms of snapshots per tick |
 | Server background | a quarter of the cores at a time (2 to 4), half the cores while writing the asteroid pack |
+| Server, new grid groups | `NewGridBuildsPerMinute` (30) first builds per minute of groups found after the world loaded, the largest first; the pieces of a ship shot apart don't all build at once (SE-1412) |
 | Network per player | `ShapeBytesPerSecond` (32 KB/s) for shapes, about 74 bytes per moving impostor per second |
 | Client | `MaxQuadsPerFrame` quads per frame (16384) |
 | Client plugin, render thread | its `PrepareList` patch: 7 µs per frame, 25 µs while every 14th frame is over the limit by 1182 impostor quads, 0.7 ms at most (`tests/billboards.py`, about 33000 billboards, Ryzen 9800X3D) |

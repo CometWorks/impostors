@@ -35,6 +35,10 @@ public sealed class ImpostorRegistry
     // Not at once: while a world unloads its grids leave the scan before they are closed.
     private const int ForgetScans = 60;
 
+    // Grid groups found in the first minute of scans are the world as loaded, built without
+    // the pacing of new groups
+    private const int LoadScans = 60;
+
     private readonly IPluginLogger log;
     private readonly IShapeCache cache;
     private readonly Dictionary<long, ImpostorEntry> entries = new();
@@ -42,7 +46,8 @@ public sealed class ImpostorRegistry
         ImpostorEntry entry,
         byte[][] shapes,
         ShapeBuild build,
-        int version
+        int version,
+        bool paced
     )> finished = new();
     private readonly Dictionary<long, int> gone = new();
     private int running;
@@ -53,6 +58,13 @@ public sealed class ImpostorRegistry
     private int next;
     private double rebuildSeconds;
     private double refreshSeconds;
+
+    // Pacing of the first builds of new grid groups, the pieces of a ship shot apart (SE-1412):
+    // a token per build, refilled at the per minute rate up to ten seconds' worth. A build
+    // that took its shapes from a cache gives its token back, only real builds count.
+    private double newGridRate;
+    private double newGridTokens;
+    private double tokensAt = double.NaN;
 
     // Builds since the last TakeCounts: shapes built, taken from the cache or the asteroid
     // pack, and found unchanged by a refresh
@@ -81,12 +93,16 @@ public sealed class ImpostorRegistry
     {
         if (!entries.TryGetValue(id, out var entry) || entry.Source != source)
         {
-            entry = new ImpostorEntry(id, source);
+            entry = new ImpostorEntry(id, source) { Born = scan };
             entries[id] = entry;
         }
         entry.LastSeen = scan;
         return entry;
     }
+
+    // An entry of this source has this id
+    public bool Has(long id, ImpostorSource source) =>
+        entries.TryGetValue(id, out var entry) && entry.Source == source;
 
     // Drops the entries of this source the current scan has not seen
     public void EndScan(ImpostorSource source)
@@ -133,17 +149,32 @@ public sealed class ImpostorRegistry
 
     // Game thread, after the picks: applies the finished builds, lists the entries due for a
     // build and starts the first ones
-    public void Plan(double now, double rebuildSeconds, double refreshSeconds)
+    // newGridBuildsPerMinute paces the first builds of grid groups found after the world
+    // loaded, 0 for no limit
+    public void Plan(
+        double now,
+        double rebuildSeconds,
+        double refreshSeconds,
+        int newGridBuildsPerMinute = 0
+    )
     {
         this.rebuildSeconds = rebuildSeconds;
         this.refreshSeconds = refreshSeconds;
+        newGridRate = newGridBuildsPerMinute / 60.0;
+        if (!double.IsNaN(tokensAt))
+            newGridTokens = Math.Min(TokenCap, newGridTokens + (now - tokensAt) * newGridRate);
+        else
+            newGridTokens = TokenCap;
+        tokensAt = now;
         ForgetDeleted();
         Apply();
 
-        // Missing shapes first, then the stale ones that waited longest
+        // Missing shapes first, the largest of them first, then the stale ones that waited
+        // longest
         due = entries
             .Values.Where(e => Due(e, now))
             .OrderBy(e => e.Shapes != null)
+            .ThenByDescending(e => e.Shapes == null ? e.Radius : 0)
             .ThenBy(e => e.LastBuild)
             .ToList();
         next = 0;
@@ -159,6 +190,16 @@ public sealed class ImpostorRegistry
         Apply();
         Start(now);
     }
+
+    private double TokenCap => Math.Max(1, newGridRate * 10);
+
+    // A grid group found after the world loaded, without shapes yet: a new piece or ship
+    private bool Paced(ImpostorEntry e) =>
+        newGridRate > 0
+        && e.Shapes == null
+        && e.Kind == ImpostorKind.Grid
+        && !e.Source.Remote
+        && e.Born > LoadScans;
 
     private bool Due(ImpostorEntry e, double now) =>
         e.Wanted
@@ -176,6 +217,8 @@ public sealed class ImpostorRegistry
             var entry = result.entry;
             entry.Building = false;
             running--;
+            if (result.paced && (result.build.Unchanged || result.build.Cached))
+                newGridTokens = Math.Min(TokenCap, newGridTokens + 1);
             if (result.shapes == null || !entries.ContainsKey(entry.Id))
                 continue;
 
@@ -213,15 +256,24 @@ public sealed class ImpostorRegistry
             // Gone, replaced, or no longer wanted since the Plan
             var entry = due[next++];
             if (
-                entries.TryGetValue(entry.Id, out var current)
-                && current == entry
-                && Due(entry, now)
+                !entries.TryGetValue(entry.Id, out var current)
+                || current != entry
+                || !Due(entry, now)
             )
-                StartBuild(entry, now);
+                continue;
+            var paced = Paced(entry);
+            if (paced)
+            {
+                // Out of tokens: this one and the smaller ones wait for the next Plan
+                if (newGridTokens < 1)
+                    continue;
+                newGridTokens--;
+            }
+            StartBuild(entry, now, paced);
         }
     }
 
-    private void StartBuild(ImpostorEntry entry, double now)
+    private void StartBuild(ImpostorEntry entry, double now, bool paced)
     {
         entry.Stale = false;
         entry.LastBuild = now;
@@ -235,11 +287,16 @@ public sealed class ImpostorRegistry
         catch (Exception e)
         {
             log.Error(e, $"Failed to snapshot impostor {entry.Id}");
-            return;
+            work = null;
         }
 
+        // Gone: the token goes back
         if (work == null)
+        {
+            if (paced)
+                newGridTokens = Math.Min(TokenCap, newGridTokens + 1);
             return;
+        }
 
         var snapshotMs = snapshot.Elapsed.TotalMilliseconds;
         var size = entry.Source.Describe(entry);
@@ -286,7 +343,7 @@ public sealed class ImpostorRegistry
             }
             // Hashed here, not on the game thread: an asteroid's shapes take about 0.2 ms
             var version = shapes != null ? ImpostorEntry.Hash(shapes) : 0;
-            finished.Enqueue((entry, shapes, build, version));
+            finished.Enqueue((entry, shapes, build, version, paced));
         });
     }
 }

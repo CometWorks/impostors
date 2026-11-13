@@ -37,6 +37,7 @@ public class PluginConfig : IPluginConfig
     private int maxQuadsPerFrame = 16384;
     private int shapeBytesPerSecond = 32 * 1024;
     private int rebuildSeconds = 60;
+    private int newGridBuildsPerMinute = 30;
     private int refreshSeconds = 600;
     private float replicationMargin = 500f;
     private int cacheMegabytes = 1024;
@@ -133,6 +134,12 @@ public class PluginConfig : IPluginConfig
     {
         get => rebuildSeconds;
         set => SetValue(ref rebuildSeconds, value);
+    }
+
+    public int NewGridBuildsPerMinute
+    {
+        get => newGridBuildsPerMinute;
+        set => SetValue(ref newGridBuildsPerMinute, value);
     }
 
     public int RefreshSeconds

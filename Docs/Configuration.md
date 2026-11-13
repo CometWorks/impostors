@@ -20,6 +20,7 @@ The file is read only when the server starts, so changes take effect after a res
 | `MaxQuadsPerFrame` | 16384 | Most impostor quads a client draws per frame; the server picks coarser levels to fit |
 | `ShapeBytesPerSecond` | 32768 | Shape data sent to one player per second, on average |
 | `RebuildSeconds` | 60 | Shortest time between two rebuilds of an impostor |
+| `NewGridBuildsPerMinute` | 30 | First builds of new grid groups started per minute, the largest first, so a ship shot into pieces doesn't build them all at once; 0 for no limit |
 | `RefreshSeconds` | 600 | Impostors in view are rebuilt this often to catch paint changes |
 | `ReplicationMargin` | 500 | Impostors arrive this far inside the sync distance already |
 | `CacheMegabytes` | 1024 | Disk space for built shapes, so a restart builds only what changed; 0 turns the cache off |
