@@ -49,6 +49,8 @@ the whitelist, loading the mod in the game does.
   billboards until a frame is over 32768 and reports which billboards the game cuts. With
   the mod only the impostors keep within `MaxQuadsPerFrame` (and the game still cuts other
   billboards); with `IMP_PLUGIN=1` only impostor quads go. See its docstring.
+- `tests/transparent.py` checks that impostors draw behind a transparent LCD's screen and
+  thruster flames with the client plugin (SE-1541), offline. See its docstring.
 - `tests/streaming.py` checks the hand-over when the player arrives fast: it jumps from 5 km
   to next to the station, a safe zone and an asteroid, deep into the replication cube, and
   checks that the impostor stays and is drawn until the real entity draws, at the full

@@ -10,7 +10,8 @@ Safe zones show from afar too, as translucent bubbles in their color.
   sends them over mod networking.
 - **Impostors mod**: draws them on the clients. Players need no plugin, only the mod in the
   world's mod list.
-- **Client plugin** (Pulsar): draws them on servers whose world doesn't have the mod, and
+- **Client plugin** (Pulsar): draws them behind thruster flames and transparent LCDs, which
+  the mod alone draws them over. It also draws them on servers whose world doesn't have the mod, and
   builds them for yourself in offline games and when you host a lobby, where it also
   serves the players who joined. There it loads the mod itself if the world doesn't list
   it, so the impostors show the same as on a server.
