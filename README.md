@@ -11,7 +11,8 @@ Safe zones show from afar too, as translucent bubbles in their color.
 - **Impostors mod**: draws them on the clients. Players need no plugin, only the mod in the
   world's mod list.
 - **Client plugin** (Pulsar): draws them behind thruster flames and transparent LCDs, which
-  the mod alone draws them over. It also draws them on servers whose world doesn't have the mod, and
+  the mod alone draws them over, and outside the game's limit of 32768 billboards per frame,
+  so there can be more of them at finer levels. It also draws them on servers whose world doesn't have the mod, and
   builds them for yourself in offline games and when you host a lobby, where it also
   serves the players who joined. There it loads the mod itself if the world doesn't list
   it, so the impostors show the same as on a server.

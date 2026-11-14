@@ -51,6 +51,11 @@ the whitelist, loading the mod in the game does.
   billboards); with `IMP_PLUGIN=1` only impostor quads go. See its docstring.
 - `tests/transparent.py` checks that impostors draw behind a transparent LCD's screen and
   thruster flames with the client plugin (SE-1541), offline. See its docstring.
+- `tests/plugin_quads.py` checks the client plugin's own draw pass (SE-1541), offline: the
+  impostors of twelve asteroids stay within `PluginQuadsPerFrame` and go over 32768 quads
+  when that allows, the game counts none of them, and blocks of 16000 to 256000 quads the
+  test probe adds all show next to 30000 other billboards. It prints the plugin's time per
+  frame for each. See its docstring.
 - `tests/streaming.py` checks the hand-over when the player arrives fast: it jumps from 5 km
   to next to the station, a safe zone and an asteroid, deep into the replication cube, and
   checks that the impostor stays and is drawn until the real entity draws, at the full

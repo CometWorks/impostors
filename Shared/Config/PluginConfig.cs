@@ -35,6 +35,7 @@ public class PluginConfig : IPluginConfig
     private float minPixels = 3f;
     private int maxImpostorsPerPlayer = 4000;
     private int maxQuadsPerFrame = 16384;
+    private int pluginQuadsPerFrame = 64000;
     private int shapeBytesPerSecond = 32 * 1024;
     private int rebuildSeconds = 60;
     private int newGridBuildsPerMinute = 30;
@@ -122,6 +123,12 @@ public class PluginConfig : IPluginConfig
     {
         get => maxQuadsPerFrame;
         set => SetValue(ref maxQuadsPerFrame, value);
+    }
+
+    public int PluginQuadsPerFrame
+    {
+        get => pluginQuadsPerFrame;
+        set => SetValue(ref pluginQuadsPerFrame, value);
     }
 
     public int ShapeBytesPerSecond

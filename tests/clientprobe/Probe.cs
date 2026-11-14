@@ -24,7 +24,9 @@ namespace ImpostorsClientProbe;
 //   file it goes back.
 // - billboards.txt ("postpp N ldr M pulse T") draws N PostPP and M LDR billboards per frame,
 //   on for T ticks and off for T, always with T = 0. billboard-stats.txt then says every
-//   second what the game drew of the frames' billboards, see BillboardCheck.
+//   second what the game drew of the frames' billboards, see BillboardCheck. "impostor K"
+//   adds K quads with the impostors' material, a block of them 420 m ahead, for the client
+//   plugin's own draw pass.
 // - camera.txt ("x y z yaw pitch yawrate vx vy vz") flies the spectator camera, see CameraPath.
 // - look.txt ("x y z yaw pitch") holds the character there, looking that way in first person
 //   with the HUD hidden, see CharacterView.
@@ -205,15 +207,20 @@ public class BillboardStress : MySessionComponentBase
 {
     private static int postPP,
         ldr,
+        impostor,
         pulse;
     private int frame;
     private static readonly MyStringId Square = MyStringId.GetOrCompute("Square");
+    private static readonly MyStringId ImpostorSquare = MyStringId.GetOrCompute("ImpostorSquare");
+
+    // Quads per row of the impostor block, a meter apart
+    private const int Columns = 500;
 
     public static void Read()
     {
         var file = Path.Combine(MyFileSystem.UserDataPath, "billboards.txt");
         var words = File.Exists(file) ? File.ReadAllText(file).Split() : new string[0];
-        postPP = ldr = pulse = 0;
+        postPP = ldr = impostor = pulse = 0;
         for (var i = 0; i + 1 < words.Length; i += 2)
         {
             var n = int.Parse(words[i + 1]);
@@ -221,6 +228,8 @@ public class BillboardStress : MySessionComponentBase
                 postPP = n;
             else if (words[i] == "ldr")
                 ldr = n;
+            else if (words[i] == "impostor")
+                impostor = n;
             else if (words[i] == "pulse")
                 pulse = n;
         }
@@ -237,6 +246,24 @@ public class BillboardStress : MySessionComponentBase
         var center = m.Translation + m.Forward * 50;
         Add(center + m.Left * 2, postPP, MyBillboard.BlendTypeEnum.PostPP, m);
         Add(center + m.Right * 2, ldr, MyBillboard.BlendTypeEnum.LDR, m);
+
+        // Rows from the bottom of the view up, 512 of them fill it
+        var corner = m.Translation + m.Forward * 420 + m.Left * (Columns / 2) + m.Down * 256;
+        var magenta = new Vector4(1, 0, 1, 1);
+        for (var i = 0; i < impostor; i++)
+        {
+            MyTransparentGeometry.AddBillboardOriented(
+                ImpostorSquare,
+                magenta,
+                corner + m.Right * (i % Columns) + m.Up * (i / Columns),
+                m.Left,
+                m.Up,
+                0.5f,
+                0.5f,
+                Vector2.Zero,
+                MyBillboard.BlendTypeEnum.LDR
+            );
+        }
     }
 
     private static void Add(Vector3D at, int count, MyBillboard.BlendTypeEnum blend, MatrixD m)
