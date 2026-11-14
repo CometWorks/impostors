@@ -1,10 +1,14 @@
 using System;
+using System.Collections;
 using System.Diagnostics;
+using System.IO;
+using System.Reflection;
 using System.Threading;
 using HarmonyLib;
 using Impostors;
 using Sandbox.ModAPI;
 using Shared.Logging;
+using VRage.FileSystem;
 using VRage.Utils;
 using VRageRender;
 
@@ -20,6 +24,13 @@ namespace ClientPlugin;
 // It also tells the renderer how many quads the next frame has room for after every other
 // billboard of the last one, so the impostors usually fit and only a sudden burst of effects
 // needs the cut.
+//
+// And it draws the impostor quads earlier. LDR billboards are drawn after tone mapping, on
+// top of everything the transparent pass drew before: thruster flames, glass, the screens
+// of transparent LCDs, none of which write depth. So the impostor quads go to the front of
+// the LDR bucket and are drawn from there with the LDR pass's own code right before the
+// transparent pass, onto the lit scene. The LDR pass then draws only the rest of its bucket.
+// The quads still count as LDR billboards for the limit above.
 public static class BillboardPriority
 {
     private const int Limit = Protocol.BillboardLimit;
@@ -37,6 +48,33 @@ public static class BillboardPriority
     private static bool patched;
     private static bool materialAdded;
     private static int tick;
+
+    // Drawing the impostor quads before the transparent pass: the renderer's privates
+    private static bool early;
+    private static MethodInfo renderLdr;
+    private static Array bucketBatches;
+    private static IList batches;
+    private static FieldInfo bucketStart;
+    private static FieldInfo bucketCount;
+    private static FieldInfo batchOffset;
+    private static FieldInfo batchNum;
+    private static FieldInfo gbufferMain;
+    private static PropertyInfo lbuffer;
+    private static bool earlyFailed;
+
+    // For comparison shots: with this file in the plugin's storage the impostors stay in the
+    // LDR pass
+    private static readonly string OnTopFile = Path.Combine(
+        MyFileSystem.UserDataPath,
+        "Storage",
+        "Impostors.ontop"
+    );
+    private static volatile bool onTop;
+
+    // The impostor quads of the frame in the buffer, written and read on the render thread
+    private static int earlyStart;
+    private static int earlyCount;
+    private static MyBillboard[] scratch = new MyBillboard[1024];
 
     // The last frame, written on the render thread
     private static int lastTotal;
@@ -69,7 +107,41 @@ public static class BillboardPriority
         catch (Exception e)
         {
             log.Error(e, "Impostor billboards won't go first when a frame is over the limit");
+            return;
         }
+
+        try
+        {
+            var renderer = AccessTools.TypeByName("VRageRender.MyBillboardRenderer");
+            var batch = AccessTools.TypeByName("VRageRender.MyBillboardRendererBatch");
+            var bucket = AccessTools.Inner(renderer, "MyBucketBatches");
+            var gbuffer = AccessTools.TypeByName("VRage.Render11.Resources.MyGBuffer");
+            renderLdr = Required(AccessTools.DeclaredMethod(renderer, "RenderLDR"));
+            bucketBatches = (Array)
+                Required(AccessTools.Field(renderer, "m_bucketBatches")).GetValue(null);
+            batches = (IList)Required(AccessTools.Field(renderer, "m_batches")).GetValue(null);
+            bucketStart = Required(AccessTools.Field(bucket, "StartIndex"));
+            bucketCount = Required(AccessTools.Field(bucket, "Count"));
+            batchOffset = Required(AccessTools.Field(batch, "Offset"));
+            batchNum = Required(AccessTools.Field(batch, "Num"));
+            gbufferMain = Required(AccessTools.Field(gbuffer, "Main"));
+            lbuffer = Required(AccessTools.Property(gbuffer, "LBuffer"));
+            harmony.Patch(
+                Required(AccessTools.DeclaredMethod(renderer, "RenderAdditiveBottom")),
+                postfix: new HarmonyMethod(typeof(BillboardPriority), nameof(DrawEarly))
+            );
+            early = true;
+        }
+        catch (Exception e)
+        {
+            log.Error(e, "Impostors will draw over thruster flames and transparent LCDs");
+        }
+    }
+
+    private static T Required<T>(T member)
+        where T : class
+    {
+        return member ?? throw new MissingMemberException("Not in this game version");
     }
 
     public static void Update()
@@ -86,6 +158,8 @@ public static class BillboardPriority
             Math.Max(0, Limit - others - Margin)
         );
 
+        if (tick % 60 == 0)
+            onTop = File.Exists(OnTopFile);
         if (++tick % 3600 == 0)
             LogSummary();
     }
@@ -163,6 +237,8 @@ public static class BillboardPriority
         int[] ___m_bucketIndices
     )
     {
+        earlyCount = 0;
+
         // An empty frame leaves the whole budget
         if (__result == 0)
         {
@@ -212,6 +288,15 @@ public static class BillboardPriority
             for (var b = LdrBucket + 1; b < indices.Length; b++)
                 indices[b] -= drop;
             __result = Math.Min(Limit, total - drop);
+            ldrEnd -= drop;
+        }
+        var kept = impostors - Math.Max(drop, 0);
+
+        if (early && !onTop && !earlyFailed && kept > 0 && ldrStart + kept <= __result)
+        {
+            ToFront(buffer, ldrStart, ldrEnd, kept);
+            earlyStart = ldrStart;
+            earlyCount = kept;
         }
 
         Volatile.Write(ref lastTotal, total);
@@ -231,5 +316,105 @@ public static class BillboardPriority
             droppedQuads += drop;
             peakDropped = Math.Max(peakDropped, drop);
         }
+    }
+
+    // Moves the impostor quads of the LDR bucket to its front, both they and the rest keep
+    // their order. Mods draw in the order they were registered, so they usually are there.
+    private static void ToFront(MyBillboard[] buffer, int start, int end, int impostors)
+    {
+        var front = start;
+        while (front < end && buffer[front].Material == Material)
+            front++;
+        if (front - start == impostors)
+            return;
+
+        if (scratch.Length < end - front)
+            scratch = new MyBillboard[Math.Max(end - front, scratch.Length * 2)];
+        var write = front;
+        var others = 0;
+        for (var read = front; read < end; read++)
+        {
+            var billboard = buffer[read];
+            if (billboard.Material == Material)
+                buffer[write++] = billboard;
+            else
+                scratch[others++] = billboard;
+        }
+        Array.Copy(scratch, 0, buffer, write, others);
+        Array.Clear(scratch, 0, others);
+    }
+
+    // Runs on the render thread right before the transparent pass, after the billboards
+    // were put into batches: runs of one texture within a bucket. Draws the batches of the
+    // impostor quads with the LDR pass's code onto the lit scene and leaves the LDR pass the
+    // batches after them. A batch that goes on past the impostors is cut in two.
+    private static void DrawEarly(object rc, object depthRead)
+    {
+        if (earlyCount == 0)
+            return;
+        var end = earlyStart + earlyCount;
+        earlyCount = 0;
+
+        try
+        {
+            var bucket = bucketBatches.GetValue(LdrBucket);
+            var first = (int)bucketStart.GetValue(bucket);
+            var count = (int)bucketCount.GetValue(bucket);
+
+            var mine = 0;
+            object cut = null;
+            var rest = 0;
+            for (var i = first; i < first + count; i++)
+            {
+                var batch = batches[i];
+                var offset = (int)batchOffset.GetValue(batch);
+                if (offset >= end)
+                    break;
+                mine++;
+                var num = (int)batchNum.GetValue(batch);
+                if (offset + num > end)
+                {
+                    cut = batch;
+                    rest = offset + num - end;
+                    batchNum.SetValue(batch, end - offset);
+                    batches[i] = batch;
+                }
+            }
+            if (mine == 0)
+                return;
+
+            SetBucket(bucket, first, mine);
+            try
+            {
+                var target = lbuffer.GetValue(gbufferMain.GetValue(null));
+                renderLdr.Invoke(null, new[] { rc, depthRead, target });
+            }
+            finally
+            {
+                if (cut == null)
+                {
+                    SetBucket(bucket, first + mine, count - mine);
+                }
+                else
+                {
+                    batchOffset.SetValue(cut, end);
+                    batchNum.SetValue(cut, rest);
+                    batches[first + mine - 1] = cut;
+                    SetBucket(bucket, first + mine - 1, count - mine + 1);
+                }
+            }
+        }
+        catch (Exception e)
+        {
+            earlyFailed = true;
+            log.Error(e, "Impostors will draw over thruster flames and transparent LCDs");
+        }
+    }
+
+    private static void SetBucket(object bucket, int start, int count)
+    {
+        bucketStart.SetValue(bucket, start);
+        bucketCount.SetValue(bucket, count);
+        bucketBatches.SetValue(bucket, LdrBucket);
     }
 }

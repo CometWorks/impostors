@@ -42,7 +42,9 @@ Billboard facts this design depends on (decompiled game 1.210):
 - Billboards are depth tested against the scene but never write depth. The `Standard` blend
   is weighted blended OIT, so overlapping opaque quads mix and look see-through. The `LDR`
   blend draws in submission order with premultiplied alpha after tone mapping. Impostors use
-  `LDR`, cull back faces and draw their quads back to front.
+  `LDR`, cull back faces and draw their quads back to front. That puts them over thruster
+  flames and transparent LCDs, which the client plugin fixes (see
+  [Flames and transparent LCDs in front](#flames-and-transparent-lcds-in-front-se-1541)).
 - Billboards are unlit, so the renderer shades each face from the sun direction
   (`MyVisualScriptLogicProvider.GetSunDirection`, which points towards the sun).
 - `Draw` of a mod's session component runs once per update (60 Hz) and its billboards live
@@ -834,6 +836,36 @@ What each client gets:
 - Once a minute the client plugin logs the frames' billboard totals while impostors are drawn:
   the peak count, the peak of other billboards, impostor quads dropped and the time its patch
   took (`Billboards in the last minute: ...`).
+
+## Flames and transparent LCDs in front (SE-1541)
+
+The game draws a frame's transparent things in this order (`MyTransparentRendering.Render`
+and `MyRender11.DrawGameScene`, decompiled 1.210):
+
+1. `AdditiveBottom` billboards, added onto the lit scene.
+2. The order independent pass: `Standard` billboards (thruster flames among them), GPU
+   particles, glass and other transparent models, such as the screen of a transparent LCD.
+3. `AdditiveTop` billboards.
+4. Bloom, tone mapping.
+5. `LDR` billboards, then FXAA, then `PostPP` billboards.
+
+Nothing in steps 1 to 3 writes depth. So the impostors, `LDR` billboards, are drawn over every
+flame and every transparent screen between the camera and them, whatever order they are added
+in: the order of billboards only counts within one blend type. No other blend type fits. The
+`Standard` one averages overlapping quads by weight, and `AdditiveBottom` is the only one
+drawn before step 2, but it adds to the background instead of covering it.
+
+A mod can't change that. The client plugin does: it patches `PrepareList` to move the impostor
+quads to the front of the `LDR` bucket, and `RenderAdditiveBottom` to draw them right after
+step 1 with the game's own `RenderLDR`, onto the lit scene instead of the tone mapped one.
+Step 5 then draws only the rest of the bucket. Flames and screens are blended over the
+impostors like over anything else behind them. The quads stay `LDR` billboards for the limit
+above, so the budget and the cut work as before. With the mod only, impostors still cover
+flames and transparent LCDs.
+
+`tests/transparent.py` shoots a transparent LCD and two thruster flames in front of asteroid
+impostors both ways. A file named `Impostors.ontop` in the client's `Storage` folder makes the
+plugin leave the impostors in step 5, for comparison.
 
 ## Grids (SE-382)
 
