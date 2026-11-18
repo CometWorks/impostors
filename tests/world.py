@@ -76,11 +76,12 @@ class Asteroid:
     # Its min corner, the voxel map's PositionLeftBottomCorner
     position: tuple[float, float, float]
     file: str
+    # Voxels (meters) on a side of its storage: 512 for the Asteroid512-* maps
+    size: int = 512
 
     @property
     def center(self):
-        # Asteroid512-* storages are 512 voxels (meters) on a side
-        return tuple(c + 256 for c in self.position)
+        return tuple(c + self.size / 2 for c in self.position)
 
 
 # Safe zone checks (SE-660): grids 26.9 m in radius, 3 to 8 pixels across from HOME.

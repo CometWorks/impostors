@@ -29,10 +29,18 @@ namespace Impostors
         // Most quads drawn per frame, the server's MaxQuadsPerFrame once it welcomed us
         private int maxQuads = 16384;
 
-        // Fitted to screenshots of real grids and asteroids from 8 directions:
-        // the game's tone mapping makes sunlit sides brighter than plain Lambert shading
-        // would. Faces facing the sun go above 1 and saturate.
-        private const float Diffuse = 1.6f;
+        // The light of a quad: the ambient light plus Diffuse times the sun's, which falls
+        // off from the sun's side to the terminator and Wrap past it: (cos + Wrap) /
+        // (1 + Wrap), where cos is between the quad's normal and the sun. The game's eye
+        // adaptation and tone mapping make sunlit sides brighter than plain Lambert shading
+        // would; faces facing the sun go above 1 and saturate. Fitted to real asteroids and
+        // grids with the sun at 0 to 180 degrees from the line of sight under the game's and
+        // Seed 2's environments (tests/asteroid_calibration.py fit, SE-1685). Grids carry
+        // more light than rock: their armor's metal and gloss reflect the sun and the sky.
+        private const float VoxelDiffuse = 1.4f;
+        private const float GridDiffuse = 2.6f;
+        private const float VoxelWrap = 0.1f;
+        private const float GridWrap = 0.35f;
 
         // Sides away from the sun and everything in a planet's shadow get only the ambient
         // light. The game lights voxels there with its environment map, the skybox scaled by
@@ -42,6 +50,9 @@ namespace Impostors
         // a real asteroid in shadow and on its dark side: 0.06 under the game's own
         // environment (EnvSkyboxBrightness 2, nearly black), 0.375 under the one of
         // Octahedron - Seed 2 (5). The skybox texture's own brightness and tint stay out.
+        // Scaled per kind by the fit above: grids reflect about twice as much of the sky.
+        private const float VoxelAmbient = 0.85f;
+        private const float GridAmbient = 2.1f;
         private const float AmbientPerSkybox = 0.015f;
         private float ambient = 0.06f;
 
@@ -211,6 +222,13 @@ namespace Impostors
         // Debug: draws the impostors in sunlight, as if no planet shaded them; the time
         // spent in Sunlight and its calls since the last stats
         private bool unshaded;
+
+        // Debug: lighting terms instead of the fitted ones, for calibration rigs (SE-1685):
+        // the sun's term and how far it wraps past the terminator (NaN keeps the fitted
+        // ones), and a scale on the fitted ambient light.
+        private float diffuseOverride = float.NaN;
+        private float wrapOverride = float.NaN;
+        private float ambientScale = 1f;
         private long shadeTicks;
         private int shadeCount;
 
@@ -881,6 +899,22 @@ namespace Impostors
             unshaded = mode.EndsWith(" unshaded");
             if (unshaded)
                 mode = mode.Substring(0, mode.Length - " unshaded".Length);
+            // "... light D W A" sets the lighting terms
+            diffuseOverride = float.NaN;
+            wrapOverride = float.NaN;
+            ambientScale = 1f;
+            var light = mode.IndexOf("light ");
+            if (light >= 0)
+            {
+                var terms = mode.Substring(light + "light ".Length).Split(' ');
+                if (terms.Length == 3)
+                {
+                    diffuseOverride = float.Parse(terms[0]);
+                    wrapOverride = float.Parse(terms[1]);
+                    ambientScale = float.Parse(terms[2]);
+                }
+                mode = mode.Substring(0, light).Trim();
+            }
             var words = mode.Split(' ');
             shift = Vector3D.Zero;
             if (words.Length == 4 && words[0] == "shift")
@@ -2017,7 +2051,21 @@ namespace Impostors
                 shadeCount++;
             }
             impostor.Sunlight = sunlight;
-            var diffuse = Diffuse * sunlight;
+            var voxel = state.Kind == ImpostorKind.Voxel;
+            var diffuse =
+                (
+                    float.IsNaN(diffuseOverride)
+                        ? voxel
+                            ? VoxelDiffuse
+                            : GridDiffuse
+                        : diffuseOverride
+                ) * sunlight;
+            var wrap = float.IsNaN(wrapOverride)
+                ? voxel
+                    ? VoxelWrap
+                    : GridWrap
+                : wrapOverride;
+            var ambientNow = ambient * (voxel ? VoxelAmbient : GridAmbient) * ambientScale;
             var tinted = state.Tint.A != 0;
             var tint = Vector3.Lerp(state.Tint.ToVector3(), Vector3.One, ZoneTintPale);
 
@@ -2046,7 +2094,12 @@ namespace Impostors
 
                 var center = position + Vector3.TransformNormal(shape.Centers[i], rotation);
                 var light =
-                    ambient + diffuse * Math.Max(0, Vector3.Dot(shape.Shading[i], sunLocal));
+                    ambientNow
+                    + diffuse
+                        * Math.Max(
+                            0,
+                            (Vector3.Dot(shape.Shading[i], sunLocal) + wrap) / (1 + wrap)
+                        );
                 var lit = shape.Colors[i] * light * brightness;
                 if (tinted)
                     lit = Vector3.Lerp(lit, tint, ZoneTint);
