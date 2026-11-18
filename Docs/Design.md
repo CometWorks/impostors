@@ -766,8 +766,13 @@ Each frame it:
   draws: those on the faces towards the camera, all of a safe zone's,
 - draws them far to near, each with its back faces culled and its quads sorted back to front
   for the current view direction (re-sorted when the view turns by about 3°),
-- shades each quad with its normal: `ambient + 1.6 × max(0, n·sun)`, fitted to
-  screenshots of real grids and asteroids from 8 directions. The ambient light stands in for
+- shades each quad with its normal: `ambient × A + D × max(0, (n·sun + W) / (1 + W))`, so
+  only the sun's direction against the surface counts, not the view. Asteroids take D 1.4,
+  W 0.1, A 0.85, grids D 2.6, W 0.35, A 2.1: the armor's metal and gloss carry more of the sun
+  and the sky than rock. W wraps the light a little past the terminator, where the real
+  surfaces' bumps still catch the sun. Fitted to real asteroids (stone, ice, iron) and grids
+  (armor, mixed blocks, painted) with the sun at 0 to 180° from the line of sight, under the
+  game's environment and Seed 2's (`tests/asteroid_calibration.py`, SE-1685). The ambient light stands in for
   the environment map the game lights voxels with on their dark side and in a planet's
   shadow: `0.015 × AmbientDiffuseFactor × EnvSkyboxBrightness²`, read from the world's
   environment definition (SE-745). That is 0.06 under the game's own environment, where dark

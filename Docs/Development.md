@@ -173,6 +173,14 @@ the whitelist, loading the mod in the game does.
   rig's `IMP_EXTRA_MODS` stages any mod folder under its Workshop id). See its docstring.
   `tests/vx2_material.py` makes an asteroid of one voxel material for it (`IMP_ASTEROID`), to
   fit an ore's color (SE-1102).
+- `tests/asteroid_calibration.py` calibrates the impostor lighting against real asteroids
+  and grids (SE-1685): stone, ice and iron asteroids and armor, mixed-block and painted
+  grids, each real and as its impostor beside it, with the sun at 0, 45, 90, 135 and 180°
+  from the line of sight, each copy from a camera of its own (copies around one camera shade
+  each other). It compares luminance and color in discs at the center and towards and away
+  from the sun. `IMP_SWEEP=1` adds impostor shots with the renderer's debug lighting terms
+  (`light D W A` in the mode file), and `fit <json...>` fits D, W and A to them; `table`
+  prints the before/after table. See its docstring.
 - `tests/zone_mesh.py` checks the safe zone meshes offline, without a game running: the
   sphere for each size on screen, up to a camera inside the zone, infinity and NaN.
 
