@@ -119,6 +119,23 @@ GRIDS = [
 ]
 
 
+# IMP_RING=1 (SE-1685): 512 m stone asteroids like the belt around Octahedron's planet, one
+# inside the planet's bounding box on its day side and one outside it, from 3 and 40 km
+RING = bool(os.environ.get("IMP_RING"))
+ASTEROID_RADIUS = 256.0 * math.sqrt(3)
+ASTEROIDS = []
+if RING:
+    CASES = [("ring-near", (110000.0, 0.0, 0.0)), ("ring-out", (110000.0, 0.0, 140000.0))]
+    DISTANCES = [3000.0, 40000.0]
+    ASTEROIDS = [
+        world.Asteroid(
+            name, 120000000000000200 + i, add(add(PLANET, offset), (-256.0,) * 3),
+            "Asteroid512-008.vx2",
+        )
+        for i, (name, offset) in enumerate(CASES)
+    ]
+
+
 def planet_xml() -> tuple[str, Path]:
     """The EarthLike entry of the Home System world, moved to PLANET"""
     text = (PLANET_SOURCE / "SANDBOX_0_0_0_.sbs").read_text(encoding="utf-8-sig")
@@ -160,7 +177,7 @@ def expected_sunlight(point, center, ground, top) -> float:
 
 
 def prepare_world() -> None:
-    world.prepare(SERVER.world, CLIENT.steam_id, CLIENT.name, grids=GRIDS, asteroids=())
+    world.prepare(SERVER.world, CLIENT.steam_id, CLIENT.name, grids=() if RING else GRIDS, asteroids=ASTEROIDS)
     entry, vx2 = planet_xml()
     sector = SERVER.world / "SANDBOX_0_0_0_.sbs"
     sector.write_text(
@@ -301,7 +318,7 @@ def main() -> None:
             api.key("V")
         planets = api.get_planets()
 
-        for grid, (name, offset) in zip(GRIDS, CASES):
+        for grid, (name, offset) in zip(ASTEROIDS if RING else GRIDS, CASES):
             for index, distance in enumerate(DISTANCES):
                 try:
                     real_row = look(api, grid, distance, far=index == 0)
@@ -371,11 +388,15 @@ def main() -> None:
 
 def grid_center(grid: world.Grid):
     """The middle of its box: blocks are 2.5 m, the first one centered on its position"""
+    if isinstance(grid, world.Asteroid):
+        return grid.center
     return add(grid.position, [(n - 1) * 1.25 for n in GRID_SIZE])
 
 
 def grid_radius() -> float:
     """Half the diagonal of the grids' boxes, meters"""
+    if RING:
+        return ASTEROID_RADIUS
     return 1.25 * math.sqrt(sum(v * v for v in GRID_SIZE))
 
 
