@@ -18,6 +18,7 @@ The file is read only when the server starts, so changes take effect after a res
 | `MinPixels` | 3 | Impostors less than this many pixels across on a 1080p screen are not sent |
 | `MaxImpostorsPerPlayer` | 4000 | The largest on screen win |
 | `MaxQuadsPerFrame` | 16384 | Most impostor quads a client draws per frame; the server picks coarser levels to fit |
+| `PluginQuadsPerFrame` | 64000 | Client plugin only: most impostor quads it draws per frame, 16000 to 256000 in steps of 16000, see [Client plugin quads](#client-plugin-quads) |
 | `ShapeBytesPerSecond` | 32768 | Shape data sent to one player per second, on average |
 | `RebuildSeconds` | 60 | Shortest time between two rebuilds of an impostor |
 | `NewGridBuildsPerMinute` | 30 | First builds of new grid groups started per minute, the largest first, so a ship shot into pieces doesn't build them all at once; 0 for no limit |
@@ -58,6 +59,8 @@ Notes:
     billboard. A client with only the mod can't: there the other billboards are safe only up
     to 32768 minus `MaxQuadsPerFrame`. See
     [Billboard limit](Design.md#billboard-limit-se-664).
+- With the client plugin `PluginQuadsPerFrame` takes the place of `MaxQuadsPerFrame` on that
+  client, see below.
 - The cache is the `Storage/Impostors/Cache` folder in the server's data folder, see
   [Design](Design.md#server). On a cluster only the World Authority's counts, the nodes use
   it. The WA also saves its index of the cluster's grids there. Older versions used
@@ -92,3 +95,35 @@ Notes:
   never wait either, they get the level for their distance at once (see
   [Design](Design.md#server)). Levels the client got earlier in the session cost no
   shape credit (see [Moving views](Design.md#moving-views-se-671)).
+
+## Client plugin quads
+
+The client plugin draws the impostor quads itself, outside the 32768 billboards of the game
+(see [Design](Design.md#outside-the-billboard-limit-se-1541)). On a client with the plugin
+its `PluginQuadsPerFrame`, in the client's `Impostors.cfg`, is the most quads drawn per frame
+instead of the server's `MaxQuadsPerFrame`. Other values are brought into the range of 16000
+to 256000 and rounded down to a multiple of 16000.
+
+What gets finer with a higher value:
+
+- The asteroids of the world's asteroid pack, whose levels the client picks itself.
+- Everything in offline games and for the host of a lobby.
+- On a server, nothing is dropped or made coarser on the client any more while the server's
+  impostors and the client's own asteroids together are within the value. The levels the
+  server sends are still fitted to the server's `MaxQuadsPerFrame`.
+
+The cost grows with the quads really drawn, not with the setting. Measured with
+`tests/plugin_quads.py` on a Ryzen 9 5950X, Linux, headless, twelve asteroids filling a
+zoomed view:
+
+| `PluginQuadsPerFrame` | Quads drawn | Renderer, game thread, per tick | Plugin's pass, render thread, per frame |
+|---|---|---|---|
+| 16000 | 5348 | 0.7 ms | 0.7 ms |
+| 32000 | 22688 | 3.1 ms | 2.4 ms |
+| 64000 | 58860 | 8.2 ms | 6.2 ms |
+
+The pass alone, with blocks of test quads: 2.0 ms per frame for 16000 quads, 7.4 ms for
+64000, 13.7 ms for 128000 and 26.0 ms for 256000, about 0.1 ms per 1000 quads. The renderer
+takes about 0.14 ms per 1000 quads on the game thread, where a tick has 16.7 ms, so a view
+that really fills 128000 quads or more slows the simulation down. Lower the value if far
+views cost too many frames.

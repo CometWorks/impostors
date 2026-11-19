@@ -66,6 +66,7 @@ public class Plugin : IPlugin, ICommonPlugin
             return;
         }
         BillboardPriority.Patch(harmony, Log);
+        ImpostorPass.Patch(harmony, Log);
 
         // Offline and on a lobby host the service serves the local player too, through the mod
         // or the plugin's copy of the renderer
@@ -135,6 +136,8 @@ public class Plugin : IPlugin, ICommonPlugin
     {
         PatchHelpers.PatchUpdates();
         BillboardPriority.Update();
+        ImpostorPass.Update(Config);
+        ImpostorService.LocalQuads = ImpostorPass.Active ? ImpostorPass.Quads(Config) : 0;
         VoxelReadiness.Update();
 
         // Serves the local player in an offline game, and on a lobby host the players who
