@@ -274,6 +274,11 @@ def brightness(shot: Path, row: dict) -> float:
 
 def main() -> None:
     world.SETTINGS.update(SyncDistance="20000", ViewDistance="50000")
+    if os.environ.get("IMP_SUN_ROTATION"):
+        world.SETTINGS.update(
+            EnableSunRotation="true",
+            SunRotationIntervalMinutes=os.environ["IMP_SUN_ROTATION"],
+        )
     prepare_world()
     SERVER.prepare([CLIENT.steam_id])
     SERVER.write_plugin_config(
