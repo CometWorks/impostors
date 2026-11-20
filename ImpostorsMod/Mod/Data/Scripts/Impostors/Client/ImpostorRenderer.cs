@@ -56,6 +56,11 @@ namespace Impostors
         private const float AmbientPerSkybox = 0.015f;
         private float ambient = 0.06f;
 
+        // The tint and direction of that light: the asteroid pack's ambient cube (see
+        // AsteroidPack.AmbientCube), six colors relative to the gray level above, blended
+        // per quad by its normal. Null without one: gray from every side.
+        private Vector3[] ambientCube;
+
         // Planets shade the impostors behind them, faked from a sphere per planet: the
         // sunlight fades out while the ray from the impostor to the sun passes from Top down
         // to sea level (AverageRadius), and is gone below. Top is the highest cloud layer of
@@ -229,6 +234,11 @@ namespace Impostors
         private float diffuseOverride = float.NaN;
         private float wrapOverride = float.NaN;
         private float ambientScale = 1f;
+
+        // Debug: the ambient cube of the storage file "ambient-cube" (the AsteroidAmbientCube
+        // setting's format) instead of the pack's, "none" for the gray light
+        private Vector3[] ambientCubeOverride;
+        private bool ambientCubeOverridden;
         private long shadeTicks;
         private int shadeCount;
 
@@ -418,6 +428,7 @@ namespace Impostors
             }
             if (pack == null)
                 return;
+            ambientCube = pack.AmbientCube;
             MyLog.Default.WriteLineAndConsole(
                 "Impostors: asteroid pack of mod "
                     + pack.ModName
@@ -427,7 +438,9 @@ namespace Impostors
                     + pack.Count
                     + " asteroids, "
                     + pack.Bytes / 1024
-                    + " KB, index read in "
+                    + " KB, "
+                    + (ambientCube != null ? "ambient cube" : "gray ambient")
+                    + ", index read in "
                     + ((timer.ElapsedTicks - start) * 1000 / MyGameTimer.Frequency)
                     + " ms"
             );
@@ -915,6 +928,17 @@ namespace Impostors
                 }
                 mode = mode.Substring(0, light).Trim();
             }
+            ambientCubeOverridden = StorageExists("ambient-cube");
+            ambientCubeOverride = null;
+            if (ambientCubeOverridden)
+            {
+                using (var file = ReadStorage("ambient-cube"))
+                {
+                    var text = file.ReadToEnd().Trim();
+                    if (text != "none")
+                        ambientCubeOverride = AsteroidPack.ParseAmbientCube(text);
+                }
+            }
             var words = mode.Split(' ');
             shift = Vector3D.Zero;
             if (words.Length == 4 && words[0] == "shift")
@@ -1059,6 +1083,8 @@ namespace Impostors
                     + Planets()
                     + " ambient="
                     + ambient.ToString("0.000")
+                    + " cube="
+                    + ((ambientCubeOverridden ? ambientCubeOverride : ambientCube) != null ? 1 : 0)
                     + " shadeus="
                     + (shadeTicks * 1000000 / MyGameTimer.Frequency)
                     + " shades="
@@ -1943,6 +1969,21 @@ namespace Impostors
             return false;
         }
 
+        // The ambient cube's light for a world space normal: its three faces the normal points
+        // to, weighted by the squares of its components
+        private static Vector3 AmbientOf(Vector3[] cube, Vector3 normal)
+        {
+            var square = normal * normal;
+            var sum = square.X + square.Y + square.Z;
+            if (sum <= 0)
+                return Vector3.One;
+            return (
+                    square.X * cube[normal.X >= 0 ? 0 : 1]
+                    + square.Y * cube[normal.Y >= 0 ? 2 : 3]
+                    + square.Z * cube[normal.Z >= 0 ? 4 : 5]
+                ) / sum;
+        }
+
         // See AmbientPerSkybox
         private static float Ambient()
         {
@@ -2066,6 +2107,7 @@ namespace Impostors
                     : GridWrap
                 : wrapOverride;
             var ambientNow = ambient * (voxel ? VoxelAmbient : GridAmbient) * ambientScale;
+            var cube = ambientCubeOverridden ? ambientCubeOverride : ambientCube;
             var tinted = state.Tint.A != 0;
             var tint = Vector3.Lerp(state.Tint.ToVector3(), Vector3.One, ZoneTintPale);
 
@@ -2093,13 +2135,14 @@ namespace Impostors
                     return;
 
                 var center = position + Vector3.TransformNormal(shape.Centers[i], rotation);
+                var normal = shape.Shading[i];
+                var sunTerm =
+                    diffuse * Math.Max(0, (Vector3.Dot(normal, sunLocal) + wrap) / (1 + wrap));
                 var light =
-                    ambientNow
-                    + diffuse
-                        * Math.Max(
-                            0,
-                            (Vector3.Dot(shape.Shading[i], sunLocal) + wrap) / (1 + wrap)
-                        );
+                    cube == null
+                        ? new Vector3(ambientNow + sunTerm)
+                        : ambientNow * AmbientOf(cube, Vector3.TransformNormal(normal, rotation))
+                            + new Vector3(sunTerm);
                 var lit = shape.Colors[i] * light * brightness;
                 if (tinted)
                     lit = Vector3.Lerp(lit, tint, ZoneTint);

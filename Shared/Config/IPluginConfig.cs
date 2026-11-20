@@ -104,4 +104,8 @@ public interface IPluginConfig : INotifyPropertyChanged
     // Finest level written into the asteroid pack; with less than 64 the pack is smaller but
     // serves only clients, the server builds those asteroids
     int AsteroidPackMaxLevel { get; set; }
+
+    // The ambient light of the world's skybox written into the asteroid pack: six colors,
+    // "r,g,b" for +X, -X, +Y, -Y, +Z, -Z, from tools/ambient_cube.py; empty for a gray one
+    string AsteroidAmbientCube { get; set; }
 }

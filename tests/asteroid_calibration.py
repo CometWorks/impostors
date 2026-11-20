@@ -29,10 +29,15 @@ its environment mod staged from the Workshop folder:
     IMP_EXTRA_MODS=3415912276:<workshop>/3415912276 IMP_TAG=-seed2 ...
 
 The sheet lands in ~/.se-test/<task>-shots/asteroid-calibration<tag>.png, the numbers next
-to it in asteroid-calibration<tag>.json. IMP_SETS=stone512,ice256 runs only those sets,
+to it in asteroid-calibration<tag>.json. IMP_CUBE="<six colors>" lights the impostors with
+that ambient cube (the AsteroidAmbientCube setting, from tools/ambient_cube.py) instead of the
+gray ambient light, as a pack with it would (SE-1743). IMP_SETS=stone512,ice256 runs only those sets,
 IMP_PHASES=0,90 only those angles, IMP_KEEP=1 leaves the game running. With the argument
 "analyze" it only redoes the checks and the sheet from the last run, "table" prints the
-Markdown table of one or more result files (before and after, for a PR).
+Markdown table of one or more result files (before and after, for a PR), with the RGB of each
+region. Besides the luminance it prints the tint error: how far the impostor's color is from the
+real one's, the mean over the regions of the channels' difference once both are scaled to the
+same luminance, in parts of that luminance.
 """
 
 from __future__ import annotations
@@ -55,6 +60,7 @@ import world  # noqa: E402
 from planet_shadow import CLIENT, SERVER, add, cross, dot, normalize  # noqa: E402
 
 TAG = os.environ.get("IMP_TAG", "")
+CUBE = os.environ.get("IMP_CUBE", "")
 SHOTS = ps.SHOTS
 RAW = SHOTS / f"asteroid-calibration{TAG}-raw.json"
 
@@ -316,6 +322,8 @@ def main() -> None:
         SERVER.start()
         CLIENT.launch(SERVER.port)
         api = CLIENT.wait_api()
+        if CUBE:
+            (CLIENT.mod_storage / "ambient-cube").write_text(CUBE)
         rig.wait_world(api)
         rig.ensure_character(api)
         rig.focus_gameplay(api)
@@ -439,6 +447,32 @@ def measure(result: dict) -> None:
                 )
 
 
+def tint_error(light: dict) -> float:
+    """How far the impostor's color is from the real one's, at the same luminance"""
+    real, impostor = light["real"], light["impostor"]
+    if real["luma"] < NEAR_BLACK or impostor["luma"] < NEAR_BLACK:
+        return None
+    return (
+        sum(
+            abs(i / impostor["luma"] - r / real["luma"])
+            for i, r in zip(impostor["rgb"], real["rgb"])
+        )
+        / 3
+    )
+
+
+def mean_tint_error(results, regions=None) -> float:
+    errors = [
+        e
+        for r in results
+        if (r["set"], r["phase"]) not in KNOWN
+        for name, light in r["regions"].items()
+        if regions is None or name in regions
+        if (e := tint_error(light)) is not None
+    ]
+    return sum(errors) / len(errors) if errors else float("nan")
+
+
 def ok(light: dict) -> bool:
     return (
         abs(light["ratio"] - 1) <= MARGIN
@@ -484,6 +518,10 @@ def analyze() -> None:
     )
     passed = sum(good for _, good, _ in checks)
     print(f"{passed}/{len(checks)} regions within the margin")
+    print(
+        f"tint error {mean_tint_error(results):.3f}, "
+        f"shade only {mean_tint_error(results, ['shade']):.3f}"
+    )
     print("PASS" if checks and passed == len(checks) else "FAIL")
 
 
@@ -492,6 +530,12 @@ def table(files: list[str]) -> None:
     impostor with its ratio, the files in the order given (before, after)"""
     runs = [json.loads(Path(f).read_text()) for f in files]
     names = [Path(f).stem for f in files]
+    for n, run in zip(names, runs):
+        print(
+            f"- {n}: tint error {mean_tint_error(run):.3f}, "
+            f"shade only {mean_tint_error(run, ['shade']):.3f}"
+        )
+    print()
     print(
         "| Asteroid | Sun angle | Region | Real | "
         + " | ".join(f"Impostor {n}" for n in names)
@@ -520,14 +564,20 @@ def table(files: list[str]) -> None:
                 g = m["regions"][region]
                 mark = "" if ok(g) else " ✗"
                 cells.append(
-                    f"{g['real']['luma']:.0f} → {g['impostor']['luma']:.0f} "
-                    f"({g['ratio']:.2f}){mark}"
+                    f"{g['impostor']['luma']:.0f} ({g['ratio']:.2f}){mark} "
+                    + rgb(g["impostor"]["rgb"])
                 )
+            real = r["regions"][region]["real"]
             print(
                 f"| {r['set']} | {r['phase']:.0f}° | {region} | "
+                + f"{real['luma']:.0f} {rgb(real['rgb'])} | "
                 + " | ".join(cells)
                 + " |"
             )
+
+
+def rgb(color) -> str:
+    return "(" + ", ".join(f"{c:.0f}" for c in color) + ")"
 
 
 def fit(files: list[str]) -> None:

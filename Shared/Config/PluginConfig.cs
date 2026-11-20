@@ -51,6 +51,7 @@ public class PluginConfig : IPluginConfig
     private ulong asteroidPackMod;
     private bool writeAsteroidPack;
     private int asteroidPackMaxLevel = 64;
+    private string asteroidAmbientCube = "";
 
     public bool Enabled
     {
@@ -218,5 +219,11 @@ public class PluginConfig : IPluginConfig
     {
         get => asteroidPackMaxLevel;
         set => SetValue(ref asteroidPackMaxLevel, value);
+    }
+
+    public string AsteroidAmbientCube
+    {
+        get => asteroidAmbientCube;
+        set => SetValue(ref asteroidAmbientCube, value);
     }
 }
