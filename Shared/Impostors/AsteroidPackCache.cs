@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using Impostors;
 using Shared.Logging;
+using VRageMath;
 
 namespace Shared.Impostors;
 
@@ -70,10 +71,18 @@ public sealed class AsteroidPackCache : IPackedShapeCache
         }
     }
 
+    // The AsteroidAmbientCube setting, numbers in the invariant culture
+    public static Vector3[] ParseAmbientCube(string text) =>
+        AsteroidPack.ParseAmbientCube(
+            text,
+            t => float.Parse(t, System.Globalization.CultureInfo.InvariantCulture)
+        );
+
     // Writes the pack of these asteroids, built with these asteroid settings
     // (VoxelSource.Settings): (id, content hash, shapes in the places of ImpostorEntry.Lods,
     // the state with the frame clients show them at, the voxel materials, see
-    // VoxelSource.Materials). Levels finer than maxLod are left out,
+    // VoxelSource.Materials), and the ambient cube (null for none, see
+    // AsteroidPack.AmbientCube). Levels finer than maxLod are left out,
     // those entries then serve
     // only clients. Returns the file's size.
     public static long Write(
@@ -87,7 +96,8 @@ public sealed class AsteroidPackCache : IPackedShapeCache
             ImpostorState frame,
             (string[] names, int[] counts) materials
         )> asteroids,
-        byte maxLod
+        byte maxLod,
+        Vector3[] ambientCube
     )
     {
         var list = asteroids.OrderBy(a => a.id).ToList();
@@ -98,6 +108,13 @@ public sealed class AsteroidPackCache : IPackedShapeCache
             writer.Write(AsteroidPack.Format);
             writer.Write(world ?? "");
             writer.Write(settings);
+            writer.Write((byte)(ambientCube?.Length ?? 0));
+            foreach (var color in ambientCube ?? new Vector3[0])
+            {
+                writer.Write(color.X);
+                writer.Write(color.Y);
+                writer.Write(color.Z);
+            }
             writer.Write(list.Count);
             var kept = new List<byte[][]>();
             foreach (var (id, input, shapes, frame, materials) in list)

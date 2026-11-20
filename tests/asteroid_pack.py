@@ -10,6 +10,7 @@ tests/ring.py.
     ... python tests/asteroid_pack.py offline    # offline with the client plugin, without
                                                  # the pack, with it, with AsteroidPackMod set
     IMP_PACK_LEVEL=32 ...                        # write: finest level in the pack (64)
+    IMP_CUBE="<six colors>" ...                  # write: the pack's ambient cube
     IMP_HEIGHT=10000 IMP_SETTLE=240 ...          # measure: meters above the ring, seconds
     IMP_RUNS=pack ...                            # measure: only the run with the pack
     ... python tests/asteroid_pack.py compare A.bin B.bin   # two packs of the world
@@ -56,6 +57,8 @@ PACK = rig.TEST_ROOT / f"{rig.TASK}-pack"
 # The pack file in it, as the service writes it (AsteroidPack.FileName)
 PACK_FILE = "ImpostorsAsteroidPack.dat"
 PACK_LEVEL = int(os.environ.get("IMP_PACK_LEVEL", "64"))
+# write: the AsteroidAmbientCube setting, from tools/ambient_cube.py
+CUBE = os.environ.get("IMP_CUBE", "")
 HEIGHT = float(os.environ.get("IMP_HEIGHT", "10000"))
 SETTLE = float(os.environ.get("IMP_SETTLE", "240"))
 
@@ -121,6 +124,7 @@ def write() -> int:
             CacheMegabytes=0,
             WriteAsteroidPack=True,
             AsteroidPackMaxLevel=PACK_LEVEL,
+            AsteroidAmbientCube=CUBE,
         )
     )
     SERVER.start(timeout=3600)
@@ -254,6 +258,8 @@ def pack_index(path: Path) -> tuple[int, dict[int, tuple[int, int, list]]]:
         _magic, fmt = struct.unpack("<iB", data.read(5))
         data.read(data.read(1)[0])  # the world name, shorter than 128 bytes
         settings = struct.unpack("<q", data.read(8))[0] if fmt >= 2 else 0
+        if fmt >= 5:
+            data.read(data.read(1)[0] * 12)  # the ambient cube
         (count,) = struct.unpack("<i", data.read(4))
         entries = {}
         for _ in range(count):

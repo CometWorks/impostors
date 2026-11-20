@@ -42,7 +42,7 @@ def read_index(path: Path):
     """Positions, radii and per asteroid {level: quads} of the pack's entries"""
     with path.open("rb") as f:
         magic, fmt = struct.unpack("<iB", f.read(5))
-        assert magic == 0x50414D49 and fmt in (3, 4), (magic, fmt)
+        assert magic == 0x50414D49 and fmt in (3, 4, 5), (magic, fmt)
         n = shift = 0
         while True:
             b = f.read(1)[0]
@@ -51,6 +51,8 @@ def read_index(path: Path):
             if b < 0x80:
                 break
         f.read(n + 8)
+        if fmt >= 5:
+            f.read(f.read(1)[0] * 12)  # the ambient cube
         (count,) = struct.unpack("<i", f.read(4))
         pos, rad, levels = [], [], []
         for _ in range(count):

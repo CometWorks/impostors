@@ -180,7 +180,11 @@ the whitelist, loading the mod in the game does.
   each other). It compares luminance and color in discs at the center and towards and away
   from the sun. `IMP_SWEEP=1` adds impostor shots with the renderer's debug lighting terms
   (`light D W A` in the mode file), and `fit <json...>` fits D, W and A to them; `table`
-  prints the before/after table. See its docstring.
+  prints the before/after table. `IMP_CUBE` lights the impostors with an ambient cube, as
+  a pack with one would (SE-1743), and the table and summary give each region's RGB and the
+  tint error. See its docstring.
+- `tools/ambient_cube.py` measures a skybox's ambient light for the asteroid pack, see
+  [Asteroid pack](AsteroidPack.md#skybox-tint).
 - `tests/zone_mesh.py` checks the safe zone meshes offline, without a game running: the
   sphere for each size on screen, up to a camera inside the zone, infinity and NaN.
 

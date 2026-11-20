@@ -66,6 +66,8 @@ def read_pack(path: Path) -> dict[tuple[int, int, int], tuple[int, int]]:
         read_string(f)
         if fmt >= 2:
             f.read(8)
+        if fmt >= 5:
+            f.read(f.read(1)[0] * 12)
         (count,) = struct.unpack("<i", f.read(4))
         offset = 0
         for _ in range(count):

@@ -34,6 +34,7 @@ The file is read only when the server starts, so changes take effect after a res
 | `AsteroidPackMod` | 0 | Workshop id of the mod with the asteroid pack, 0 for any of the world's mods that has one |
 | `WriteAsteroidPack` | false | Builds every asteroid of the world and writes its asteroid pack mod, once per start |
 | `AsteroidPackMaxLevel` | 64 | Finest level written into the pack; a lower one makes it smaller but serves only clients |
+| `AsteroidAmbientCube` | "" | The skybox's ambient light written into the pack: six colors from `tools/ambient_cube.py`, see [Asteroid pack](AsteroidPack.md#skybox-tint) |
 
 Notes:
 

@@ -777,8 +777,11 @@ Each frame it:
   shadow: `0.015 × AmbientDiffuseFactor × EnvSkyboxBrightness²`, read from the world's
   environment definition (SE-745). That is 0.06 under the game's own environment, where dark
   sides are nearly black, and 0.375 under the brighter one of Octahedron - Seed 2
-  (EnvSkyboxBrightness 5). The skybox texture's own brightness and tint aren't readable and
-  stay out. Under 27 pixels in radius on a
+  (EnvSkyboxBrightness 5). The skybox texture isn't readable by mods. With an asteroid pack
+  that has an ambient cube (SE-1743, [Asteroid pack](AsteroidPack.md#skybox-tint)) the
+  ambient light gets the sky's tint and direction: six colors, one per world axis, blended by
+  the quad's normal turned into world space, each weighted by the square of the normal's
+  component along its axis. Under 27 pixels in radius on a
   1080p screen it brightens grids (up to 1.35 times under 13 pixels) and dims asteroids (down
   to 0.82), where the real ones carry more or less light than their impostors.
 - dims the sunlit part behind planets (SE-713), faked from the planet's size, the sun

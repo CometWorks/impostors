@@ -74,6 +74,36 @@ have flat normals: they match only with it off.
 
 `tests/asteroid_pack.py write` does all of this for the "Octahedron - Seed 2" test world.
 
+## Skybox tint
+
+The game lights the shaded side of a real asteroid with the light of the sky around it, so
+it takes the skybox's tint: bluish under Octahedron's starfield, greenish gray under the game's
+own sky, and brighter on the side that faces the brighter part of the sky. The Impostors mod
+can't read the skybox, and neither can a dedicated server: it has no skybox textures. So the
+pack carries the sky's light, measured once per skybox with a script:
+
+    uv run --no-project --with numpy --with texture2ddecoder python tools/ambient_cube.py \
+        <skybox>.dds [--orientation YAW PITCH ROLL]
+
+Take the texture the world's environment definition names in `EnvironmentTexture` (the
+game's `Environment.sbc` or an environment mod's). For a texture in the game's own
+`Content`, use the `Indirect` file next to it if there is one
+(`Textures/BackgroundCube/Final/BackgroundCubeIndirect.dds` for the default sky): that is
+what the game lights with. Pass `--orientation` only when the definition's
+`EnvironmentOrientation` differs from the game's, with its numbers as written there. The
+script prints one line, six colors: put it into `AsteroidAmbientCube` before writing the pack.
+
+| Sky | `AsteroidAmbientCube` |
+|---|---|
+| The game's default (`BackgroundCubeIndirect.dds`) | `0.980,1.059,0.946 0.926,1.002,0.892 1.144,1.239,1.104 0.799,0.866,0.773 0.894,0.968,0.864 0.937,1.013,0.904` |
+| Octahedron - Seed 2 (`Starfield.dds` of mod 3415912276) | `0.801,1.003,1.182 0.871,1.112,1.310 0.863,1.122,1.304 0.760,0.932,1.142 0.737,0.949,1.108 0.877,1.072,1.287` |
+
+The colors are the sky's light from each axis direction (+X, -X, +Y, -Y, +Z, -Z), relative
+to their mean brightness, so the impostors stay as bright as before and only take the tint
+and the direction. A pack without them, written before (formats 1 to 4) or with the setting
+empty, and a world without a pack keep the gray ambient light. The Impostors mod and the
+server plugin read packs of format 5 since 1.0.5: update them before publishing such a pack.
+
 ## Size
 
 All levels of a 512 m asteroid take about 190 KB, most of it level 64. For the 2004 asteroids

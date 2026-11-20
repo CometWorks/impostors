@@ -17,7 +17,8 @@ namespace Impostors
     // The client also shows the pack's asteroids before the server sends them (see
     // EarlyAsteroids), from the frame each entry has since format 3.
     //
-    // File: magic, format, world name, the asteroid settings (format 2 on), count, then per
+    // File: magic, format, world name, the asteroid settings (format 2 on), the ambient cube
+    // (format 5 on: byte count, 0 or 6, then float r, g, b each, see AmbientCube), count, then per
     // asteroid long id, long content hash, int version, byte complete, the frame (format 3 on:
     // float radius, double position x, y, z, float orientation x, y, z, w), the voxel materials
     // (format 4 on: byte count, then string material name and int voxel count each, see
@@ -35,7 +36,7 @@ namespace Impostors
         // The old name: packs written under it still load from a local mod
         private const string OldFileName = "ImpostorsAsteroidPack.bin";
         public const int Magic = 0x50414d49; // "IMAP"
-        public const byte Format = 4;
+        public const byte Format = 5;
 
         private class Entry
         {
@@ -68,6 +69,11 @@ namespace Impostors
 
         // Hash of the asteroid settings the pack was built with, 0 for a format 1 pack
         public long Settings { get; private set; }
+
+        // The ambient light of the world's skybox, relative to its mean brightness: one color
+        // per axis direction, +X, -X, +Y, -Y, +Z, -Z, in world space. Null when the pack has
+        // none, the impostors are then lit by a gray ambient light.
+        public Vector3[] AmbientCube { get; private set; }
         public ulong ModId
         {
             get { return mod.PublishedFileId; }
@@ -120,6 +126,19 @@ namespace Impostors
                 World = reader.ReadString();
                 if (format >= 2)
                     Settings = reader.ReadInt64();
+                if (format >= 5)
+                {
+                    var colors = reader.ReadByte();
+                    var cube = new Vector3[colors];
+                    for (var c = 0; c < colors; c++)
+                        cube[c] = new Vector3(
+                            reader.ReadSingle(),
+                            reader.ReadSingle(),
+                            reader.ReadSingle()
+                        );
+                    if (colors == 6)
+                        AmbientCube = cube;
+                }
                 var count = reader.ReadInt32();
                 long offset = 0;
                 for (var i = 0; i < count; i++)
@@ -190,6 +209,31 @@ namespace Impostors
                     dataStart = 0;
                 }
             }
+        }
+
+        // The six colors of the AsteroidAmbientCube setting, "r,g,b r,g,b ...", or null when
+        // it is empty. Mod code can't name a culture: the numbers are read in the current one.
+        public static Vector3[] ParseAmbientCube(string text)
+        {
+            return ParseAmbientCube(text, float.Parse);
+        }
+
+        public static Vector3[] ParseAmbientCube(string text, Func<string, float> parse)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+                return null;
+            var colors = text.Split(new[] { ' ', ';' }, StringSplitOptions.RemoveEmptyEntries);
+            if (colors.Length != 6)
+                throw new FormatException("the ambient cube needs six colors");
+            var cube = new Vector3[6];
+            for (var c = 0; c < 6; c++)
+            {
+                var parts = colors[c].Split(',');
+                if (parts.Length != 3)
+                    throw new FormatException("an ambient cube color needs r,g,b: " + colors[c]);
+                cube[c] = new Vector3(parse(parts[0]), parse(parts[1]), parse(parts[2]));
+            }
+            return cube;
         }
 
         // Every asteroid's id, version and level mask, for the Inventory

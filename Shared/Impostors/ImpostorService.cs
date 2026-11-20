@@ -202,6 +202,14 @@ public sealed class ImpostorService : IDisposable
         {
             registry.MaxBuilds = Math.Max(2, Environment.ProcessorCount / 2);
             log.Info("Building every asteroid for the asteroid pack");
+            try
+            {
+                AsteroidPackCache.ParseAmbientCube(config.AsteroidAmbientCube);
+            }
+            catch (FormatException e)
+            {
+                log.Error($"AsteroidAmbientCube: {e.Message}; the pack will not be written");
+            }
         }
         if (config.Grids)
             sources.Add(new GridSource(config));
@@ -481,10 +489,11 @@ public sealed class ImpostorService : IDisposable
                 MySession.Static.Name,
                 sources.OfType<VoxelSource>().First().Settings,
                 asteroids.Select((e, i) => (e.Id, e.Input, e.Shapes, e.State(0), materials[i])),
-                (byte)config.AsteroidPackMaxLevel
+                (byte)config.AsteroidPackMaxLevel,
+                AsteroidPackCache.ParseAmbientCube(config.AsteroidAmbientCube)
             );
             log.Info(
-                $"Asteroid pack written: {asteroids.Count} asteroids, {bytes / 1024} KB, levels up to {config.AsteroidPackMaxLevel}, materials read in {materialsSeconds:0.0} s, in {folder}"
+                $"Asteroid pack written: {asteroids.Count} asteroids, {bytes / 1024} KB, levels up to {config.AsteroidPackMaxLevel}, ambient cube {(string.IsNullOrWhiteSpace(config.AsteroidAmbientCube) ? "none" : config.AsteroidAmbientCube)}, materials read in {materialsSeconds:0.0} s, in {folder}"
             );
         }
         catch (Exception e)
