@@ -60,7 +60,7 @@ public static class BillboardPriority
     private static FieldInfo batchNum;
     private static FieldInfo gbufferMain;
     private static PropertyInfo lbuffer;
-    private static bool earlyFailed;
+    private static volatile bool earlyFailed;
 
     // For comparison shots: with this file in the plugin's storage the impostors stay in the
     // LDR pass
@@ -160,6 +160,10 @@ public static class BillboardPriority
 
         if (tick % 60 == 0)
             onTop = File.Exists(OnTopFile);
+
+        // The mod lights the quads for where they are drawn
+        if (early && !onTop && !earlyFailed)
+            MyAPIGateway.Utilities.SendModMessage(ImpostorRenderer.HdrMessage, true);
         if (++tick % 3600 == 0)
             LogSummary();
     }
