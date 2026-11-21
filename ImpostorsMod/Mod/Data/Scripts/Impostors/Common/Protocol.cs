@@ -17,7 +17,7 @@ namespace Impostors
         // other theirs and the ids of their packs (SE-1826): Steam keeps an old Workshop mod or
         // pack in a game that kept running over an update, and such a mix draws the asteroids
         // wrong. Any difference counts, not only one of the protocol.
-        public const string Release = "1.0.5";
+        public const string Release = "1.0.6";
 
         // What the player reads, from the mod's popup or, for a mod older than the pin, the
         // server's chat line
