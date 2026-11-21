@@ -67,6 +67,11 @@ public sealed class ImpostorService : IDisposable
     private long buildTicks;
     private long maxBuildTicks;
 
+    // Most quads the local player's client plugin draws per frame while it draws them itself
+    // (PluginQuadsPerFrame), 0 otherwise: its levels are fitted to this instead of
+    // MaxQuadsPerFrame
+    public static int LocalQuads;
+
     private sealed class Viewer
     {
         public readonly ulong SteamId;
@@ -1177,7 +1182,8 @@ public sealed class ImpostorService : IDisposable
             )
             .ToList();
         var fit = Levels(viewer, shown, tints, held, 1, out var quads);
-        if (quads <= config.MaxQuadsPerFrame)
+        var most = viewer.Local && LocalQuads > 0 ? LocalQuads : config.MaxQuadsPerFrame;
+        if (quads <= most)
             return fit;
 
         double low = 0,
@@ -1187,7 +1193,7 @@ public sealed class ImpostorService : IDisposable
         {
             var scale = (low + high) / 2;
             var levels = Levels(viewer, shown, tints, held, scale, out quads);
-            if (quads <= config.MaxQuadsPerFrame)
+            if (quads <= most)
             {
                 low = scale;
                 best = levels;

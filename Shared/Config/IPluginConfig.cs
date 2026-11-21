@@ -47,6 +47,11 @@ public interface IPluginConfig : INotifyPropertyChanged
     // and other effects.
     int MaxQuadsPerFrame { get; set; }
 
+    // Client plugin only: most impostor quads it draws per frame. It draws them itself, not
+    // as the game's billboards, so they take nothing from those 32768 and this replaces
+    // MaxQuadsPerFrame on a client with the plugin. 16000 to 256000 in steps of 16000.
+    int PluginQuadsPerFrame { get; set; }
+
     // Shape data sent to one player per second on average, bytes
     int ShapeBytesPerSecond { get; set; }
 

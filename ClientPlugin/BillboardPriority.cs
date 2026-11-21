@@ -70,6 +70,7 @@ public static class BillboardPriority
         "Impostors.ontop"
     );
     private static volatile bool onTop;
+    public static bool OnTop => onTop;
 
     // The impostor quads of the frame in the buffer, written and read on the render thread
     private static int earlyStart;

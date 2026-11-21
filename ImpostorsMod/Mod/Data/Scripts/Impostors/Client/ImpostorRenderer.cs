@@ -139,6 +139,14 @@ namespace Impostors
         private int frameBudget;
         private int frameBudgetTick = -BudgetTicks - 1;
 
+        // The client plugin sends an int here every tick while it draws the impostor quads
+        // itself instead of the game's billboard renderer: the most quads per frame, its
+        // PluginQuadsPerFrame. They don't count as billboards then, so it replaces the
+        // server's MaxQuadsPerFrame and the budget above.
+        public const long PluginQuadsMessage = 4721300006;
+        private int pluginQuads;
+        private int pluginQuadsTick = -BudgetTicks - 1;
+
         // Other mods get the voxel materials of the asteroids drawn as impostors from the world's
         // asteroid pack (see AsteroidMaterials): this delegate goes out on this channel once the
         // renderer starts, and again to anyone sending a string on it.
@@ -269,6 +277,10 @@ namespace Impostors
         // Debug: time spent in SendReady since the last stats, and Ready ids sent so far
         private readonly MyGameTimer timer = new MyGameTimer();
         private long readyTicks;
+
+        // Debug: the time Draw took since the last stats, and its frames
+        private long drawTicks;
+        private int drawFrames;
         private int readySent;
 
         // Debug: the last impostors that turned ready, as id:drawable tick:ready tick:whether
@@ -357,6 +369,7 @@ namespace Impostors
             if (UseGridPack)
                 OpenGridPack();
             MyAPIGateway.Utilities.RegisterMessageHandler(BudgetMessage, OnBudget);
+            MyAPIGateway.Utilities.RegisterMessageHandler(PluginQuadsMessage, OnPluginQuads);
             MyAPIGateway.Utilities.RegisterMessageHandler(VoxelLoadedMessage, OnVoxelLoaded);
             active = true;
             if (pack != null)
@@ -569,6 +582,7 @@ namespace Impostors
                     OnMessage
                 );
             MyAPIGateway.Utilities.UnregisterMessageHandler(BudgetMessage, OnBudget);
+            MyAPIGateway.Utilities.UnregisterMessageHandler(PluginQuadsMessage, OnPluginQuads);
             MyAPIGateway.Utilities.UnregisterMessageHandler(VoxelLoadedMessage, OnVoxelLoaded);
             if (materialsApi != null)
             {
@@ -724,7 +738,7 @@ namespace Impostors
                     : MyAPIGateway.Session.SessionSettings.ViewDistance,
                 minPixels,
                 local ? camera.FarPlaneDistance : 0,
-                Math.Max(0, maxQuads - used)
+                Math.Max(0, QuadCap - used)
             );
         }
 
@@ -1047,6 +1061,8 @@ namespace Impostors
                     + string.Join(",", readyLog)
                     + " readyus="
                     + (readyTicks * 1000000 / MyGameTimer.Frequency)
+                    + " drawus="
+                    + (drawTicks * 1000000 / MyGameTimer.Frequency / Math.Max(1, drawFrames))
                     + " culled="
                     + culled
                     + " overbudget="
@@ -1209,6 +1225,8 @@ namespace Impostors
                 );
             }
             readyTicks = 0;
+            drawTicks = 0;
+            drawFrames = 0;
             shadeTicks = 0;
             shadeCount = 0;
             occlusionTicks = 0;
@@ -1255,6 +1273,20 @@ namespace Impostors
                 return;
             frameBudget = (int)message;
             frameBudgetTick = tick;
+        }
+
+        private void OnPluginQuads(object message)
+        {
+            if (!(message is int))
+                return;
+            pluginQuads = (int)message;
+            pluginQuadsTick = tick;
+        }
+
+        // The client plugin's own while it draws the quads, the server's otherwise
+        private int QuadCap
+        {
+            get { return tick - pluginQuadsTick <= BudgetTicks ? pluginQuads : maxQuads; }
         }
 
         private void OnMessage(ushort channel, byte[] message, ulong sender, bool fromServer)
@@ -1568,6 +1600,7 @@ namespace Impostors
                 NoteMoves(camera);
             if (!active || impostors.Count == 0 || realOnly || noRenderer || camera == null)
                 return;
+            var drawStart = debug ? timer.ElapsedTicks : 0;
             var eye = camera.Position;
             var view = MatrixD.Transpose(camera.WorldMatrix);
             culled = 0;
@@ -1646,9 +1679,10 @@ namespace Impostors
             }
             visible.Sort((a, b) => b.Rank.CompareTo(a.Rank));
 
-            // The client plugin's budget while it keeps sending it, the server's otherwise
-            budget = maxQuads;
-            if (tick - frameBudgetTick <= BudgetTicks)
+            // The client plugin's budget while it keeps sending it, the server's otherwise.
+            // None of it applies while the plugin draws the quads itself.
+            budget = QuadCap;
+            if (tick - pluginQuadsTick > BudgetTicks && tick - frameBudgetTick <= BudgetTicks)
                 budget = MathHelper.Clamp(frameBudget, 0, maxQuads);
 
             // One over the budget is drawn at a coarser level we have, or left out, which leaves
@@ -1720,6 +1754,11 @@ namespace Impostors
             }
             if (drawnQuads > 0)
                 quadDrawn = true;
+            if (debug)
+            {
+                drawTicks += timer.ElapsedTicks - drawStart;
+                drawFrames++;
+            }
             visible.RemoveRange(count, visible.Count - count);
             foreach (var impostor in visible)
             {

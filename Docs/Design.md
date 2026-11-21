@@ -875,6 +875,42 @@ flames and transparent LCDs.
 impostors both ways. A file named `Impostors.ontop` in the client's `Storage` folder makes the
 plugin leave the impostors in step 5, for comparison.
 
+## Outside the billboard limit (SE-1541)
+
+Drawn like that, the impostor quads are still billboards of the game: counted in
+`PrepareList` and drawn from the game's buffers, which hold 32768 quads. The client plugin's
+`ImpostorPass` takes them out of that:
+
+- The renderer adds its quads as billboards as before. Adding isn't limited, the pools grow.
+- Before the game counts the frame's billboards (a prefix of `MyBillboardRenderer.Gather`), the
+  plugin takes the impostor quads out of the frame's list, so the game never counts them, and
+  puts them back after, as the same list is drawn again when a frame comes before the next
+  update.
+- It draws them there, before step 1 above, 32768 at a time: that is what the game's index
+  buffer covers, and the shader numbers a draw's quads from 0. For each such chunk it points
+  the billboard renderer at a vertex buffer and a quad data buffer of its own, has
+  `GatherInternal` fill them from the chunk's billboards and `RenderLDR` draw them, and puts
+  the game's buffers back. So the vertices, texture and shaders are the game's own. The game
+  uploads its billboard data at once or later on the main render context, depending on the
+  adapter (`DeferredTransferData`), and the chunks do the same (a postfix of `TransferData`).
+- The buffers of a chunk are made when a frame first needs it, about 3.6 MB of video memory
+  and as much of main memory each: 8 of them at 256000 quads.
+
+The renderer's cap is then the plugin's `PluginQuadsPerFrame` instead of the server's
+`MaxQuadsPerFrame` and the budget of the billboard limit: the plugin sends it as a mod message
+every tick (`PluginQuadsMessage`), which reaches the mod's copy too, and the renderer goes back
+to the server's when the messages stop. The asteroids the client picks the levels of itself
+(asteroid pack) are fitted to it, and so are the local player's impostors offline and on a
+lobby host. A server still fits the levels it sends to its own `MaxQuadsPerFrame`: it doesn't
+know the client's cap.
+
+Every other billboard has the whole 32768 again. If a member of the renderer is missing in a
+later game version, or the pass throws, the plugin logs it once and the quads are billboards
+again, drawn early as above.
+
+What it costs, measured by `tests/plugin_quads.py`: see the table in
+[Configuration](Configuration.md#client-plugin-quads).
+
 ## Grids (SE-382)
 
 `GridSource`: one impostor per physical grid group, so docked ships and subgrids show as one.
