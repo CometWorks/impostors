@@ -45,6 +45,11 @@ nobody edited and that the world doesn't save get no impostors anyway (see
    Windows) and publish it to the Workshop from the game, like any mod. Add the published mod
    to the world.
 
+A player whose game was running while a new pack or a new Impostors mod went up keeps the old
+one until the game restarts. The server sees that in the player's pin and sends that player no
+asteroids, and the mod asks the player to restart (see
+[Design](Design.md#version-pin-se-1826)).
+
 The pack file is `ImpostorsAsteroidPack.dat`, next to a `Data` folder with a readme in it.
 The game fails to load a mod without a `Data` folder, and a player whose client doesn't run on
 Linux gets a message box saying the pack wasn't loaded. The pack still works, but for a pack

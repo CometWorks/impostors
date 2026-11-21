@@ -733,8 +733,8 @@ Mod networking on channel 47213, reliable messages up to 16 KB:
 
 | Message | Direction | Content |
 |---|---|---|
-| Hello | client to server | protocol version, whether the client has nothing from the server yet, whether an Inventory follows; at load and every 30 s |
-| Welcome | server to client | protocol version, server instance id, `MaxQuadsPerFrame`, the asteroid range and `MinPixels` (see "Early asteroids") |
+| Hello | client to server | protocol version, whether the client has nothing from the server yet, whether an Inventory follows, whether it picks the asteroids' levels itself, its pin (see "Version pin"); at load and every 30 s |
+| Welcome | server to client | protocol version, server instance id, `MaxQuadsPerFrame`, the asteroid range and `MinPixels` (see "Early asteroids"), whether it started over with the client, its pin |
 | States | server to client | impostor states: id, kind (grid, voxel or safe zone), version, level, radius, position, orientation, velocity, safe zone tint (74 bytes each); a level from the shape store switches the impostor to it |
 | Remove | server to client | impostor ids |
 | ShapeData | server to client | count, then id, version and shape per impostor; or a 1 and the level for a shape in the client's disk cache |
@@ -748,6 +748,36 @@ cluster node a player was moved to learns about the client within 30 s. A differ
 instance id makes the client drop everything it has, shape store included. A hello from a
 client without a Welcome yet makes the server start over with that player, so a quick rejoin
 can't leave the server's copy of the store out of step.
+
+### Version pin (SE-1826)
+
+The mod and the packs come from the Workshop, the plugins from the hubs, and Steam doesn't
+update a mod in a game that is running. A player whose game kept running over an update joins
+with the old mod or pack. Before the pin that went wrong without a word:
+
+- a mod older than the pack can't read it: no early asteroids, no pack, the server streams
+  every asteroid, and its coarsest levels show as cubes (`tests/version_mismatch.py`: levels
+  stuck at 2 for 5 minutes),
+- an old pack claims other versions in the Inventory, and the server sends every changed
+  asteroid at every level, all the time the player is there.
+
+So the client and the server tell each other their pin: the release (`Protocol.Release`, the
+same as `Version.Build.props`; `tests/builds.py` checks), the asteroid pack's id and the grid
+pack's id. A pack's id is a hash of its index, `AsteroidPack.Id` (`tools/pack_id.py` computes
+it from a file); a grid pack has one already. The server logs its pin at the start
+(`Impostors pin: release ..., asteroid pack ..., grid pack ...`).
+
+Any difference, or a pack the mod can't read, is a mismatch:
+
+- The server sends that player no asteroids and logs it once.
+- The mod drops its asteroid impostors, its early asteroids and the pack, and shows a popup
+  once asking the player to restart the game. A mod newer than the server's, with the same
+  packs, skips the popup: the server's update is on its way.
+- A mod older than the pin sends a Hello without one; the server tells that player to restart
+  in chat, which any mod version shows, and a protocol older than the server's gets the same
+  line.
+
+The Octahedron deploy checks that every node logs the pin of the mod and packs it published.
 
 ## Client
 

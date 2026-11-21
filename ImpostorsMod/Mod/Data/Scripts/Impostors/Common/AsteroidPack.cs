@@ -67,6 +67,11 @@ namespace Impostors
 
         public string World { get; private set; }
 
+        // Tells this pack from any other, also another build for the same world: a hash of the
+        // index (format, world, settings, and per asteroid id, content hash, version and level
+        // lengths). The server and the client compare theirs (SE-1826).
+        public long Id { get; private set; }
+
         // Hash of the asteroid settings the pack was built with, 0 for a format 1 pack
         public long Settings { get; private set; }
 
@@ -126,6 +131,11 @@ namespace Impostors
                 World = reader.ReadString();
                 if (format >= 2)
                     Settings = reader.ReadInt64();
+                // Not string.GetHashCode: .NET randomizes it per process
+                var id = Mix(Fnv, format);
+                foreach (var c in World)
+                    id = Mix(id, c);
+                id = Mix(id, Settings);
                 if (format >= 5)
                 {
                     var colors = reader.ReadByte();
@@ -143,7 +153,7 @@ namespace Impostors
                 long offset = 0;
                 for (var i = 0; i < count; i++)
                 {
-                    var id = reader.ReadInt64();
+                    var asteroid = reader.ReadInt64();
                     var entry = new Entry
                     {
                         Input = reader.ReadInt64(),
@@ -154,7 +164,7 @@ namespace Impostors
                     {
                         entry.Frame = new ImpostorState
                         {
-                            Id = id,
+                            Id = asteroid,
                             Kind = ImpostorKind.Voxel,
                             Version = entry.Version,
                             Radius = reader.ReadSingle(),
@@ -186,6 +196,7 @@ namespace Impostors
                     entry.Lods = new byte[levels];
                     entry.Offsets = new long[levels];
                     entry.Lengths = new int[levels];
+                    id = Mix(Mix(Mix(id, asteroid), entry.Input), entry.Version);
                     for (var k = 0; k < levels; k++)
                     {
                         entry.Lods[k] = reader.ReadByte();
@@ -193,10 +204,12 @@ namespace Impostors
                         entry.Lengths[k] = reader.ReadInt32();
                         offset += entry.Lengths[k];
                         entry.Mask |= Protocol.LodBit(entry.Lods[k]);
+                        id = Mix(id, entry.Lods[k] | (long)entry.Lengths[k] << 8);
                     }
-                    entries[id] = entry;
+                    entries[asteroid] = entry;
                 }
                 Bytes = offset;
+                Id = id;
 
                 var stream = reader.BaseStream;
                 if (stream.CanSeek)
@@ -209,6 +222,19 @@ namespace Impostors
                     dataStart = 0;
                 }
             }
+        }
+
+        private const long Fnv = -3750763034362895579; // FNV-1a offset basis
+
+        // FNV-1a over the value's eight bytes
+        private static long Mix(long hash, long value)
+        {
+            for (var b = 0; b < 8; b++)
+            {
+                hash ^= (value >> (b * 8)) & 0xff;
+                hash *= 1099511628211;
+            }
+            return hash;
         }
 
         // The six colors of the AsteroidAmbientCube setting, "r,g,b r,g,b ...", or null when

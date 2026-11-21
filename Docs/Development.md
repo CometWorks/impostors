@@ -17,6 +17,11 @@ the whitelist, loading the mod in the game does.
 - `tests/scenario.py` checks it all in game: an isolated Magnetar server with the plugin and
   a headless client that has only the mod. `IMP_ONLY=zones` runs only the safe zone checks.
   See its docstring.
+- `tests/version_mismatch.py` joins the Seed 2 world with a mod or an asteroid pack other
+  than the server's (`IMP_MOD_CLIENT`, `IMP_PACK_CLIENT`) and samples the client's CPU and
+  the shapes it gets; with `IMP_EXPECT=mismatch` it checks that the player is told to restart
+  and gets no asteroids, with `IMP_EXPECT=match` that a matching set draws as before (SE-1826).
+  See its docstring.
 - `tests/no_render.py` checks that a headless client started with `--no-render` doesn't crash
   in the mod (SE-1407). The game's null renderer has no billboard pools, and drawing a
   billboard throws there; the mod must notice and draw nothing. See its docstring.
@@ -195,7 +200,9 @@ them runs with flat or smooth asteroid normals.
 
 The plugin version lives in `Version.Build.props`, which **is** committed and imported by
 `Directory.Build.props`. Keeping the version separate from the local path overrides means it
-is shared by all contributors and stays under version control. Bump the version there.
+is shared by all contributors and stays under version control. Bump the version there, and
+`Protocol.Release` in the mod's `Protocol.cs` with it: the mod and the server compare it (see
+[Design](Design.md#version-pin-se-1826)), and `tests/builds.py` fails while they differ.
 
 ## Folder path overrides
 
