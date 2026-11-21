@@ -102,6 +102,9 @@ SWEEP = (
     if os.environ.get("IMP_SWEEP") == "1"
     else {}
 )
+# IMP_SWEEP_TERMS="key=D W A;...": these terms instead
+if os.environ.get("IMP_SWEEP_TERMS"):
+    SWEEP = dict(t.split("=", 1) for t in os.environ["IMP_SWEEP_TERMS"].split(";") if t)
 
 # Impostor over real, of the luminance
 MARGIN = 0.2
