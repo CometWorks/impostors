@@ -18,7 +18,7 @@ Per set, angle and region it prints the mean luminance and RGB of the real aster
 its impostor, and the impostor's over the real one's. The regions are discs inside the
 asteroid on screen, at the center and towards and away from the sun on screen. PASS when every
 impostor region is within MARGIN of the real one (or within NEAR_BLACK levels of it, where
-both are nearly black), except the KNOWN cases.
+both are nearly black) and its tint within TINT_MARGIN, except the KNOWN cases.
 
     IMP_TASK=se1685 uv run --no-project --with httpx --with pillow \\
         python tests/asteroid_calibration.py
@@ -38,6 +38,10 @@ Markdown table of one or more result files (before and after, for a PR), with th
 region. Besides the luminance it prints the tint error: how far the impostor's color is from the
 real one's, the mean over the regions of the channels' difference once both are scaled to the
 same luminance, in parts of that luminance.
+
+IMP_PLUGIN=1 runs the client with the client plugin, which draws the impostors before tone
+mapping and so lights them with the mod's Hdr terms. To fit those, sweep a grid of sun and
+ambient terms with IMP_SWEEP_GRID and fit them with "fitgrid" (SE-1798).
 """
 
 from __future__ import annotations
@@ -102,10 +106,24 @@ SWEEP = (
     if os.environ.get("IMP_SWEEP") == "1"
     else {}
 )
+# IMP_SWEEP_TERMS="key=D W A;...": these terms instead
+if os.environ.get("IMP_SWEEP_TERMS"):
+    SWEEP = dict(t.split("=", 1) for t in os.environ["IMP_SWEEP_TERMS"].split(";") if t)
+# IMP_SWEEP_GRID="D,D,...;A,A,...;W": every D with every A at wrap W, for "fitgrid". Where
+# the client plugin draws the impostors before tone mapping (IMP_PLUGIN=1), the screen isn't
+# linear in the light, so the fit can't add up the ambient and sun shots as "fit" does.
+if os.environ.get("IMP_SWEEP_GRID"):
+    _d, _a, _w = os.environ["IMP_SWEEP_GRID"].split(";")
+    SWEEP = {
+        f"g_{d}_{_w}_{a}": f"{d} {_w} {a}" for d in _d.split(",") for a in _a.split(",")
+    }
 
 # Impostor over real, of the luminance
 MARGIN = 0.2
 NEAR_BLACK = 6.0
+# And of its tint (see tint_error): at most 0.36 on good runs, over 1 on a broken frame that
+# drew an impostor in nearly pure blue (SE-1798)
+TINT_MARGIN = 0.5
 # Shown, not checked: (set or None for every set, angle) -> why
 GLARE = "the sun's disc and glare show around the real one, not behind the impostor"
 KNOWN = {
@@ -474,7 +492,8 @@ def mean_tint_error(results, regions=None) -> float:
 
 
 def ok(light: dict) -> bool:
-    return (
+    tint = tint_error(light)
+    return (tint is None or tint <= TINT_MARGIN) and (
         abs(light["ratio"] - 1) <= MARGIN
         or abs(light["impostor"]["luma"] - light["real"]["luma"]) <= NEAR_BLACK
     )
@@ -511,6 +530,7 @@ def analyze() -> None:
         print(
             f"{'PASS' if good else 'FAIL'} {name}: real {light['real']['luma']:.1f} "
             f"impostor {light['impostor']['luma']:.1f} ratio {light['ratio']:.2f}"
+            + (f" tint error {t:.2f}" if (t := tint_error(light)) is not None else "")
         )
     compose(results, SHOTS / f"asteroid-calibration{TAG}.png")
     (SHOTS / f"asteroid-calibration{TAG}.json").write_text(
@@ -645,6 +665,78 @@ def fit(files: list[str]) -> None:
         )
 
 
+def fit_grid(files: list[str]) -> None:
+    """Fits the sun's strength D and the ambient scale A to grid sweep runs
+    (IMP_SWEEP_GRID), separately for asteroids and grids: each region's luminance between the
+    swept terms interpolated in log D and log A, the pair with the least error against the
+    real ones' found on a fine grid between them. The wrap stays the swept one."""
+    runs = [r for f in files for r in json.loads(Path(f).read_text())]
+    samples = {"asteroid": [], "grid": []}
+    wraps = set()
+    for r in runs:
+        if (r["set"], r["phase"]) in KNOWN:
+            continue
+        group = "grid" if r["set"] in GRID_STYLES else "asteroid"
+        for g in r["regions"].values():
+            levels = {}
+            for kind, light in g.items():
+                if kind.startswith("sweep-g_"):
+                    d, w, a = (float(v) for v in kind[len("sweep-g_") :].split("_"))
+                    wraps.add(w)
+                    levels[(d, a)] = math.log(light["luma"] + 8)
+            if levels:
+                samples[group].append((math.log(g["real"]["luma"] + 8), levels))
+
+    def at(levels, ds, as_, d, a):
+        def bracket(values, v):
+            i = max(0, min(len(values) - 2, sum(x <= v for x in values) - 1))
+            lo, hi = values[i], values[i + 1]
+            return lo, hi, (math.log(v) - math.log(lo)) / (math.log(hi) - math.log(lo))
+
+        d0, d1, s = bracket(ds, d)
+        a0, a1, t = bracket(as_, a)
+        return (
+            levels[(d0, a0)] * (1 - s) * (1 - t)
+            + levels[(d1, a0)] * s * (1 - t)
+            + levels[(d0, a1)] * (1 - s) * t
+            + levels[(d1, a1)] * s * t
+        )
+
+    for group, rows in samples.items():
+        if not rows:
+            continue
+        ds = sorted({d for d, _ in rows[0][1]})
+        as_ = sorted({a for _, a in rows[0][1]})
+
+        def errors(d, a):
+            return [at(levels, ds, as_, d, a) - real for real, levels in rows]
+
+        steps = 40
+        best = min(
+            (sum(e * e for e in errors(d, a)), d, a)
+            for d in (ds[0] * (ds[-1] / ds[0]) ** (i / steps) for i in range(steps + 1))
+            for a in (
+                as_[0] * (as_[-1] / as_[0]) ** (j / steps) for j in range(steps + 1)
+            )
+        )
+        _, d, a = best
+        # IMP_FIT_BASE="asteroid=D,A;grid=D,A": also the error of these terms
+        base = dict(
+            t.split("=") for t in os.environ.get("IMP_FIT_BASE", "").split(";") if t
+        )
+        pairs = [("fit", d, a)]
+        if group in base:
+            pairs.append(("base", *(float(v) for v in base[group].split(","))))
+        for label, d, a in pairs:
+            errs = errors(d, a)
+            within = sum(abs(math.exp(e) - 1) <= MARGIN for e in errs)
+            print(
+                f"{group} {label}: D {d:.2f} A {a:.2f} (W {sorted(wraps)}), rms log error "
+                f"{math.sqrt(sum(e * e for e in errs) / len(errs)):.3f}, {within}/"
+                f"{len(errs)} regions within {MARGIN:.0%}; swept D {ds}, A {as_}"
+            )
+
+
 def compose(results, target: Path) -> None:
     """A row per set, per sun angle the real asteroid and its impostor, the measured
     regions outlined"""
@@ -704,6 +796,8 @@ if __name__ == "__main__":
         analyze()
     elif sys.argv[1:2] == ["fit"]:
         fit(sys.argv[2:])
+    elif sys.argv[1:2] == ["fitgrid"]:
+        fit_grid(sys.argv[2:])
     elif sys.argv[1:2] == ["table"]:
         table(sys.argv[2:])
     else:

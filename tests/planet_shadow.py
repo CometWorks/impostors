@@ -45,7 +45,11 @@ import world  # noqa: E402
 
 SERVER = rig.Server()
 # Medium like compare.py: on high the headless client draws asteroids without sunlight
-CLIENT = rig.Client(1, "Alpha", quality="medium")
+# IMP_PLUGIN=1: the client runs the client plugin, which draws the impostors before tone
+# mapping (see BillboardPriority)
+CLIENT = rig.Client(
+    1, "Alpha", quality="medium", plugin=os.environ.get("IMP_PLUGIN") == "1"
+)
 SHOTS = rig.TEST_ROOT / f"{rig.TASK}-shots"
 
 # The planet's center, far from where the player spawns. Its storage is 2^18 m on a side and

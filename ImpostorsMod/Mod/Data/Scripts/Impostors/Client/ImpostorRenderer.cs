@@ -37,10 +37,33 @@ namespace Impostors
         // grids with the sun at 0 to 180 degrees from the line of sight under the game's and
         // Seed 2's environments (tests/asteroid_calibration.py fit, SE-1685). Grids carry
         // more light than rock: their armor's metal and gloss reflect the sun and the sky.
-        private const float VoxelDiffuse = 1.4f;
-        private const float GridDiffuse = 2.6f;
-        private const float VoxelWrap = 0.1f;
-        private const float GridWrap = 0.35f;
+        //
+        // The ambient light (see AmbientPerSkybox) is scaled by Ambient: grids reflect about
+        // twice as much of the sky.
+        //
+        // The client plugin draws the quads before tone mapping (see BillboardPriority), so
+        // their light goes through the game's eye adaptation and tone curve like the real
+        // asteroids' instead of reaching the screen as it is. Those quads take the Hdr terms,
+        // fitted the same way with the plugin on (IMP_PLUGIN=1 fitgrid, SE-1798): asteroids
+        // need about 1.6 times the sun, grids came out as close with their own terms.
+        private struct LightTerms
+        {
+            public readonly float Diffuse;
+            public readonly float Wrap;
+            public readonly float Ambient;
+
+            public LightTerms(float diffuse, float wrap, float ambient)
+            {
+                Diffuse = diffuse;
+                Wrap = wrap;
+                Ambient = ambient;
+            }
+        }
+
+        private static readonly LightTerms VoxelLight = new LightTerms(1.4f, 0.1f, 0.85f);
+        private static readonly LightTerms GridLight = new LightTerms(2.6f, 0.35f, 2.1f);
+        private static readonly LightTerms HdrVoxelLight = new LightTerms(2.2f, 0.1f, 0.85f);
+        private static readonly LightTerms HdrGridLight = GridLight;
 
         // Sides away from the sun and everything in a planet's shadow get only the ambient
         // light. The game lights voxels there with its environment map, the skybox scaled by
@@ -50,9 +73,6 @@ namespace Impostors
         // a real asteroid in shadow and on its dark side: 0.06 under the game's own
         // environment (EnvSkyboxBrightness 2, nearly black), 0.375 under the one of
         // Octahedron - Seed 2 (5). The skybox texture's own brightness and tint stay out.
-        // Scaled per kind by the fit above: grids reflect about twice as much of the sky.
-        private const float VoxelAmbient = 0.85f;
-        private const float GridAmbient = 2.1f;
         private const float AmbientPerSkybox = 0.015f;
         private float ambient = 0.06f;
 
@@ -138,6 +158,12 @@ namespace Impostors
         private const int BudgetTicks = 10;
         private int frameBudget;
         private int frameBudgetTick = -BudgetTicks - 1;
+
+        // The client plugin sends true here every tick while it draws the impostor quads
+        // before tone mapping (see BillboardPriority), where they take the Hdr light terms
+        public const long HdrMessage = 4721300006;
+        private int hdrTick = -BudgetTicks - 1;
+        private bool Hdr => tick - hdrTick <= BudgetTicks;
 
         // Other mods get the voxel materials of the asteroids drawn as impostors from the world's
         // asteroid pack (see AsteroidMaterials): this delegate goes out on this channel once the
@@ -357,6 +383,7 @@ namespace Impostors
             if (UseGridPack)
                 OpenGridPack();
             MyAPIGateway.Utilities.RegisterMessageHandler(BudgetMessage, OnBudget);
+            MyAPIGateway.Utilities.RegisterMessageHandler(HdrMessage, OnHdr);
             MyAPIGateway.Utilities.RegisterMessageHandler(VoxelLoadedMessage, OnVoxelLoaded);
             active = true;
             if (pack != null)
@@ -569,6 +596,7 @@ namespace Impostors
                     OnMessage
                 );
             MyAPIGateway.Utilities.UnregisterMessageHandler(BudgetMessage, OnBudget);
+            MyAPIGateway.Utilities.UnregisterMessageHandler(HdrMessage, OnHdr);
             MyAPIGateway.Utilities.UnregisterMessageHandler(VoxelLoadedMessage, OnVoxelLoaded);
             if (materialsApi != null)
             {
@@ -1083,6 +1111,8 @@ namespace Impostors
                     + Planets()
                     + " ambient="
                     + ambient.ToString("0.000")
+                    + " hdr="
+                    + (Hdr ? 1 : 0)
                     + " cube="
                     + ((ambientCubeOverridden ? ambientCubeOverride : ambientCube) != null ? 1 : 0)
                     + " shadeus="
@@ -1255,6 +1285,12 @@ namespace Impostors
                 return;
             frameBudget = (int)message;
             frameBudgetTick = tick;
+        }
+
+        private void OnHdr(object message)
+        {
+            if (message is bool && (bool)message)
+                hdrTick = tick;
         }
 
         private void OnMessage(ushort channel, byte[] message, ulong sender, bool fromServer)
@@ -2093,20 +2129,17 @@ namespace Impostors
             }
             impostor.Sunlight = sunlight;
             var voxel = state.Kind == ImpostorKind.Voxel;
-            var diffuse =
-                (
-                    float.IsNaN(diffuseOverride)
-                        ? voxel
-                            ? VoxelDiffuse
-                            : GridDiffuse
-                        : diffuseOverride
-                ) * sunlight;
-            var wrap = float.IsNaN(wrapOverride)
+            var terms = Hdr
                 ? voxel
-                    ? VoxelWrap
-                    : GridWrap
-                : wrapOverride;
-            var ambientNow = ambient * (voxel ? VoxelAmbient : GridAmbient) * ambientScale;
+                    ? HdrVoxelLight
+                    : HdrGridLight
+                : voxel
+                    ? VoxelLight
+                    : GridLight;
+            var diffuse =
+                (float.IsNaN(diffuseOverride) ? terms.Diffuse : diffuseOverride) * sunlight;
+            var wrap = float.IsNaN(wrapOverride) ? terms.Wrap : wrapOverride;
+            var ambientNow = ambient * terms.Ambient * ambientScale;
             var cube = ambientCubeOverridden ? ambientCubeOverride : ambientCube;
             var tinted = state.Tint.A != 0;
             var tint = Vector3.Lerp(state.Tint.ToVector3(), Vector3.One, ZoneTintPale);
