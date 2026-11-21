@@ -191,6 +191,15 @@ namespace Impostors
         // names the mod with PackMod (0 for any of the world's mods).
         private AsteroidPack pack;
 
+        // The pin told to the server in the Hello (SE-1826): the id of the pack read at the
+        // start, 0 for none, -1 for one this mod can't read, and the grid pack's. A server whose
+        // pin differs, or a pack we can't read, makes a mismatch: the asteroids are dropped,
+        // the early ones and the pack too, and the player is asked to restart the game once.
+        private long packId;
+        private long gridPackId;
+        private string mismatch;
+        private bool mismatchShown;
+
         // The world's grid pack, its id told to the server with the Inventory; null without one.
         // The client plugin turns it off with UseGridPack.
         private GridPack gridPack;
@@ -401,7 +410,11 @@ namespace Impostors
             debug = StorageExists("debug");
 
             // Tests turn the early asteroids off with "noearly", for a baseline
-            if ((cache != null || pack != null) && !(debug && StorageExists("noearly")))
+            if (
+                (cache != null || pack != null)
+                && mismatch == null
+                && !(debug && StorageExists("noearly"))
+            )
             {
                 // Locally the pack's asteroids are ours to pick too (SE-740). A cache in memory
                 // only, never loaded or saved, keeps the levels of the asteroids that changed.
@@ -425,6 +438,8 @@ namespace Impostors
                 );
                 return;
             }
+            if (gridPack != null)
+                gridPackId = gridPack.Id;
             if (gridPack != null)
                 MyLog.Default.WriteLineAndConsole(
                     "Impostors: grid pack of mod "
@@ -451,10 +466,13 @@ namespace Impostors
                 MyLog.Default.WriteLineAndConsole(
                     "Impostors: failed to read the asteroid pack: " + e.Message
                 );
+                packId = -1;
+                Mismatch("an asteroid pack this mod can't read (" + e.Message + ")");
                 return;
             }
             if (pack == null)
                 return;
+            packId = pack.Id;
             ambientCube = pack.AmbientCube;
             MyLog.Default.WriteLineAndConsole(
                 "Impostors: asteroid pack of mod "
@@ -467,6 +485,8 @@ namespace Impostors
                     + pack.Bytes / 1024
                     + " KB, "
                     + (ambientCube != null ? "ambient cube" : "gray ambient")
+                    + ", id "
+                    + packId.ToString("x16")
                     + ", index read in "
                     + ((timer.ElapsedTicks - start) * 1000 / MyGameTimer.Frequency)
                     + " ms"
@@ -681,7 +701,23 @@ namespace Impostors
                 writer.Byte((byte)(serverInstance == 0 ? 1 : 0));
                 writer.Byte((byte)(cache != null ? 1 : 0));
                 writer.Byte((byte)(PicksAsteroids ? 1 : 0));
+                WritePin();
                 SendToServer();
+            }
+
+            // Not over the loading screen: 10 s into the session
+            if (mismatch != null && !mismatchShown && tick > 600)
+            {
+                mismatchShown = true;
+                MyLog.Default.WriteLineAndConsole("Impostors: restart popup shown");
+                MyAPIGateway.Utilities.ShowMissionScreen(
+                    "Impostors",
+                    "",
+                    "Restart the game",
+                    Protocol.RestartText + "\n\n(" + mismatch + ")",
+                    null,
+                    "OK"
+                );
             }
 
             if (cache != null)
@@ -1069,6 +1105,8 @@ namespace Impostors
                     + budget
                     + " standins="
                     + standIns
+                    + " mismatch="
+                    + (mismatch != null ? 1 : 0)
                     + " readysent="
                     + readySent
                     + " readylog="
@@ -1337,6 +1375,7 @@ namespace Impostors
                             WriteRange();
                         }
                         started = r.Remaining >= 1 && r.Byte() == 1;
+                        CheckPin(r);
                     }
                     if (instance != serverInstance)
                     {
@@ -1572,7 +1611,75 @@ namespace Impostors
             writer.Byte(1);
             writer.Byte(1);
             writer.Byte((byte)(PicksAsteroids ? 1 : 0));
+            WritePin();
             SendToServer();
+        }
+
+        private void WritePin()
+        {
+            writer.Ascii(Protocol.Release);
+            writer.Long(packId);
+            writer.Long(gridPackId);
+        }
+
+        // The mod, a pack or the server doesn't match (SE-1826): stops everything that draws
+        // or asks for asteroids. The server sends none to a client whose Hello pin differs.
+        private void Mismatch(string reason)
+        {
+            if (mismatch == null)
+                MyLog.Default.WriteLineAndConsole(
+                    "Impostors: mismatch, "
+                        + reason
+                        + ": no asteroid impostors, the player is asked to restart the game"
+                );
+            mismatch = reason;
+            pack = null;
+            early = null;
+            dropped.Clear();
+            foreach (var impostor in impostors.Values)
+            {
+                if (impostor.State.Kind == ImpostorKind.Voxel || impostor.Early)
+                    dropped.Add(impostor.State.Id);
+            }
+            foreach (var id in dropped)
+                impostors.Remove(id);
+        }
+
+        // The server's pin at the end of its Welcome, when it has one
+        private void CheckPin(ByteReader r)
+        {
+            if (r.Remaining < 1)
+                return;
+            var release = r.Ascii();
+            if (r.Remaining < 16)
+                return;
+            var serverPack = r.Long();
+            var serverGridPack = r.Long();
+            var reasons = new List<string>();
+            if (release != Protocol.Release)
+                reasons.Add("mod " + Protocol.Release + ", the server has " + release);
+            if (serverPack != 0 && serverPack != packId)
+                reasons.Add(
+                    "asteroid pack "
+                        + packId.ToString("x16")
+                        + ", the server has "
+                        + serverPack.ToString("x16")
+                );
+            if (serverGridPack != 0 && serverGridPack != gridPackId)
+                reasons.Add(
+                    "grid pack "
+                        + gridPackId.ToString("x16")
+                        + ", the server has "
+                        + serverGridPack.ToString("x16")
+                );
+            if (reasons.Count == 0)
+                return;
+            Mismatch(string.Join("; ", reasons));
+
+            // A newer mod with the server's packs: the server's update is on its way, nothing
+            // for the player to do
+            if (reasons.Count == 1 && Protocol.Older(release, Protocol.Release))
+                mismatchShown = true;
         }
 
         // With the world's asteroid pack the client picks the asteroids' levels itself, from the

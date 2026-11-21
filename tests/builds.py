@@ -1,7 +1,8 @@
 """Build check of every plugin leg the loaders compile (SE-1367): the client and server
 plugins for net48 the way Pulsar Legacy and Magnetar Legacy compile them, and for net10.0.
-Prints one PASS or FAIL line per leg with the compiler errors, and exits with the number
-of failures.
+Prints one PASS or FAIL line per leg with the compiler errors, and one for the release the
+mod tells the server (Protocol.Release, SE-1826), which must be Version.Build.props'. Exits
+with the number of failures.
 
     python tests/builds.py
 
@@ -14,6 +15,7 @@ build (see Directory.Build.props). Deploys nothing and leaves the mod link alone
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -52,8 +54,25 @@ def build(project: str, framework: str) -> list[str]:
     return sorted(lines) or [result.stdout.strip()[-2000:]]
 
 
+def release() -> list[str]:
+    """The mod's Protocol.Release against the plugins' version"""
+    props = (ROOT / "Version.Build.props").read_text()
+    protocol = (
+        ROOT / "ImpostorsMod/Mod/Data/Scripts/Impostors/Common/Protocol.cs"
+    ).read_text()
+    version = re.search(r"<Version>(.*?)</Version>", props).group(1)
+    pinned = re.search(r'const string Release = "(.*?)"', protocol).group(1)
+    return (
+        [] if version == pinned else [f"Protocol.Release {pinned}, version {version}"]
+    )
+
+
 def main() -> int:
-    failures = 0
+    errors = release()
+    print(f"{'FAIL' if errors else 'PASS'} Protocol.Release")
+    for error in errors:
+        print("  " + error)
+    failures = bool(errors)
     for project in PROJECTS:
         for framework in ("net48", "net10.0"):
             errors = build(project, framework)

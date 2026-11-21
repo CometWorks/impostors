@@ -7,6 +7,7 @@ using System.Threading;
 using Impostors;
 using Sandbox;
 using Sandbox.Engine.Multiplayer;
+using Sandbox.Game;
 using Sandbox.Game.Entities;
 using Sandbox.Game.Multiplayer;
 using Sandbox.Game.World;
@@ -59,7 +60,11 @@ public sealed class ImpostorService : IDisposable
     private readonly ByteWriter writer = new(Protocol.MaxMessageSize + 1024);
     private bool packWritten;
     private readonly GridPack grids;
+    private readonly AsteroidPack asteroidPack;
     private GridPackWriter gridWriter;
+
+    // Players told to restart the game for a mod or pack that differs from ours (SE-1826)
+    private readonly HashSet<ulong> warned = new();
     private int tick;
 
     // Game thread time of the registry's updates since the last minute's log line, all of it
@@ -95,6 +100,10 @@ public sealed class ImpostorService : IDisposable
         // and the ids of those it drew last, to remove one deleted from the world
         public bool PicksAsteroids;
         public readonly HashSet<long> Asteroids = new();
+
+        // The client's mod or packs differ from ours (SE-1826): it gets no asteroids, which it
+        // would draw from the wrong pack or ask for over the network at every level
+        public bool Mismatch;
 
         // Where the server picked for this player last
         public Vector3D Eye;
@@ -194,6 +203,7 @@ public sealed class ImpostorService : IDisposable
                 : null;
         if (asteroids != null)
             cache = new AsteroidPackCache(asteroids, cache);
+        asteroidPack = asteroids;
         grids = config.Grids && config.GridPack ? GridPackCache.Open(log) : null;
         if (grids != null)
             cache = new GridPackCache(grids, cache);
@@ -236,6 +246,10 @@ public sealed class ImpostorService : IDisposable
 
         MyAPIGateway.Multiplayer.RegisterSecureMessageHandler(Protocol.Channel, OnMessage);
         log.Info($"Impostors service started, instance {instanceId:x16}");
+        // What clients must match (SE-1826); the Octahedron deploy checks it on every node
+        log.Info(
+            $"Impostors pin: release {Protocol.Release}, asteroid pack {asteroidPack?.Id ?? 0:x16}, grid pack {grids?.Id ?? 0:x16}"
+        );
     }
 
     // The cache folder in this server's or game's user data folder, also holds the WA's index
@@ -628,9 +642,14 @@ public sealed class ImpostorService : IDisposable
 
         if (message[1] != Protocol.Version)
         {
-            log.Warning(
-                $"Player {sender} has Impostors protocol version {message[1]}, the server has {Protocol.Version}"
-            );
+            if (warned.Add(sender))
+            {
+                log.Warning(
+                    $"Player {sender} has Impostors protocol version {message[1]}, the server has {Protocol.Version}"
+                );
+                if (message[1] < Protocol.Version)
+                    TellRestart(sender);
+            }
             return;
         }
 
@@ -648,7 +667,11 @@ public sealed class ImpostorService : IDisposable
             if (message.Length > 3 && message[3] == 1)
                 viewers[sender].InventoryDue = tick + Protocol.InventoryWait * 60;
         }
-        viewers[sender].PicksAsteroids = message.Length > 4 && message[4] == 1;
+        var viewer = viewers[sender];
+        viewer.PicksAsteroids = message.Length > 4 && message[4] == 1;
+        viewer.Mismatch = !local && Mismatch(message, sender);
+        if (viewer.Mismatch)
+            viewer.PicksAsteroids = false;
 
         writer.Clear();
         writer.Byte(Protocol.Welcome);
@@ -668,7 +691,72 @@ public sealed class ImpostorService : IDisposable
         // instance and would send no Inventory, like after the player left this cluster node
         // for less than a HelloInterval (SE-1097)
         writer.Byte((byte)(started ? 1 : 0));
+
+        // Our pin, the client compares (SE-1826)
+        writer.Ascii(Protocol.Release);
+        writer.Long(asteroidPack?.Id ?? 0);
+        writer.Long(grids?.Id ?? 0);
         Send(sender);
+    }
+
+    // Whether the client's Impostors mod or packs differ from ours, by the pin at the end of
+    // its Hello; a Hello without one is from a mod older than the pin. Logged and told to the
+    // player once per server start.
+    private bool Mismatch(byte[] message, ulong sender)
+    {
+        string release = null;
+        long pack = 0,
+            gridPack = 0;
+        if (message.Length > 6)
+        {
+            var r = new ByteReader(message, 5);
+            release = r.Ascii();
+            if (r.Remaining >= 16)
+            {
+                pack = r.Long();
+                gridPack = r.Long();
+            }
+        }
+        var reasons = new List<string>();
+        if (release != Protocol.Release)
+            reasons.Add(
+                $"Impostors mod {release ?? "from before the version pin"}, the server has {Protocol.Release}"
+            );
+        if (release != null && asteroidPack != null && pack != asteroidPack.Id)
+            reasons.Add(
+                pack == -1 ? "an asteroid pack its mod can't read"
+                : pack == 0 ? "no asteroid pack"
+                : $"asteroid pack {pack:x16}, the server has {asteroidPack.Id:x16}"
+            );
+        if (release != null && grids != null && gridPack != grids.Id)
+            reasons.Add($"grid pack {gridPack:x16}, the server has {grids.Id:x16}");
+        if (reasons.Count == 0)
+            return false;
+        if (warned.Add(sender))
+        {
+            log.Warning(
+                $"Player {sender} has {string.Join("; ", reasons)}: no asteroid impostors for it, told to restart the game"
+            );
+            // A newer mod than ours with our packs waits for the server's update
+            var packs = reasons.Count - (release != Protocol.Release ? 1 : 0);
+            if (release == null || Protocol.Older(release, Protocol.Release) || packs > 0)
+                TellRestart(sender);
+        }
+        return true;
+    }
+
+    // A chat line to the player, for a mod too old to show the popup itself
+    private void TellRestart(ulong sender)
+    {
+        var identity = MySession.Static?.Players?.TryGetIdentityId(sender) ?? 0;
+        if (identity == 0)
+            return;
+        MyVisualScriptLogicProvider.SendChatMessageColored(
+            Protocol.RestartText,
+            Color.Orange,
+            "Impostors",
+            identity
+        );
     }
 
     // Bounds what a client can make us keep, far more than a 512 MB cache holds
@@ -840,6 +928,8 @@ public sealed class ImpostorService : IDisposable
                     notices.Add(entry);
                 continue;
             }
+            if (viewer.Mismatch && entry.Kind == ImpostorKind.Voxel)
+                continue;
 
             // The client has the real entity, or will have it soon. Another node's entities are
             // never replicated to this node's players. One the client already has stays until

@@ -12,6 +12,20 @@ namespace Impostors
         public const ushort Channel = 47213;
         public const byte Version = 7;
 
+        // The release of the mod, the plugins and the pack readers, the same as
+        // Version.Build.props (tests/builds.py checks). The client and the server tell each
+        // other theirs and the ids of their packs (SE-1826): Steam keeps an old Workshop mod or
+        // pack in a game that kept running over an update, and such a mix draws the asteroids
+        // wrong. Any difference counts, not only one of the protocol.
+        public const string Release = "1.0.5";
+
+        // What the player reads, from the mod's popup or, for a mod older than the pin, the
+        // server's chat line
+        public const string RestartText =
+            "Your Impostors mod or asteroid pack is not the one this server has: Steam updated it"
+            + " while the game was running. Restart Space Engineers to load the new one. Until"
+            + " then far asteroids are not shown.";
+
         // Client to server: byte version, byte 1 while the client has no impostors and no
         // shapes from the server yet (no Welcome), 0 after. Sent when the session is ready and
         // then every HelloInterval seconds, so a server that starts later or a cluster node the
@@ -22,6 +36,10 @@ namespace Impostors
         // levels of the asteroids its pack and cache have itself (SE-739): the server sends no
         // states or shapes for those, and for an asteroid whose version the client doesn't have
         // at every level one state and all of its levels at once. Older servers ignore it.
+        // Then the pin (SE-1826): string Release, long id of the asteroid pack the client read,
+        // 0 for none, -1 when it has one it can't read, and long id of its grid pack, 0 for
+        // none. A server that differs in any of them tells the player to restart the game and
+        // sends no asteroids; a Hello without them comes from a mod older than the pin.
         public const byte Hello = 1;
 
         // Server to client: byte version, long server instance id, int most impostor quads the
@@ -33,7 +51,8 @@ namespace Impostors
         // server doesn't send them. Then byte 1 when the server started over with the client: it
         // waits for the Inventory again and knows none of the shapes it sent before, also when
         // its instance id is the same, as after the player left a cluster node for a moment
-        // (SE-1097).
+        // (SE-1097). Then the server's pin, as in the Hello: string Release, long asteroid pack
+        // id and long grid pack id, 0 for none. Older clients ignore it.
         public const byte Welcome = 2;
 
         // Server to client: ushort count, then count states (see ImpostorState). A state whose
@@ -103,6 +122,23 @@ namespace Impostors
         // Pixels per radian near the screen center the server assumes: a 1080p screen with a
         // 70 degree vertical field of view
         public const double PixelsPerRadian = 540 / 0.7002075382097097;
+
+        // Whether release a is older than b, both "major.minor.patch"
+        public static bool Older(string a, string b)
+        {
+            var x = a.Split('.');
+            var y = b.Split('.');
+            for (var i = 0; i < Math.Min(x.Length, y.Length); i++)
+            {
+                int p,
+                    q;
+                if (!int.TryParse(x[i], out p) || !int.TryParse(y[i], out q))
+                    return false;
+                if (p != q)
+                    return p < q;
+            }
+            return x.Length < y.Length;
+        }
 
         // The bit of a level in an Inventory mask: bit 0 for level 0 (a safe zone), bit k for
         // level 2^k
@@ -347,6 +383,15 @@ namespace Impostors
             buffer[length++] = value;
         }
 
+        // A short ASCII string: byte length, then the characters
+        public void Ascii(string value)
+        {
+            var count = Math.Min(value.Length, 255);
+            Byte((byte)count);
+            for (var i = 0; i < count; i++)
+                Byte((byte)value[i]);
+        }
+
         public void UShort(ushort value)
         {
             Ensure(2);
@@ -481,6 +526,15 @@ namespace Impostors
             Buffer.BlockCopy(buffer, position, result, 0, count);
             position += count;
             return result;
+        }
+
+        public string Ascii()
+        {
+            var count = Byte();
+            var chars = new char[count];
+            for (var i = 0; i < count; i++)
+                chars[i] = (char)Byte();
+            return new string(chars);
         }
     }
 }
