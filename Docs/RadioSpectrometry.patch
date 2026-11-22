@@ -1,5 +1,5 @@
 diff --git a/Data/Scripts/RadioSpectrometry/AsteroidScanTask.cs b/Data/Scripts/RadioSpectrometry/AsteroidScanTask.cs
-index cc4affb..3524d6e 100755
+index cc4affb..906485c 100755
 --- a/Data/Scripts/RadioSpectrometry/AsteroidScanTask.cs
 +++ b/Data/Scripts/RadioSpectrometry/AsteroidScanTask.cs
 @@ -1,4 +1,5 @@
@@ -51,7 +51,7 @@ index cc4affb..3524d6e 100755
  				for (int i = 0; i < 256; i++)
  				{
  					resultMap[i] += (float)(randgen.NextDouble() * lrgvl * noise);
-@@ -147,13 +159,20 @@ namespace ResourceRadiospectrometry
+@@ -147,13 +159,35 @@ namespace ResourceRadiospectrometry
  		}
  		Dictionary<byte, long> materials = new Dictionary<byte, long>();
  		public MyVoxelBase workMap;
@@ -64,25 +64,40 @@ index cc4affb..3524d6e 100755
  		{
  			
 -			asteroid.Storage.ReadRange(cache, MyStorageDataTypeFlags.Material, LOD, workMap.StorageMin, workMap.StorageMax >> LOD);
-+			// Content too: an asteroid of a prefab shape filled with one material (a
-+			// MyPredefinedDataProvider) gives the material only to voxels with content, so
-+			// without content it read as empty. No flags: other asteroids read as before,
-+			// without ConsiderContent emptying the voxels without content.
-+			var flags = (MyVoxelRequestFlags)0;
-+			asteroid.Storage.ReadRange(cache, MyStorageDataTypeFlags.ContentAndMaterial, LOD, workMap.StorageMin, workMap.StorageMax >> LOD, ref flags);
++			var min = workMap.StorageMin;
++			var max = workMap.StorageMax >> LOD;
++			asteroid.Storage.ReadRange(cache, MyStorageDataTypeFlags.Material, LOD, min, max);
++
++			// An asteroid of a prefab shape filled with one material (a MyPredefinedDataProvider)
++			// gives the material only to voxels with content, so without the content all of it
++			// reads as empty. Then read the content too. Only then: other asteroids count the
++			// voxels without content as well, and would change with it.
++			var range = max - min + 1;
++			var empty = 0;
++			var p = Vector3I.Zero;
++			for (p.Z = 0; p.Z < range.Z; p.Z++)
++				for (p.Y = 0; p.Y < range.Y; p.Y++)
++					for (p.X = 0; p.X < range.X; p.X++)
++						if (cache.Material(cache.ComputeLinear(ref p)) == 255)
++							empty++;
++			if (empty == range.X * range.Y * range.Z)
++			{
++				var flags = (MyVoxelRequestFlags)0;
++				asteroid.Storage.ReadRange(cache, MyStorageDataTypeFlags.ContentAndMaterial, LOD, min, max, ref flags);
++			}
  
  		}
  		internal void Prepare(MyVoxelBase closestvoxelmap, float maxrange)
-@@ -164,11 +183,30 @@ namespace ResourceRadiospectrometry
+@@ -164,8 +198,27 @@ namespace ResourceRadiospectrometry
  			Complete = false;
  			Running = true;
  			workMap = closestvoxelmap;
 +			workId = closestvoxelmap.EntityId;
- 			m_maxrange = maxrange;
- 			materials.Clear();
- 			ResourceRadioSpecCore.instance.SubmitWork(this);
- 		}
- 
++			m_maxrange = maxrange;
++			materials.Clear();
++			ResourceRadioSpecCore.instance.SubmitWork(this);
++		}
++
 +		// An asteroid drawn by Impostors: its voxel counts by material name
 +		internal void Prepare(long impostorId, Dictionary<string, int> counts, float maxrange)
 +		{
@@ -90,20 +105,17 @@ index cc4affb..3524d6e 100755
 +			Running = true;
 +			workMap = null;
 +			workId = impostorId;
-+			m_maxrange = maxrange;
-+			materials.Clear();
+ 			m_maxrange = maxrange;
+ 			materials.Clear();
 +			foreach (var count in counts)
 +			{
 +				var def = MyDefinitionManager.Static.GetVoxelMaterialDefinition(count.Key);
 +				if (def != null)
 +					materials[def.Index] = count.Value;
 +			}
-+			ResourceRadioSpecCore.instance.SubmitWork(this);
-+		}
-+
- 		public void OnComplete()
- 		{
- 			//running = false;
+ 			ResourceRadioSpecCore.instance.SubmitWork(this);
+ 		}
+ 
 diff --git a/Data/Scripts/RadioSpectrometry/AsteroidScannerComponent.cs b/Data/Scripts/RadioSpectrometry/AsteroidScannerComponent.cs
 index 470caab..e7b49a5 100755
 --- a/Data/Scripts/RadioSpectrometry/AsteroidScannerComponent.cs

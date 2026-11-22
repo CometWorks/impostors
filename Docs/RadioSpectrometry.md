@@ -38,8 +38,9 @@ The original mod reads only the voxel materials, and an asteroid made of a prefa
 with one material, like the Octahedron world's four ice asteroids (`MyPredefinedDataProvider`),
 gives its material only to voxels with content: without content every voxel read as empty, so
 these asteroids had no spectrum, near or far, and the pack had no materials for them (SE-1880).
-The patch and the pack writer read the content with the materials, without the
-`ConsiderContent` request flag, so other asteroids count exactly as before. Apply it with `patch -p1` to a copy of the Workshop item
+When a read of the materials alone finds every voxel empty, the patch and the pack writer read
+again with the content. Only then: other asteroids count their voxels without content too, and
+a read with content would change their counts. Apply it with `patch -p1` to a copy of the Workshop item
 with its `.cs` files converted to LF line endings.
 
 ## Test
