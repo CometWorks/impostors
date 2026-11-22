@@ -272,21 +272,42 @@ public sealed class VoxelSource : ImpostorSource, IDisposable
     // The voxel counts by material name that Radio Spectrometry gets from a loaded asteroid, for
     // the asteroid pack (see Docs/RadioSpectrometry.md). Read the way it reads them: level of
     // detail 2 into a buffer 7 voxels larger per axis than the range read, counting the whole
-    // buffer, so the material at index 0 gets the unread voxels too.
+    // buffer, so the material at index 0 gets the unread voxels too. An asteroid of a prefab
+    // shape filled with one material (MyPredefinedDataProvider, the Octahedron world's ice
+    // asteroids) gives the material only to voxels with content, so its materials alone read as
+    // empty: then read with the content, as the patched mod does (SE-1880). Only then, since
+    // other asteroids count their voxels without content too, and the counts would change.
     public static (string[] names, int[] counts) Materials(MyVoxelBase map)
     {
         const int lod = 2;
         var read = new MyStorageData();
         read.Resize((map.Storage.Size >> lod) + 7);
+        var min = map.StorageMin;
+        var max = map.StorageMax >> lod;
         map.Storage.PinAndExecute(() =>
-            map.Storage.ReadRange(
-                read,
-                MyStorageDataTypeFlags.Material,
-                lod,
-                map.StorageMin,
-                map.StorageMax >> lod
-            )
-        );
+        {
+            map.Storage.ReadRange(read, MyStorageDataTypeFlags.Material, lod, min, max);
+            var range = max - min + 1;
+            var empty = 0;
+            var p = Vector3I.Zero;
+            for (p.Z = 0; p.Z < range.Z; p.Z++)
+            for (p.Y = 0; p.Y < range.Y; p.Y++)
+            for (p.X = 0; p.X < range.X; p.X++)
+                if (read.Material(read.ComputeLinear(ref p)) == 255)
+                    empty++;
+            if (empty == range.X * range.Y * range.Z)
+            {
+                var flags = (MyVoxelRequestFlags)0;
+                map.Storage.ReadRange(
+                    read,
+                    MyStorageDataTypeFlags.ContentAndMaterial,
+                    lod,
+                    min,
+                    max,
+                    ref flags
+                );
+            }
+        });
         var counts = new int[256];
         var size = read.Size3D;
         var linear = size.X * size.Y * size.Z;

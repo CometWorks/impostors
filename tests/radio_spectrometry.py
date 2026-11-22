@@ -7,13 +7,17 @@ shows.
     IMP_TASK=se984 uv run --no-project --with httpx --with pillow --with numpy \
         python tests/radio_spectrometry.py
     IMP_RS_LOADED=1200 IMP_RS_FAR=14000   # station height over the asteroid, in metres
+    IMP_RS_TARGET=Octahedron-Ice-1        # this asteroid instead of a ring one (SE-1880:
+                                          # the ice ones are a prefab filled with Ice_02;
+                                          # they are ~1.4 km, so 3000 and 16000 m over them)
     IMP_RS_PACK=<folder>     # an asteroid pack mod instead of the world's
     IMP_RS_NOEARLY=1         # the mod shows no early asteroids
     IMP_RS_PATCH=<file>      # Radio Spectrometry with this patch (Docs/RadioSpectrometry.patch)
     IMP_PLUGIN=1, IMP_SAVE, IMP_TAG and the rest as in tests/ring.py
 
-Prints one PASS or FAIL line per case: the LCD shows "Scanning" and an asteroid, and a last
-line comparing the two spectra. The LCD's sprites and screenshots go to
+Prints one PASS or FAIL line per case: the LCD shows "Scanning", an asteroid and a spectrum
+rising at least 0.15 of the plot (the noise alone, with no materials, is flat), and a last line
+comparing the two spectra. Far away "No Data" passes too: the mod says it has no materials for the asteroid. The LCD's sprites and screenshots go to
 ~/.se-test/<task>-shots. Exits with the number of failures.
 """
 
@@ -21,6 +25,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -42,6 +47,7 @@ RS_ID = 2687324923
 PACK = os.environ.get("IMP_RS_PACK")
 PATCH = os.environ.get("IMP_RS_PATCH")
 NOEARLY = os.environ.get("IMP_RS_NOEARLY") == "1"
+TARGET = os.environ.get("IMP_RS_TARGET")
 SERVER, CLIENT, SHOTS = ring.SERVER, ring.CLIENT, ring.SHOTS
 # Grid cells: the detector looks along the grid's forward, -Z. Two LCDs beside it facing
 # opposite ways, one of them faces the player behind the station.
@@ -119,6 +125,15 @@ def stage_overrides(mods: Path, ids, patched: Path | None) -> None:
         (mods / f"{RS_ID}.sbm").symlink_to(patched)
 
 
+def saved_corner(world: Path, storage: str) -> np.ndarray:
+    """Where the save has the voxel map of this storage: its storage's min corner"""
+    text = (world / "SANDBOX_0_0_0_.sbs").read_text(encoding="utf-8")
+    end = text.index(f"<StorageName>{storage}</StorageName>")
+    start = text.rfind("<MyObjectBuilder_EntityBase", 0, end)
+    p = re.search(r'<Position x="([^"]+)" y="([^"]+)" z="([^"]+)"', text[start:end])
+    return np.array([float(v) for v in p.groups()])
+
+
 def grid_to_world(api, grid: int, cell) -> np.ndarray:
     world = api.batch(calls=[CallOp.grid_to_world(grid, cell)]).call(0)["world"]
     return np.array(world, dtype=float)
@@ -142,11 +157,28 @@ def spectrum(surface: dict) -> list[float]:
     return [round((215 - l["position"][1]) / 210, 3) for l in lines]
 
 
+def span(surface: dict) -> float:
+    """How far the plotted spectrum rises over its lowest point, in plot heights from the
+    x scale of its lines (square LCDs): about 0.05 for the noise alone, 0.3 for an asteroid's
+    materials"""
+    lines = [
+        s
+        for s in surface.get("sprites") or []
+        if s.get("data") == "SquareSimple" and s["size"][1] == 1
+    ]
+    if len(lines) < 2:
+        return 0.0
+    xs = [l["position"][0] for l in lines]
+    ys = [l["position"][1] for l in lines]
+    scale = (max(xs) - min(xs)) / ((len(lines) - 1) * 1.7)
+    return (max(ys) - min(ys)) / (210 * scale)
+
+
 def asteroid(api, around: np.ndarray, name: str | None = None) -> dict | None:
     maps = [
         m
         for m in api.get_voxel_maps()
-        if m.get("name", "").startswith("Octahedron-Asteroid")
+        if m.get("name", "").startswith("Octahedron-Asteroid" if not name else name)
     ]
     if name:
         return next((m for m in maps if m["name"] == name), None)
@@ -272,14 +304,19 @@ def check(
     curve = spectrum(surface)
     real = asteroid(api, center, target["name"]) is not None
     imp = impostor_of(int(target["entityId"]))
-    ok = "Scanning" in shown and "No Asteroid Detected" not in shown
+    rise = span(surface)
+    no_data = case != "loaded" and "No Data" in shown
+    ok = "No Asteroid Detected" not in shown and (
+        ("Scanning" in shown and rise >= 0.15) or no_data
+    )
     print(
         f"{'PASS' if ok else 'FAIL'} {case}: {height/1000:.1f} km over {target['name']} "
         f"(r={target['radius']:.0f} m), real={int(real)} "
         f"impostor={'none' if imp is None else 'drawn=' + imp.get('drawn', '?') + ' lod=' + imp.get('lod', '?')} "
         f"detector->asteroid {np.linalg.norm(detector - center):.0f} m facing {facing:.2f}, "
         f"lcd={[t for t in shown if t and not t.startswith('RS984')][:6]} "
-        f"spectrum peak={max(curve, default=0):.2f} points={len(curve)} | voxel ray: {ray}",
+        f"spectrum rise={rise:.2f} points={len(curve)}{' (No Data)' if no_data else ''} "
+        f"| voxel ray: {ray}",
         flush=True,
     )
     (SHOTS / f"{case}-lcd.json").write_text(json.dumps(surface, indent=1))
@@ -345,16 +382,21 @@ def main() -> int:
         if api.get_view().get("thirdPerson"):
             api.key("V")
         SHOTS.mkdir(parents=True, exist_ok=True)
-        # The saved asteroid nearest to a spot on the ring, found from close by
-        base = points[
-            np.argmin(np.linalg.norm(points - (center + side * 120000), axis=1))
-        ]
+        # The saved asteroid nearest to a spot on the ring, or the one named, found from
+        # close by
+        base = (
+            saved_corner(SERVER.world, TARGET)
+            if TARGET
+            else points[
+                np.argmin(np.linalg.norm(points - (center + side * 120000), axis=1))
+            ]
+        )
         api.character_teleport(*(base + normal * 1500))
         time.sleep(10)
         target = None
         deadline = time.monotonic() + 120
         while target is None and time.monotonic() < deadline:
-            target = asteroid(api, base)
+            target = asteroid(api, base, TARGET)
             time.sleep(2)
         if target is None:
             print("FAIL no ring asteroid loaded near", base.round(0), flush=True)
