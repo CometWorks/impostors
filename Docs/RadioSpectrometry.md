@@ -31,7 +31,15 @@ makes it ask, published as
 [[QoL] Radio Spectrometry (Impostors)](https://steamcommunity.com/sharedfiles/filedetails/?id=3833294660)
 (unlisted), which the Octahedron world uses instead of the original: when the ray hits no loaded asteroid, it takes the impostor's materials and draws
 the spectrum from them. Same counts and the same entity id as the noise seed, so the LCD shows
-the same spectrum as from up close. Apply it with `patch -p1` to a copy of the Workshop item
+the same spectrum as from up close. When a scan finds no materials at all, the LCD says "No
+Data" instead of "Scanning" on with a flat line.
+
+The original mod reads only the voxel materials, and an asteroid made of a prefab shape filled
+with one material, like the Octahedron world's four ice asteroids (`MyPredefinedDataProvider`),
+gives its material only to voxels with content: without content every voxel read as empty, so
+these asteroids had no spectrum, near or far, and the pack had no materials for them (SE-1880).
+The patch and the pack writer read the content with the materials, without the
+`ConsiderContent` request flag, so other asteroids count exactly as before. Apply it with `patch -p1` to a copy of the Workshop item
 with its `.cs` files converted to LF line endings.
 
 ## Test
@@ -39,6 +47,8 @@ with its `.cs` files converted to LF line endings.
 `tests/radio_spectrometry.py` runs "Octahedron - Seed 2" on a test server with a headless client,
 pastes a station (ore detector, battery, LCD with the "Radio Spectrometry Reader" script) 1.2 km
 above a ring asteroid and then another one 14 km above it, and reads the LCD's sprites. A case
-passes when the LCD shows "Scanning" and an asteroid; the last line checks that both spectra are
-the same. `IMP_RS_PACK` puts a pack in place of the world's, `IMP_RS_PATCH` the patched mod in
+passes when the LCD shows "Scanning", an asteroid and a spectrum (its peak at least 0.5), or far
+away "No Data"; the last line checks that both spectra are the same. `IMP_RS_TARGET` scans the
+asteroid of that storage instead, for example `Octahedron-Ice-2` with `IMP_RS_LOADED=3000
+IMP_RS_FAR=16000`, since it is 1.4 km in radius. `IMP_RS_PACK` puts a pack in place of the world's, `IMP_RS_PATCH` the patched mod in
 place of the Workshop one.

@@ -272,21 +272,28 @@ public sealed class VoxelSource : ImpostorSource, IDisposable
     // The voxel counts by material name that Radio Spectrometry gets from a loaded asteroid, for
     // the asteroid pack (see Docs/RadioSpectrometry.md). Read the way it reads them: level of
     // detail 2 into a buffer 7 voxels larger per axis than the range read, counting the whole
-    // buffer, so the material at index 0 gets the unread voxels too.
+    // buffer, so the material at index 0 gets the unread voxels too. Content is read with the
+    // materials: an asteroid of a prefab shape filled with one material (MyPredefinedDataProvider,
+    // the Octahedron world's ice asteroids) gives the material only to voxels with content, so a
+    // read of materials alone found none on them (SE-1880). No ConsiderContent, so the voxels
+    // without content of other asteroids keep their material and count as before.
     public static (string[] names, int[] counts) Materials(MyVoxelBase map)
     {
         const int lod = 2;
         var read = new MyStorageData();
         read.Resize((map.Storage.Size >> lod) + 7);
         map.Storage.PinAndExecute(() =>
+        {
+            var flags = (MyVoxelRequestFlags)0;
             map.Storage.ReadRange(
                 read,
-                MyStorageDataTypeFlags.Material,
+                MyStorageDataTypeFlags.ContentAndMaterial,
                 lod,
                 map.StorageMin,
-                map.StorageMax >> lod
-            )
-        );
+                map.StorageMax >> lod,
+                ref flags
+            );
+        });
         var counts = new int[256];
         var size = read.Size3D;
         var linear = size.X * size.Y * size.Z;
