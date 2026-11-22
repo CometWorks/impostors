@@ -45,11 +45,12 @@ with its `.cs` files converted to LF line endings.
 
 ## Test
 
-`tests/radio_spectrometry.py` runs "Octahedron - Seed 2" on a test server with a headless client,
-pastes a station (ore detector, battery, LCD with the "Radio Spectrometry Reader" script) 1.2 km
-above a ring asteroid and then another one 14 km above it, and reads the LCD's sprites. A case
-passes when the LCD shows "Scanning", an asteroid and a spectrum (its peak at least 0.5), or far
-away "No Data"; the last line checks that both spectra are the same. `IMP_RS_TARGET` scans the
-asteroid of that storage instead, for example `Octahedron-Ice-2` with `IMP_RS_LOADED=3000
-IMP_RS_FAR=16000`, since it is 1.4 km in radius. `IMP_RS_PACK` puts a pack in place of the world's, `IMP_RS_PATCH` the patched mod in
+`tests/radio_spectrometry.py` runs "Octahedron - Seed 2" on a test server with a headless
+client, pastes a station (ore detector, battery, LCD with the "Radio Spectrometry Reader"
+script) 1.2 km above a ring asteroid and then another one 14 km above it, and reads the LCD's
+sprites. A case passes when the LCD shows "Scanning", an asteroid and a spectrum rising at least
+0.15 of the plot (the noise alone is flat), or far away "No Data"; the last line checks that
+both spectra are the same. `IMP_RS_TARGET` scans the asteroid of that storage instead, for
+example `Octahedron-Ice-2` with `IMP_RS_LOADED=3000 IMP_RS_FAR=16000`, since it is 1.4 km in
+radius. `IMP_RS_PACK` puts a pack in place of the world's, `IMP_RS_PATCH` the patched mod in
 place of the Workshop one.

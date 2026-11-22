@@ -16,8 +16,8 @@ shows.
     IMP_PLUGIN=1, IMP_SAVE, IMP_TAG and the rest as in tests/ring.py
 
 Prints one PASS or FAIL line per case: the LCD shows "Scanning", an asteroid and a spectrum
-(its peak at least 0.5, not the flat line of no materials), and a last line comparing the two
-spectra. Far away "No Data" passes too: the mod says it has no materials for the asteroid. The LCD's sprites and screenshots go to
+rising at least 0.15 of the plot (the noise alone, with no materials, is flat), and a last line
+comparing the two spectra. Far away "No Data" passes too: the mod says it has no materials for the asteroid. The LCD's sprites and screenshots go to
 ~/.se-test/<task>-shots. Exits with the number of failures.
 """
 
@@ -157,6 +157,23 @@ def spectrum(surface: dict) -> list[float]:
     return [round((215 - l["position"][1]) / 210, 3) for l in lines]
 
 
+def span(surface: dict) -> float:
+    """How far the plotted spectrum rises over its lowest point, in plot heights from the
+    x scale of its lines (square LCDs): about 0.05 for the noise alone, 0.3 for an asteroid's
+    materials"""
+    lines = [
+        s
+        for s in surface.get("sprites") or []
+        if s.get("data") == "SquareSimple" and s["size"][1] == 1
+    ]
+    if len(lines) < 2:
+        return 0.0
+    xs = [l["position"][0] for l in lines]
+    ys = [l["position"][1] for l in lines]
+    scale = (max(xs) - min(xs)) / ((len(lines) - 1) * 1.7)
+    return (max(ys) - min(ys)) / (210 * scale)
+
+
 def asteroid(api, around: np.ndarray, name: str | None = None) -> dict | None:
     maps = [
         m
@@ -287,10 +304,10 @@ def check(
     curve = spectrum(surface)
     real = asteroid(api, center, target["name"]) is not None
     imp = impostor_of(int(target["entityId"]))
-    peak = max(curve, default=0)
+    rise = span(surface)
     no_data = case != "loaded" and "No Data" in shown
     ok = "No Asteroid Detected" not in shown and (
-        ("Scanning" in shown and peak >= 0.5) or no_data
+        ("Scanning" in shown and rise >= 0.15) or no_data
     )
     print(
         f"{'PASS' if ok else 'FAIL'} {case}: {height/1000:.1f} km over {target['name']} "
@@ -298,7 +315,7 @@ def check(
         f"impostor={'none' if imp is None else 'drawn=' + imp.get('drawn', '?') + ' lod=' + imp.get('lod', '?')} "
         f"detector->asteroid {np.linalg.norm(detector - center):.0f} m facing {facing:.2f}, "
         f"lcd={[t for t in shown if t and not t.startswith('RS984')][:6]} "
-        f"spectrum peak={peak:.2f} points={len(curve)}{' (No Data)' if no_data else ''} "
+        f"spectrum rise={rise:.2f} points={len(curve)}{' (No Data)' if no_data else ''} "
         f"| voxel ray: {ray}",
         flush=True,
     )
